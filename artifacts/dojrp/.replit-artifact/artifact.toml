@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "DOJRP CAD/MDT"
+version = "1.0.0"
+id = "artifacts/somerville-metro"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24379
+
+[services.development]
+run = "pnpm --filter @workspace/dojrp run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/dojrp", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/dojrp/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24379"
+BASE_PATH = "/"

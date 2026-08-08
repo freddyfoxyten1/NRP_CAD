@@ -1,0 +1,391 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-card-border: hsl(var(--card-border));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-popover-border: hsl(var(--popover-border));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-border: var(--primary-border);
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-secondary-border: var(--secondary-border);
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-muted-border: var(--muted-border);
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-accent-border: var(--accent-border);
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-destructive-border: var(--destructive-border);
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-primary-border: var(--sidebar-primary-border);
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-accent-border: var(--sidebar-accent-border);
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --font-sans: var(--app-font-sans);
+  --font-serif: var(--app-font-serif);
+  --font-mono: var(--app-font-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root,
+.dark {
+  --button-outline: rgba(0, 0, 0, 0.1);
+  --badge-outline: rgba(0, 0, 0, 0.05);
+  --opaque-button-border-intensity: -8;
+  --elevate-1: rgba(0, 0, 0, 0.03);
+  --elevate-2: rgba(0, 0, 0, 0.08);
+
+  --background: 0 0% 5%;
+  --foreground: 210 40% 98%;
+  --card: 220 13% 10%;
+  --card-foreground: 210 40% 98%;
+  --card-border: 220 13% 18%;
+  --popover: 220 13% 10%;
+  --popover-foreground: 210 40% 98%;
+  --popover-border: 220 13% 18%;
+  --primary: 217 91% 60%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 220 13% 18%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217 19% 27%;
+  --muted-foreground: 215 20% 65%;
+  --accent: 217 19% 27%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 220 13% 18%;
+  --input: 220 13% 18%;
+  --ring: 217 91% 60%;
+
+  --sidebar: 220 13% 10%;
+  --sidebar-foreground: 210 40% 98%;
+  --sidebar-border: 220 13% 18%;
+  --sidebar-primary: 217 91% 60%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 217 19% 27%;
+  --sidebar-accent-foreground: 210 40% 98%;
+  --sidebar-ring: 217 91% 60%;
+
+  --chart-1: 217 91% 60%;
+  --chart-2: 217 19% 27%;
+  --chart-3: 220 13% 18%;
+  --chart-4: 210 40% 98%;
+  --chart-5: 0 62.8% 30.6%;
+
+  --app-font-sans: 'Inter', sans-serif;
+  --app-font-serif: Georgia, serif;
+  --app-font-mono: Menlo, monospace;
+  --radius: 0.5rem;
+  
+  --shadow-2xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-xs: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-sm:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 1px 2px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-md:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 2px 4px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-lg:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 4px 6px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-xl:
+    0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0),
+    0px 8px 10px -1px hsl(202.8169 89.1213% 53.1373% / 0);
+  --shadow-2xl: 0px 2px 0px 0px hsl(202.8169 89.1213% 53.1373% / 0);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+
+  --sidebar-primary-border: hsl(var(--sidebar-primary));
+  --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --sidebar-accent-border: hsl(var(--sidebar-accent));
+  --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --primary-border: hsl(var(--primary));
+  --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --secondary-border: hsl(var(--secondary));
+  --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --muted-border: hsl(var(--muted));
+  --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --accent-border: hsl(var(--accent));
+  --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+  --destructive-border: hsl(var(--destructive));
+  --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
+}
+
+.dark {
+  --button-outline: rgba(255, 255, 255, 0.1);
+  --badge-outline: rgba(255, 255, 255, 0.05);
+  --opaque-button-border-intensity: 9;
+  --elevate-1: rgba(255, 255, 255, 0.04);
+  --elevate-2: rgba(255, 255, 255, 0.09);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  input[type='search']::-webkit-search-cancel-button {
+    @apply hidden;
+  }
+  [contenteditable][data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+  }
+  .toggle-elevate::before,
+  .toggle-elevate-2::before {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: -1;
+  }
+  .toggle-elevate.toggle-elevated::before {
+    background-color: var(--elevate-2);
+  }
+  .border.toggle-elevate::before {
+    inset: -1px;
+  }
+  .hover-elevate:not(.no-default-hover-elevate),
+  .active-elevate:not(.no-default-active-elevate),
+  .hover-elevate-2:not(.no-default-hover-elevate),
+  .active-elevate-2:not(.no-default-active-elevate) {
+    position: relative;
+    z-index: 0;
+  }
+  .hover-elevate:not(.no-default-hover-elevate)::after,
+  .active-elevate:not(.no-default-active-elevate)::after,
+  .hover-elevate-2:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:not(.no-default-active-elevate)::after {
+    content: '';
+    pointer-events: none;
+    position: absolute;
+    inset: 0px;
+    border-radius: inherit;
+    z-index: 999;
+  }
+  /* Main page document scrollbar */
+  html {
+    scrollbar-width: thin;
+    scrollbar-color: #27354c transparent;
+  }
+  html::-webkit-scrollbar {
+    width: 6px;
+  }
+  html::-webkit-scrollbar-track {
+    background: #02060b;
+  }
+  html::-webkit-scrollbar-thumb {
+    background-color: #27354c;
+    border-radius: 9999px;
+  }
+  html::-webkit-scrollbar-thumb:hover {
+    background-color: #3a4f6e;
+  }
+
+  /* Sidebar scrollbar — matches the dark page palette */
+  .sidebar-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #27354c transparent;
+  }
+  .sidebar-scroll::-webkit-scrollbar {
+    width: 4px;
+  }
+  .sidebar-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .sidebar-scroll::-webkit-scrollbar-thumb {
+    background-color: #27354c;
+    border-radius: 9999px;
+  }
+  .sidebar-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: #3a4f6e;
+  }
+
+  .hover-elevate:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-1);
+  }
+  .hover-elevate-2:hover:not(.no-default-hover-elevate)::after,
+  .active-elevate-2:active:not(.no-default-active-elevate)::after {
+    background-color: var(--elevate-2);
+  }
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
+  .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
+  .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
+    inset: -1px;
+  }
+}
+
+/* ── TipTap document editor — Google Docs defaults ───────────────────────── */
+.doc-editor:focus { outline: none; }
+.doc-editor .tiptap {
+  outline: none;
+  min-height: 500px;
+  font-family: Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.15;
+  color: #222222;
+}
+.doc-editor .tiptap p {
+  margin: 0 0 2pt;
+  line-height: 1.15;
+  color: #222222;
+  font-size: inherit;
+  font-family: inherit;
+}
+.doc-editor .tiptap p:last-child { margin-bottom: 0; }
+.doc-editor .tiptap h1 { font-size: 20pt; font-weight: 700; color: #000; margin: 18pt 0 6pt; line-height: 1.2; font-family: Arial, sans-serif; }
+.doc-editor .tiptap h2 { font-size: 16pt; font-weight: 700; color: #000; margin: 14pt 0 4pt; line-height: 1.2; font-family: Arial, sans-serif; }
+.doc-editor .tiptap h3 { font-size: 12pt; font-weight: 700; color: #434343; margin: 12pt 0 4pt; line-height: 1.2; font-family: Arial, sans-serif; }
+.doc-editor .tiptap strong { font-weight: 700; }
+.doc-editor .tiptap em { font-style: italic; }
+.doc-editor .tiptap u { text-decoration: underline; }
+.doc-editor .tiptap s { text-decoration: line-through; }
+.doc-editor .tiptap ul { list-style-type: disc; padding-left: 1.5em; margin: 0 0 11pt; }
+.doc-editor .tiptap ol { list-style-type: decimal; padding-left: 1.5em; margin: 0 0 11pt; }
+/* Nested lists must not inherit the bottom margin — otherwise every indent
+   level adds an 11 pt gap below itself, creating large holes between bullets. */
+.doc-editor .tiptap li > ul,
+.doc-editor .tiptap li > ol { margin: 0; }
+.doc-editor .tiptap li { margin: 0; line-height: 1.15; color: #222222; font-size: inherit; }
+/* TipTap wraps each bullet's text in a <p>; strip its margin so bullets sit
+   flush against each other regardless of indent level. */
+.doc-editor .tiptap li p { margin: 0; }
+.doc-editor .tiptap blockquote { border-left: 3px solid #c0c0c0; padding-left: 1em; margin: 0 0 11pt; color: #555; font-style: italic; }
+.doc-editor .tiptap code { background: #f4f4f4; border-radius: 2px; padding: 1px 4px; font-size: 10pt; font-family: 'Courier New', monospace; color: #222; }
+.doc-editor .tiptap pre { background: #f4f4f4; border-radius: 3px; padding: 1em; margin: 0 0 11pt; overflow-x: auto; }
+.doc-editor .tiptap pre code { background: transparent; color: #222; font-size: 10pt; padding: 0; }
+.doc-editor .tiptap a { color: #1155cc; text-decoration: underline; cursor: pointer; }
+.doc-editor .tiptap img { max-width: 100%; height: auto; margin: 0.25em 0; }
+/* Prevent drag-to-save on all images when the document is in view-only mode */
+.select-none img { -webkit-user-drag: none; user-drag: none; pointer-events: none; }
+.doc-editor .tiptap hr { border: none; border-top: 1px solid #c0c0c0; margin: 11pt 0; }
+.doc-editor .tiptap .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #aaaaaa;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* ── Page texture — crosshatch diagonal lines (DPS handbook style) ──────── */
+.page-texture-crosshatch {
+  background-image:
+    repeating-linear-gradient(
+      -45deg,
+      transparent,
+      transparent 7px,
+      rgba(0, 0, 0, 0.025) 7px,
+      rgba(0, 0, 0, 0.025) 8px
+    ),
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 7px,
+      rgba(0, 0, 0, 0.025) 7px,
+      rgba(0, 0, 0, 0.025) 8px
+    );
+}
+
+/* ── TipTap tables ─────────────────────────────────────────────────────────── */
+.doc-editor .tiptap .tableWrapper { overflow-x: hidden; margin: 0 0 11pt; }
+.doc-editor .tiptap table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 10pt;
+  table-layout: fixed;
+}
+.doc-editor .tiptap table td,
+.doc-editor .tiptap table th {
+  border: 1px solid #bfc9d4;
+  padding: 5px 8px;
+  vertical-align: top;
+  min-width: 60px;
+  position: relative;
+  word-wrap: break-word;
+}
+.doc-editor .tiptap table th {
+  font-weight: 700;
+  text-align: left;
+}
+/* Default header colour — skipped when a fill colour is applied inline */
+.doc-editor .tiptap table th:not([style*="background-color"]) { background-color: #dce6f0; }
+/* Alternating rows — skipped when a fill colour is applied inline */
+.doc-editor .tiptap table tbody tr:nth-child(odd)  td:not([style*="background-color"]) { background-color: #ffffff; }
+.doc-editor .tiptap table tbody tr:nth-child(even) td:not([style*="background-color"]) { background-color: #dce6f0; }
+/* Selected cell */
+.doc-editor .tiptap .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(26,115,232,0.15);
+  pointer-events: none;
+  z-index: 2;
+}
+/* Column resize handle */
+.doc-editor .tiptap .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: -2px;
+  width: 4px;
+  background-color: #1a73e8;
+  pointer-events: none;
+  z-index: 20;
+}
+.doc-editor .tiptap.resize-cursor { cursor: col-resize; }
+/* Table context toolbar separator */
+.table-context-toolbar { animation: fadeIn 0.1s ease; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

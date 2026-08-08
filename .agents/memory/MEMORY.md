@@ -1,0 +1,2 @@
+- [Document editor architecture](doc-editor-arch.md) — TipTap + custom extensions, multi-page layout, Google Docs chrome
+- [Document editor HeaderConfig](doc-header-config.md) — all header + page-style + memo fields; stored as jsonb; GET /resources/:id must include header_config

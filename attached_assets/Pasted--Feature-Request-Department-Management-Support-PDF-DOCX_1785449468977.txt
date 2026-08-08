@@ -1,0 +1,245 @@
+**Feature Request: Department Management – Support PDF & DOCX Resource Uploads**
+
+I would like to enhance the **Department Management** system, specifically within the **Department of Public Safety** panel, by expanding the way department resources are uploaded.
+
+## Objective
+
+Currently, resources can only be uploaded in their existing supported format(s). I want administrators to have the ability to upload either:
+
+* PDF files (existing or new support)
+* Microsoft Word (.docx) documents
+
+If a DOCX document is uploaded, it should be **automatically converted into a PDF locally on the server (or locally within the application environment)** before being stored or made available to users. The original DOCX should not be used as the public-facing resource unless explicitly configured. The final resource presented to users should always be a PDF.
+
+---
+
+## Functional Requirements
+
+### 1. Upload Options
+
+When an administrator clicks **Add Resource** under:
+
+**Department Management → Department of Public Safety**
+
+the upload dialog should allow:
+
+* PDF (.pdf)
+* Microsoft Word (.docx)
+
+The file picker should filter to these file types.
+
+---
+
+### 2. DOCX Conversion
+
+If the uploaded file is a DOCX:
+
+1. Validate the file.
+2. Convert it locally into a PDF.
+3. Save the generated PDF.
+4. Store the PDF as the official downloadable resource.
+5. Optionally discard the original DOCX unless there's a business reason to retain it.
+
+The conversion should happen automatically without requiring any additional user interaction.
+
+---
+
+### 3. PDF Upload
+
+If the uploaded file is already a PDF:
+
+* Skip conversion.
+* Save it normally.
+* Continue the existing upload workflow.
+
+---
+
+### 4. User Experience
+
+The administrator should not have to think about file conversion.
+
+Example workflow:
+
+1. Click **Add Resource**
+2. Choose:
+
+   * PDF
+   * DOCX
+3. Click Upload
+4. System processes the file
+5. If DOCX:
+
+   * show "Converting document..."
+   * convert
+   * save PDF
+6. Resource appears normally
+
+The workflow should feel identical regardless of which format was selected.
+
+---
+
+## Validation
+
+Accept only:
+
+* .pdf
+* .docx
+
+Reject:
+
+* .doc
+* .txt
+* .rtf
+* .pages
+* .odt
+* images
+* archives
+* executables
+
+Display a clear validation error for unsupported file types.
+
+---
+
+## Error Handling
+
+Provide friendly messages for situations such as:
+
+* DOCX conversion failed
+* Corrupted document
+* Password-protected document
+* Empty document
+* File too large
+* Unsupported Word format
+
+The original upload should fail gracefully without crashing the application.
+
+---
+
+## Storage
+
+Store only the final PDF used by the application.
+
+The filename should remain clean and predictable.
+
+Example:
+
+Emergency Procedures.docx
+
+becomes
+
+Emergency Procedures.pdf
+
+The resource metadata should reference the generated PDF.
+
+---
+
+## Resource Preview
+
+If the application already includes document previews, continue using the generated PDF so previews remain consistent.
+
+---
+
+## Performance
+
+The conversion should:
+
+* run asynchronously if necessary
+* avoid freezing the UI
+* provide a loading indicator or progress spinner
+* notify the user when complete
+
+---
+
+## Security
+
+Validate uploaded files before conversion.
+
+Protect against:
+
+* malicious documents
+* oversized uploads
+* invalid MIME types
+* incorrect file extensions
+
+Do not rely solely on the file extension.
+
+---
+
+## Architecture
+
+Keep the upload pipeline modular.
+
+Suggested flow:
+
+Upload
+→ Validate
+→ Detect File Type
+→ If PDF:
+Save
+→ If DOCX:
+Convert to PDF
+Validate Generated PDF
+Save PDF
+→ Store Metadata
+→ Refresh Resource List
+
+This design allows future support for additional formats if needed.
+
+---
+
+## UI Changes
+
+Under **Add Resource**, update the upload field text to something like:
+
+> Upload PDF or Word Document (.pdf, .docx)
+
+or
+
+> Supported Formats: PDF, DOCX
+
+If a DOCX is selected, optionally display:
+
+> "This document will automatically be converted to PDF."
+
+---
+
+## Logging
+
+Log:
+
+* upload started
+* upload completed
+* conversion started
+* conversion completed
+* conversion duration
+* conversion errors
+* validation failures
+
+These logs will help diagnose issues in production.
+
+---
+
+## Code Quality
+
+Implement this feature using clean, maintainable code that:
+
+* avoids duplication
+* separates upload and conversion logic
+* is easy to extend
+* includes proper error handling
+* follows the project's existing coding conventions
+
+---
+
+## Acceptance Criteria
+
+The implementation is complete when:
+
+* Administrators can upload either PDF or DOCX files.
+* DOCX files are automatically converted into PDFs locally.
+* Only the resulting PDF is used as the official department resource.
+* Existing PDF uploads continue to work without changes.
+* Unsupported file types are rejected.
+* Conversion failures are handled gracefully with clear user feedback.
+* The upload interface clearly communicates supported file types.
+* The feature integrates seamlessly with the existing Department Management workflow without breaking current functionality.
