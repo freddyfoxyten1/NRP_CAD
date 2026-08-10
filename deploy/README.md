@@ -84,10 +84,10 @@ STAFF_DISCORD_GUILD_ID=1411760639428399194
 DPS_DISCORD_GUILD_ID=1469131277612486791
 DIVISION_DISCORD_GUILD_ID=1469131277612486791
 DPH_DISCORD_GUILD_ID=1519857439220957204
-# Leave empty to use local SQLite (cad-database/dojcad.sqlite)
+# Optional Postgres for ETL source only (website runtime uses Mongo)
 # DATABASE_URL=postgres://user:pass@localhost:5432/dojcad
-# MongoDB Atlas cutover (see docs/mongodb.md)
-DATA_STORE=sql
+# MongoDB Atlas (see docs/mongodb.md) — website/API data store
+DATA_STORE=mongo
 MONGODB_URI=
 MONGODB_DATABASE=dojcad
 REDIS_URL=
@@ -102,9 +102,8 @@ API_PORT=8080
 > (`https://cad.dojrblx.com/dojcad/discord-callback`) — otherwise Discord OAuth
 > breaks. Also add this URI to your Discord application's OAuth2 redirects.
 >
-> **MongoDB**: keep `DATA_STORE=sql` until you run `bun run migrate:mongo` and
-> `bun run migrate:mongo:verify` successfully, then set `DATA_STORE=mongo`.
-> Full guide: [`docs/mongodb.md`](../docs/mongodb.md).
+> **MongoDB**: set `MONGODB_URI`, run `bun run migrate:mongo` once from your
+> SQL backup, then keep `DATA_STORE=mongo`. Full guide: [`docs/mongodb.md`](../docs/mongodb.md).
 
 ---
 
