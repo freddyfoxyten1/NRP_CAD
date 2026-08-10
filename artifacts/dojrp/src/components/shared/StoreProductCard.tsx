@@ -179,9 +179,9 @@ export default function StoreProductCard({
         {hasFooter ? (
           <>
             <div className="mt-1 h-px w-full shrink-0 bg-[#131f30]" />
-            <div className="flex items-center justify-between gap-3 pt-1">
+            <div className="flex flex-col gap-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
               {footer ? (
-                <p className="text-xs font-semibold text-[#3f5470]">{footer}</p>
+                <p className="min-w-0 text-xs font-semibold text-[#3f5470]">{footer}</p>
               ) : (
                 <span />
               )}
@@ -191,12 +191,12 @@ export default function StoreProductCard({
                     href={buyUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className={buyButtonClass}
+                    className={`${buyButtonClass} w-full justify-center sm:w-auto`}
                   >
                     {buttonLabel}
                   </a>
                 ) : (
-                  <span className={`${buyButtonClass} cursor-default opacity-40`}>
+                  <span className={`${buyButtonClass} w-full cursor-default justify-center opacity-40 sm:w-auto`}>
                     {buttonLabel}
                   </span>
                 )
