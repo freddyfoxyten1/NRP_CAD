@@ -6,7 +6,7 @@ MongoDB Atlas is the target authoritative database. SQL (SQLite/Postgres via `po
 
 | Variable | Purpose |
 |----------|---------|
-| `DATA_STORE` | `sql` (default) or `mongo` |
+| `DATA_STORE` | `mongo` (preferred) or `sql`; if unset, mongo when `MONGODB_URI` is set |
 | `MONGODB_URI` | Atlas connection string |
 | `MONGODB_DATABASE` | Database name (default `dojcad`) |
 | `REDIS_URL` | Redis for admin member cache |
@@ -92,9 +92,10 @@ When `DATA_STORE=mongo`, request handlers use Mongo repositories + the SQL bridg
 ## Local development
 
 1. Copy `.env.example` → `.env`
-2. Set `MONGODB_URI`, `REDIS_URL`
-3. Keep `DATA_STORE=sql` until you run ETL and verify
-4. Switch `DATA_STORE=mongo` to run against Atlas
+2. Set `MONGODB_URI` (required) and optional `REDIS_URL`
+3. Run ETL once from existing SQLite/Postgres: `bun run migrate:mongo`
+4. Keep `DATA_STORE=mongo` — the API and website read/write Mongo (GridFS for files)
+5. Use `DATA_STORE=sql` only as an emergency fallback
 
 ## Troubleshooting
 
