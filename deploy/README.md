@@ -101,6 +101,10 @@ API_PORT=8080
 
 ## 5. Install dependencies + build (bun only)
 
+> `bun run build` **must succeed before** starting bm2 — the API bundle
+> (`artifacts/api-server/dist/index.mjs`) is gitignored and only exists after
+> building.
+
 ```bash
 # Install all workspace dependencies
 bun install
@@ -112,6 +116,12 @@ bun run build
 This produces:
 - `artifacts/api-server/dist/index.mjs`  ← the bundled API (bun executes this)
 - `artifacts/dojrp/dist/public/`         ← static frontend (nginx serves this)
+
+Verify both exist:
+```bash
+ls -la artifacts/api-server/dist/index.mjs
+ls -la artifacts/dojrp/dist/public/index.html
+```
 
 ---
 
