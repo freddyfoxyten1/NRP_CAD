@@ -105,11 +105,8 @@ API_PORT=8080
 # Install all workspace dependencies
 bun install
 
-# Build the API server (esbuild bundle)
-bun --filter @workspace/api-server run build
-
-# Build the frontend (Vite)
-bun --filter @workspace/dojrp run build
+# Build everything (API + frontend)
+bun run build
 ```
 
 This produces:

@@ -10,12 +10,12 @@
     "scripts"
   ],
   "scripts": {
-    "dev": "bun --parallel --filter @workspace/dojrp --filter @workspace/api-server run dev",
-    "dev:web": "bun --filter @workspace/dojrp run dev",
-    "dev:api": "bun --filter @workspace/api-server run dev",
-    "build": "bun --filter @workspace/api-server --filter @workspace/dojrp run build",
+    "dev": "bun run dev:api & bun run dev:web",
+    "dev:web": "bun run --cwd ./artifacts/dojrp dev",
+    "dev:api": "bun run --cwd ./artifacts/api-server dev",
+    "build": "bun run --cwd ./artifacts/api-server build && bun run --cwd ./artifacts/dojrp build",
     "typecheck:libs": "bunx tsc --build",
-    "typecheck": "bun run typecheck:libs && bun --filter '*' --if-present run typecheck"
+    "typecheck": "bun run typecheck:libs && bun run --cwd ./artifacts/api-server typecheck && bun run --cwd ./artifacts/dojrp typecheck && bun run --cwd ./artifacts/mockup-sandbox typecheck && bun run --cwd ./scripts typecheck"
   },
   "dependencies": {
     "@replit/connectors-sdk": "^0.4.1"
