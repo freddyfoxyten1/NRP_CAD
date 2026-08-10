@@ -4,7 +4,7 @@
 // No authentication required. Displays live stats, announcements, gallery,
 // and press/news items for the DOJRP community.
 // ----
-import { useEffect, useState, Fragment } from "react";
+import { useCallback, useEffect, useRef, useState, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays, Gamepad2, Users, Megaphone, Image as ImageIcon,
@@ -267,6 +267,14 @@ const PublicView = () => {
   const [gallery,       setGallery]       = useState<GalleryImage[]>([]);
   const [press,         setPress]         = useState<PressItem[]>([]);
   const [lightbox,      setLightbox]      = useState<GalleryImage | null>(null);
+  const galleryTrackRef = useRef<HTMLDivElement | null>(null);
+  const galleryFirstCopyRef = useRef<HTMLDivElement | null>(null);
+  const galleryPausedRef = useRef(false);
+  const [galleryTrackEl, setGalleryTrackEl] = useState<HTMLDivElement | null>(null);
+  const setGalleryTrackNode = useCallback((node: HTMLDivElement | null) => {
+    galleryTrackRef.current = node;
+    setGalleryTrackEl(node);
+  }, []);
   const [statsLoading,  setStatsLoading]  = useState(true);
   const [events,        setEvents]        = useState<DpsEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -304,6 +312,39 @@ const PublicView = () => {
     const id = setInterval(load, 60_000);
     return () => clearInterval(id);
   }, []);
+
+  // Home Gallery: slow continuous left auto-scroll (starts when track mounts)
+  useEffect(() => {
+    const track = galleryTrackEl;
+    const firstCopy = galleryFirstCopyRef.current;
+    if (!track || !firstCopy || gallery.length === 0) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let raf = 0;
+    let offset = 0;
+    let last = performance.now();
+    const speedPxPerSec = 28;
+
+    const tick = (now: number) => {
+      const dt = Math.min(now - last, 64);
+      last = now;
+      if (!galleryPausedRef.current && !document.hidden) {
+        const loopAt = firstCopy.offsetWidth;
+        if (loopAt > 0) {
+          offset += (speedPxPerSec * dt) / 1000;
+          if (offset >= loopAt) offset -= loopAt;
+          track.style.transform = `translate3d(${-offset}px, 0, 0)`;
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      track.style.transform = "";
+    };
+  }, [galleryTrackEl, gallery.length]);
 
   useEffect(() => {
     void fetchJsonArray<Announcement>("/api/announcements").then(setAnnouncements);
@@ -636,14 +677,21 @@ const PublicView = () => {
                   <p className="text-sm font-bold text-[#2a3a50]">No gallery images yet.</p>
                 </div>
               ) : (
-                <div className="home-gallery-scroller -mx-1 overflow-hidden px-1 pb-2">
+                <div
+                  className="home-gallery-scroller -mx-1 overflow-hidden px-1 pb-2"
+                  onMouseEnter={() => { galleryPausedRef.current = true; }}
+                  onMouseLeave={() => { galleryPausedRef.current = false; }}
+                  onFocusCapture={() => { galleryPausedRef.current = true; }}
+                  onBlurCapture={() => { galleryPausedRef.current = false; }}
+                >
                   <div
-                    className="home-gallery-marquee flex w-max"
-                    style={{ animationDuration: `${Math.max(gallery.length, 1) * 6}s` }}
+                    ref={setGalleryTrackNode}
+                    className="flex w-max will-change-transform"
                   >
                     {[0, 1].map(copy => (
                       <div
                         key={copy}
+                        ref={copy === 0 ? galleryFirstCopyRef : undefined}
                         className="flex gap-3 pr-3"
                         aria-hidden={copy === 1 ? true : undefined}
                       >
