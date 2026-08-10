@@ -4,7 +4,7 @@
 // No authentication required. Displays live stats, announcements, gallery,
 // and press/news items for the DOJRP community.
 // ----
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useRef, useState, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays, Gamepad2, Users, Megaphone, Image as ImageIcon,
@@ -267,6 +267,8 @@ const PublicView = () => {
   const [gallery,       setGallery]       = useState<GalleryImage[]>([]);
   const [press,         setPress]         = useState<PressItem[]>([]);
   const [lightbox,      setLightbox]      = useState<GalleryImage | null>(null);
+  const galleryScrollRef = useRef<HTMLDivElement>(null);
+  const galleryPausedRef = useRef(false);
   const [statsLoading,  setStatsLoading]  = useState(true);
   const [events,        setEvents]        = useState<DpsEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -304,6 +306,34 @@ const PublicView = () => {
     const id = setInterval(load, 60_000);
     return () => clearInterval(id);
   }, []);
+
+  // Home Gallery: continuous automatic side-scroll (pauses on hover / reduced motion)
+  useEffect(() => {
+    if (tab !== "home" || gallery.length === 0) return;
+    const el = galleryScrollRef.current;
+    if (!el) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    let raf = 0;
+    let last = performance.now();
+    const speedPxPerSec = 36;
+
+    const tick = (now: number) => {
+      const dt = Math.min(now - last, 48);
+      last = now;
+      if (!galleryPausedRef.current && !document.hidden) {
+        el.scrollLeft += (speedPxPerSec * dt) / 1000;
+        const loopAt = el.scrollWidth / 2;
+        if (loopAt > 0 && el.scrollLeft >= loopAt) {
+          el.scrollLeft -= loopAt;
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [tab, gallery.length]);
 
   useEffect(() => {
     void fetchJsonArray<Announcement>("/api/announcements").then(setAnnouncements);
@@ -636,11 +666,18 @@ const PublicView = () => {
                   <p className="text-sm font-bold text-[#2a3a50]">No gallery images yet.</p>
                 </div>
               ) : (
-                <div className="-mx-1 overflow-x-auto px-1 pb-2 [scrollbar-width:thin] [scrollbar-color:#1b2738_transparent]">
+                <div
+                  ref={galleryScrollRef}
+                  className="-mx-1 overflow-x-auto px-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                  onMouseEnter={() => { galleryPausedRef.current = true; }}
+                  onMouseLeave={() => { galleryPausedRef.current = false; }}
+                  onFocusCapture={() => { galleryPausedRef.current = true; }}
+                  onBlurCapture={() => { galleryPausedRef.current = false; }}
+                >
                   <div className="flex w-max gap-3">
-                    {gallery.map(img => (
+                    {[...gallery, ...gallery].map((img, i) => (
                       <button
-                        key={img.id}
+                        key={`${img.id}-${i}`}
                         type="button"
                         onClick={() => setLightbox(img)}
                         className="group relative aspect-video w-[min(78vw,280px)] shrink-0 overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16] text-left transition-all hover:border-[#2f70ff]/50 hover:shadow-[0_0_30px_rgba(47,112,255,0.10)] sm:w-[300px]"
