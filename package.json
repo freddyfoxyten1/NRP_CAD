@@ -14,6 +14,8 @@
     "dev:web": "bun run --cwd ./artifacts/dojrp dev",
     "dev:api": "bun run --cwd ./artifacts/api-server dev",
     "build": "bun run --cwd ./artifacts/api-server build && bun run --cwd ./artifacts/dojrp build",
+    "migrate:mongo": "bun run --cwd ./lib/db migrate:mongo",
+    "migrate:mongo:verify": "bun run --cwd ./lib/db migrate:mongo:verify",
     "typecheck:libs": "bunx tsc --build",
     "typecheck": "bun run typecheck:libs && bun run --cwd ./artifacts/api-server typecheck && bun run --cwd ./artifacts/dojrp typecheck && bun run --cwd ./artifacts/mockup-sandbox typecheck && bun run --cwd ./scripts typecheck"
   },

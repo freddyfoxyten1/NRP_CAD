@@ -1438,7 +1438,9 @@ const AdminPortal = () => {
   };
 
   const loadMembers = async () => {
-    const response = await fetch('/api/admin/members', {
+    // all=1 requests a lightweight full summary list for staff tooling.
+    // Paginated Members UI should call /api/admin/members?page=&limit=&q= instead.
+    const response = await fetch('/api/admin/members?all=1', {
       headers: { 'x-admin-code': adminCode, accept: 'application/json' },
     });
     const contentType = response.headers.get('content-type') ?? '';
@@ -1451,7 +1453,8 @@ const AdminPortal = () => {
       throw new Error('The shared members API is not running yet. Restart the app server and try again.');
     }
 
-    return (await response.json()) as AdminMember[];
+    const data = await response.json() as AdminMember[] | { items: AdminMember[] };
+    return Array.isArray(data) ? data : (data.items ?? []);
   };
 
   const loadGuildMembers = async () => {

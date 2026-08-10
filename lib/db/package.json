@@ -9,11 +9,15 @@
   },
   "scripts": {
     "push": "drizzle-kit push --config ./drizzle.config.ts",
-    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
+    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts",
+    "migrate:mongo": "bun --preload ../../scripts/load-env.mjs ./src/migrate/run.ts",
+    "migrate:mongo:verify": "bun --preload ../../scripts/load-env.mjs ./src/migrate/verify.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
     "drizzle-zod": "^0.8.3",
+    "ioredis": "^5.6.1",
+    "mongodb": "^6.16.0",
     "pg": "^8.22.0",
     "zod": "^3.25.76"
   },

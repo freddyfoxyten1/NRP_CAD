@@ -11,7 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { Router } from "express";
 import multer from "multer";
-import { pool } from "@workspace/db";
+import { pool, isMongoStore, resourcesRepo } from "@workspace/db";
 import { ConversionError, convertDocxToPdf, isDocx, isLegacyDoc, isPdf } from "../lib/docx-to-pdf";
 
 const router = Router();
@@ -106,6 +106,31 @@ router.post("/resources/upload", (req, res) => {
       const personnelOnly = divisionId == null
         && (personnelOnlyRaw === "1" || personnelOnlyRaw.toLowerCase() === "true" || allowedDpsRanks.length > 0);
       const savedDpsRanks = divisionId == null ? allowedDpsRanks : [];
+      if (isMongoStore()) {
+        const row = await resourcesRepo.insertResource("dps", {
+          title,
+          type: "pdf",
+          created_by: createdBy,
+          division_id: divisionId,
+          division_only: divisionOnly,
+          allowed_ranks: JSON.stringify(allowedRanks),
+          personnel_only: personnelOnly,
+          allowed_dps_ranks: JSON.stringify(savedDpsRanks),
+        });
+        const resourceId = Number(row.id);
+        await resourcesRepo.saveResourceFile("dps", resourceId, pdf, "application/pdf", `${title}.pdf`);
+        req.log.info({ id: resourceId, title, divisionId, divisionOnly, personnelOnly }, "resource upload completed");
+        res.status(201).json({
+          ...row,
+          id: resourceId,
+          division_only: Boolean(divisionOnly),
+          allowed_ranks: allowedRanks,
+          personnel_only: Boolean(personnelOnly),
+          allowed_dps_ranks: savedDpsRanks,
+        });
+        return;
+      }
+
       const { rows } = await pool.query(
         `INSERT INTO dps_resources
            (title, type, created_by, file_data, division_id, division_only, allowed_ranks, personnel_only, allowed_dps_ranks)
@@ -142,6 +167,16 @@ router.get("/resources/:id/file", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    if (isMongoStore()) {
+      const file = await resourcesRepo.getResourceFile("dps", id);
+      if (!file) { res.status(404).json({ error: "File not found." }); return; }
+      const meta = await resourcesRepo.getResource("dps", id);
+      const safeName = String(meta?.title || "resource").replace(/[^\w\- ]+/g, "").trim() || "resource";
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${safeName}.pdf"`);
+      res.send(file.data);
+      return;
+    }
     const { rows } = await pool.query(
       `SELECT title, file_data FROM dps_resources WHERE id = $1 AND file_data IS NOT NULL`,
       [id],

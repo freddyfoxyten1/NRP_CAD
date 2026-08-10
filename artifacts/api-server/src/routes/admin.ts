@@ -1,6 +1,12 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { pool } from "@workspace/db";
-import { writeLog, ensureAuditLog } from "../lib/audit-log";
+import {
+  pool,
+  isMongoStore,
+  usersRepo,
+  getCachedMemberPage,
+  invalidateMemberCaches,
+} from "@workspace/db";
+import { writeLog, ensureAuditLog, listLogs } from "../lib/audit-log";
 
 const router = Router();
 
@@ -26,15 +32,8 @@ router.get("/admin/logs", requireAdmin, async (req, res) => {
   await ensureAuditLog;
   try {
     const category = typeof req.query.category === "string" ? req.query.category : null;
-    const result = await pool.query(
-      `SELECT id, category, actor, action, details, created_at::text
-       FROM cad_audit_logs
-       ${category ? "WHERE category = $1" : ""}
-       ORDER BY created_at DESC
-       LIMIT 200`,
-      category ? [category] : []
-    );
-    res.json(result.rows);
+    const rows = await listLogs(category);
+    res.json(rows);
   } catch (err) {
     req.log.error({ err }, "admin/logs GET error");
     res.status(500).json({ error: "Unable to load logs." });
@@ -406,13 +405,95 @@ router.get("/admin/discord-search", async (req, res) => {
 
 router.get("/admin/members", requireAdmin, async (req, res) => {
   try {
+    const pageRaw = typeof req.query.page === "string" ? Number(req.query.page) : NaN;
+    const limitRaw = typeof req.query.limit === "string" ? Number(req.query.limit) : NaN;
+    const q = typeof req.query.q === "string" ? req.query.q : "";
+    const wantAll = req.query.all === "1" || req.query.all === "true";
+    const paginated = Number.isFinite(pageRaw) && pageRaw >= 1;
+
+    if (isMongoStore()) {
+      if (wantAll && !paginated) {
+        // Lightweight full list for staff tooling (cached via list pages / direct query)
+        const result = await usersRepo.listMemberSummaries({ page: 1, limit: 10_000, q });
+        req.log.info({ cache: "BYPASS_ALL", total: result.total }, "admin/members");
+        res.json(result.items);
+        return;
+      }
+      if (paginated) {
+        const result = await getCachedMemberPage({
+          page: pageRaw,
+          limit: Number.isFinite(limitRaw) ? limitRaw : 25,
+          q,
+        });
+        req.log.info({ cache: result.cache, page: result.page, total: result.total }, "admin/members");
+        res.json({
+          items: result.items,
+          total: result.total,
+          page: result.page,
+          limit: result.limit,
+          cache: result.cache,
+        });
+        return;
+      }
+      // Default: paginated first page (do not dump entire collection)
+      const result = await getCachedMemberPage({ page: 1, limit: 25, q });
+      req.log.info({ cache: result.cache, page: result.page, total: result.total }, "admin/members");
+      res.json({
+        items: result.items,
+        total: result.total,
+        page: result.page,
+        limit: result.limit,
+        cache: result.cache,
+      });
+      return;
+    }
+
+    // SQL path — keep legacy full-list for all=1 / no page; otherwise paginate in SQL
+    if (paginated) {
+      const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 25));
+      const page = Math.max(1, pageRaw);
+      const offset = (page - 1) * limit;
+      const params: unknown[] = [];
+      let where = "";
+      if (q.trim()) {
+        params.push(`%${q.trim().toLowerCase()}%`);
+        where = `WHERE lower(username) LIKE $1 OR lower(coalesce(discord_username,'')) LIKE $1 OR lower(coalesce(email,'')) LIKE $1 OR coalesce(discord_id,'') LIKE $1`;
+      }
+      const countR = await pool.query<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM cad_user_profiles ${where}`,
+        params,
+      );
+      const listParams = [...params, limit, offset];
+      const limIdx = params.length + 1;
+      const offIdx = params.length + 2;
+      const result = await pool.query(
+        `SELECT id, auth_user_id, username, discord_username, discord_id,
+                email, community_code, status, rank, role,
+                dps_rank, dps_role, staff_rank, staff_role,
+                whitelisted, avatar_hash, created_at::text, updated_at::text
+         FROM cad_user_profiles
+         ${where}
+         ORDER BY created_at DESC
+         LIMIT $${limIdx} OFFSET $${offIdx}`,
+        listParams,
+      );
+      res.json({
+        items: result.rows,
+        total: countR.rows[0]?.c ?? 0,
+        page,
+        limit,
+        cache: "BYPASS",
+      });
+      return;
+    }
+
     const result = await pool.query(
       `SELECT id, auth_user_id, username, discord_username, discord_id,
               email, community_code, status, rank, role,
               dps_rank, dps_role, staff_rank, staff_role,
               whitelisted, avatar_hash, created_at::text, updated_at::text
        FROM cad_user_profiles
-       ORDER BY created_at DESC`
+       ORDER BY created_at DESC`,
     );
     res.json(result.rows);
   } catch (err) {
@@ -465,6 +546,32 @@ router.patch("/admin/members", requireAdmin, async (req, res) => {
     const staffRank = body.staff_rank !== undefined ? (body.staff_rank?.trim() || null) : undefined;
     const staffRole = body.staff_role !== undefined ? (body.staff_role?.trim() || null) : undefined;
 
+    if (isMongoStore()) {
+      const patch: Record<string, unknown> = {
+        auth_user_id: authUserId,
+        username,
+        discord_username: discordUsername,
+        discord_id: discordId,
+        email,
+        community_code: communityCode,
+        status,
+        rank,
+        role,
+      };
+      if (dpsRank !== undefined) patch.dps_rank = dpsRank;
+      if (dpsRole !== undefined) patch.dps_role = dpsRole;
+      if (staffRank !== undefined) patch.staff_rank = staffRank;
+      if (staffRole !== undefined) patch.staff_role = staffRole;
+      const updated = await usersRepo.updateUser(id, patch);
+      if (!updated) {
+        res.status(404).json({ error: "Member not found." });
+        return;
+      }
+      void writeLog("members", actor, "Edited member account", `Username: ${updated.username} (ID: ${id})`);
+      res.json(updated);
+      return;
+    }
+
     const result = await pool.query(
       `UPDATE cad_user_profiles
        SET auth_user_id=$1, username=$2, discord_username=$3, discord_id=$4,
@@ -490,6 +597,7 @@ router.patch("/admin/members", requireAdmin, async (req, res) => {
 
     const updated = result.rows[0] as { username: string };
     void writeLog("members", actor, "Edited member account", `Username: ${updated.username} (ID: ${id})`);
+    await invalidateMemberCaches(id);
 
     res.json(result.rows[0]);
   } catch (err) {
@@ -507,6 +615,29 @@ router.delete("/admin/members", requireAdmin, async (req, res) => {
       const id = Number(memberId);
       if (!Number.isInteger(id)) {
         res.status(400).json({ error: "Invalid member ID." });
+        return;
+      }
+
+      if (isMongoStore()) {
+        const member = await usersRepo.getUserById(id);
+        if (!member) {
+          res.json({ deleted_count: 0, protected_count: 0, deleted_ids: [] });
+          return;
+        }
+        const isProtected = Boolean(member.staff_role) || Boolean(member.whitelisted);
+        if (isProtected) {
+          res.json({ deleted_count: 0, protected_count: 1, deleted_ids: [] });
+          return;
+        }
+        const deleted = await usersRepo.deleteUser(id);
+        if (deleted) {
+          void writeLog("members", actor, "Deleted member account", `Member ID: ${id}`);
+        }
+        res.json({
+          deleted_count: deleted ? 1 : 0,
+          deleted_ids: deleted ? [id] : [],
+          protected_count: 0,
+        });
         return;
       }
 
@@ -536,6 +667,7 @@ router.delete("/admin/members", requireAdmin, async (req, res) => {
 
       if (deleteResult.rows.length > 0) {
         void writeLog("members", actor, "Deleted member account", `Member ID: ${id}`);
+        await invalidateMemberCaches(id);
       }
 
       res.json({
