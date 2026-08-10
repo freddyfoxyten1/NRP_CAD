@@ -62,16 +62,16 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#03070c]/95 px-4 text-white">
+        <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-[#03070c]/95 px-4 py-6 text-white sm:items-center sm:py-8">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_center,rgba(21,34,56,0.5)_0,rgba(3,7,12,0)_60%)]" />
 
-      <div className="relative w-full max-w-[420px] rounded-2xl border border-[#192336] bg-[#0d1422] px-8 py-9 shadow-[0_32px_80px_rgba(0,0,0,0.72)]">
+      <div className="relative my-auto w-full max-w-[420px] rounded-2xl border border-[#192336] bg-[#0d1422] px-6 py-8 shadow-[0_32px_80px_rgba(0,0,0,0.72)] sm:px-8 sm:py-9">
 
         {/* Close */}
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-4 top-4 rounded-full p-1.5 text-[#4a5568] transition-colors hover:bg-white/5 hover:text-white"
+          className="absolute right-3 top-3 flex h-10 w-10 items-center justify-center rounded-full text-[#4a5568] transition-colors hover:bg-white/5 hover:text-white"
           aria-label="Close"
         >
           <X className="h-4 w-4" />

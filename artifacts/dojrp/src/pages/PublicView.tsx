@@ -106,13 +106,13 @@ function SectionHeading({ icon: Icon, title, count }: {
   icon: React.ElementType; title: string; count?: number;
 }) {
   return (
-    <div className="mb-5 flex items-center gap-3 sm:mb-6">
-      <Icon className="h-4 w-4 text-[#4384ff]" />
-      <h2 className="text-sm font-black uppercase tracking-[0.22em] text-white">{title}</h2>
+    <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 sm:mb-6">
+      <Icon className="h-4 w-4 shrink-0 text-[#4384ff]" />
+      <h2 className="min-w-0 text-sm font-black uppercase tracking-[0.14em] text-white sm:tracking-[0.22em]">{title}</h2>
       {count !== undefined && (
         <span className="rounded-full bg-[#0f1b28] px-2 py-0.5 text-[9px] font-black text-[#526179]">{count}</span>
       )}
-      <div className="ml-3 h-px flex-1 bg-[#131f30]" />
+      <div className="ml-0 h-px min-w-[2rem] flex-1 bg-[#131f30] sm:ml-3" />
     </div>
   );
 }
@@ -267,15 +267,22 @@ const PublicView = () => {
   const [gallery,       setGallery]       = useState<GalleryImage[]>([]);
   const [press,         setPress]         = useState<PressItem[]>([]);
   const [lightbox,      setLightbox]      = useState<GalleryImage | null>(null);
-  const galleryTrackRef = useRef<HTMLDivElement | null>(null);
   const galleryFirstCopyRef = useRef<HTMLDivElement | null>(null);
-  const galleryScrollerRef = useRef<HTMLDivElement | null>(null);
   const galleryPausedRef = useRef(false);
-  const [galleryTrackEl, setGalleryTrackEl] = useState<HTMLDivElement | null>(null);
+  const galleryResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const galleryIgnoreScrollRef = useRef(false);
+  const [galleryScrollerEl, setGalleryScrollerEl] = useState<HTMLDivElement | null>(null);
   const [galleryCopies, setGalleryCopies] = useState(2);
-  const setGalleryTrackNode = useCallback((node: HTMLDivElement | null) => {
-    galleryTrackRef.current = node;
-    setGalleryTrackEl(node);
+  const setGalleryScrollerNode = useCallback((node: HTMLDivElement | null) => {
+    setGalleryScrollerEl(node);
+  }, []);
+  const pauseGalleryAutoScroll = useCallback(() => {
+    galleryPausedRef.current = true;
+    if (galleryResumeTimerRef.current) clearTimeout(galleryResumeTimerRef.current);
+    galleryResumeTimerRef.current = setTimeout(() => {
+      galleryPausedRef.current = false;
+      galleryResumeTimerRef.current = null;
+    }, 20_000);
   }, []);
   const tabScrollRef = useRef<HTMLDivElement | null>(null);
   const [statsLoading,  setStatsLoading]  = useState(true);
@@ -319,14 +326,13 @@ const PublicView = () => {
   // Enough duplicated sets so the strip never shows empty space before looping
   useEffect(() => {
     if (tab !== "home" || gallery.length === 0) return;
-    const scroller = galleryScrollerRef.current;
+    const scroller = galleryScrollerEl;
     const firstCopy = galleryFirstCopyRef.current;
     if (!scroller || !firstCopy) return;
 
     const updateCopies = () => {
       const setWidth = firstCopy.offsetWidth;
       if (setWidth <= 0) return;
-      // Fill viewport at least twice, then +1 set for a seamless wrap
       const needed = Math.max(2, Math.ceil((scroller.clientWidth * 2) / setWidth) + 1);
       setGalleryCopies(prev => (prev === needed ? prev : needed));
     };
@@ -336,20 +342,35 @@ const PublicView = () => {
     ro.observe(scroller);
     ro.observe(firstCopy);
     return () => ro.disconnect();
-  }, [tab, gallery.length, galleryTrackEl]);
+  }, [tab, gallery.length, galleryScrollerEl]);
 
-  // Home Gallery ONLY: endless left auto-scroll — when a full set ends, first image follows again
+  // Home Gallery ONLY: auto-scroll with scrollbar; pause on interaction, resume after 20s idle
   useEffect(() => {
     if (tab !== "home") return;
-    const track = galleryTrackEl;
+    const el = galleryScrollerEl;
     const firstCopy = galleryFirstCopyRef.current;
-    if (!track || !firstCopy || gallery.length === 0) return;
+    if (!el || !firstCopy || gallery.length === 0) return;
 
     let raf = 0;
-    let offset = 0;
     let last = performance.now();
     const speedPxPerSec = 32;
     let running = true;
+
+    const markProgrammaticScroll = () => {
+      galleryIgnoreScrollRef.current = true;
+      requestAnimationFrame(() => {
+        galleryIgnoreScrollRef.current = false;
+      });
+    };
+
+    const onUserActivity = () => {
+      pauseGalleryAutoScroll();
+    };
+
+    const onScroll = () => {
+      if (galleryIgnoreScrollRef.current) return;
+      pauseGalleryAutoScroll();
+    };
 
     const tick = (now: number) => {
       if (!running) return;
@@ -358,22 +379,37 @@ const PublicView = () => {
       if (!galleryPausedRef.current && !document.hidden) {
         const loopAt = firstCopy.offsetWidth;
         if (loopAt > 0) {
-          offset += (speedPxPerSec * dt) / 1000;
-          // Jump back exactly one set — next copy already starts with image 1
-          while (offset >= loopAt) offset -= loopAt;
-          track.style.transform = `translate3d(${-offset}px, 0, 0)`;
+          markProgrammaticScroll();
+          el.scrollLeft += (speedPxPerSec * dt) / 1000;
+          if (el.scrollLeft >= loopAt) {
+            markProgrammaticScroll();
+            el.scrollLeft -= loopAt;
+          }
         }
       }
       raf = requestAnimationFrame(tick);
     };
 
+    el.addEventListener("scroll", onScroll, { passive: true });
+    el.addEventListener("wheel", onUserActivity, { passive: true });
+    el.addEventListener("pointerdown", onUserActivity);
+    el.addEventListener("touchstart", onUserActivity, { passive: true });
+
     raf = requestAnimationFrame(tick);
     return () => {
       running = false;
       cancelAnimationFrame(raf);
-      track.style.transform = "";
+      el.removeEventListener("scroll", onScroll);
+      el.removeEventListener("wheel", onUserActivity);
+      el.removeEventListener("pointerdown", onUserActivity);
+      el.removeEventListener("touchstart", onUserActivity);
+      if (galleryResumeTimerRef.current) {
+        clearTimeout(galleryResumeTimerRef.current);
+        galleryResumeTimerRef.current = null;
+      }
+      galleryPausedRef.current = false;
     };
-  }, [tab, galleryTrackEl, gallery.length, galleryCopies]);
+  }, [tab, galleryScrollerEl, gallery.length, galleryCopies, pauseGalleryAutoScroll]);
 
   // Tab bar: map mouse wheel to horizontal scroll so Store / Press stay reachable
   useEffect(() => {
@@ -506,14 +542,14 @@ const PublicView = () => {
       <div className="h-px bg-[#1b2738]" />
 
       {/* Header */}
-      <header className="sticky top-0 z-30 border-b border-[#131f30] bg-[#02060b]/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center gap-4 px-5 py-3.5 sm:px-8">
-          <div className="flex items-center gap-2.5">
-            <img src={`${import.meta.env.BASE_URL}dojrp-shield.png`} alt="" className="h-7 w-7" />
+      <header className="sticky top-0 z-30 h-14 border-b border-[#131f30] bg-[#02060b]/90 backdrop-blur-md">
+        <div className="mx-auto flex h-full max-w-6xl items-center gap-3 px-4 sm:gap-4 sm:px-8">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <img src={`${import.meta.env.BASE_URL}dojrp-shield.png`} alt="" className="h-7 w-7 shrink-0" />
             <DojrpLogo />
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             {/* Live ERLC badge */}
             <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 sm:px-3 ${
               statsLoading ? "border-[#1b2738] bg-[#070d16]" : "border-[#173053] bg-[#071120]"
@@ -532,7 +568,7 @@ const PublicView = () => {
             <button
               type="button"
               onClick={handleSignIn}
-              className="rounded-full px-3 py-1.5 text-xs font-bold text-[#526179] transition-colors hover:bg-white/5 hover:text-white"
+              className="min-h-10 rounded-full px-3.5 py-2 text-xs font-bold text-[#526179] transition-colors hover:bg-white/5 hover:text-white"
             >
               Sign in
             </button>
@@ -558,7 +594,7 @@ const PublicView = () => {
             </p>
 
             {/* Live stats strip */}
-            <div className="mt-6 grid w-full max-w-2xl grid-cols-3 gap-2 sm:mt-8 sm:gap-3">
+            <div className="mt-6 grid w-full max-w-2xl grid-cols-1 gap-2 min-[420px]:grid-cols-3 sm:mt-8 sm:gap-3">
               <StatCard
                 icon={Gamepad2}
                 label="In-Game"
@@ -586,7 +622,7 @@ const PublicView = () => {
       </section>
 
       {/* Tab bar */}
-      <div className="sticky top-[52px] z-20 border-b border-[#0f1b28] bg-[#02060b]/95 backdrop-blur-md sm:top-[56px]">
+      <div className="sticky top-14 z-20 border-b border-[#0f1b28] bg-[#02060b]/95 backdrop-blur-md">
         <div
           ref={tabScrollRef}
           className="tab-button-scroller overflow-x-auto overscroll-x-contain"
@@ -605,16 +641,16 @@ const PublicView = () => {
               <button
                 key={t.id}
                 type="button"
-              onClick={() => setTab(t.id)}
-                className={`flex shrink-0 items-center gap-1.5 border-b-2 px-2.5 py-3 text-[10px] font-black uppercase tracking-[0.12em] transition-colors sm:gap-2 sm:px-3.5 sm:py-3.5 sm:text-[11px] sm:tracking-[0.16em] ${
+                onClick={() => setTab(t.id)}
+                className={`flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-3 py-3 text-[10px] font-black uppercase tracking-[0.12em] transition-colors sm:gap-2 sm:px-3.5 sm:py-3.5 sm:text-[11px] sm:tracking-[0.16em] ${
                   tab === t.id
                     ? "border-[#4384ff] text-white"
                     : "border-transparent text-[#526179] hover:text-[#8392aa]"
                 }`}
               >
                 <t.icon className="h-3.5 w-3.5 shrink-0" />
-                <span className="lg:hidden">{t.shortLabel}</span>
-                <span className="hidden lg:inline">{t.label}</span>
+                <span className="md:hidden">{t.shortLabel}</span>
+                <span className="hidden md:inline">{t.label}</span>
                 {t.id === "announcements" && announcements.length > 0 && (
                   <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{announcements.length}</span>
                 )}
@@ -639,7 +675,7 @@ const PublicView = () => {
           <>
             <section>
               <SectionHeading icon={Shield} title="About DOJRP" />
-              <div className="mb-6 rounded-xl border border-[#131f30] bg-[#070d16] px-6 py-7 sm:px-8 sm:py-8">
+              <div className="mb-6 rounded-xl border border-[#131f30] bg-[#070d16] px-4 py-6 sm:px-8 sm:py-8">
                 <p className="text-sm leading-relaxed text-[#a8b7cd]">
                   DOJ:RP is one of the largest ER:LC servers out there. With multiple departments including DPS and DPH and sub-divisions like SWAT, Hazmat, SRU and many more. We aim to ensure that the server is fun for everyone who joins us here in DOJ. We always aim for everyone to have a great time with the amazing staff team, great roleplays and fun events.
                 </p>
@@ -653,7 +689,7 @@ const PublicView = () => {
                   { icon: Shield,   title: "Realistic Operations",    body: "Structured rank system, callsign management, and professional standards that mirror real law enforcement procedure." },
                   { icon: Users,    title: "Active Community",        body: "A growing community of dedicated roleplayers committed to immersive, realistic law enforcement and civilian roleplay." },
                 ].map(c => (
-                  <div key={c.title} className="rounded-xl border border-[#131f30] bg-[#070d16] px-6 py-7 transition-all hover:border-[#2f70ff]/40">
+                  <div key={c.title} className="rounded-xl border border-[#131f30] bg-[#070d16] px-5 py-6 transition-all hover:border-[#2f70ff]/40 sm:px-6 sm:py-7">
                     <c.icon className="h-6 w-6 text-[#4384ff]" strokeWidth={2.25} />
                     <h3 className="mt-4 text-sm font-black text-white">{c.title}</h3>
                     <p className="mt-2 text-xs leading-relaxed text-[#526179]">{c.body}</p>
@@ -665,15 +701,15 @@ const PublicView = () => {
             {/* Recent Announcements preview */}
             {announcements.length > 0 && (
               <section>
-                <div className="mb-5 flex items-center gap-3 sm:mb-6">
-                  <Megaphone className="h-4 w-4 text-[#4384ff]" />
-                  <h2 className="text-sm font-black uppercase tracking-[0.22em] text-white">Recent Announcements</h2>
+                <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 sm:mb-6">
+                  <Megaphone className="h-4 w-4 shrink-0 text-[#4384ff]" />
+                  <h2 className="min-w-0 text-sm font-black uppercase tracking-[0.14em] text-white sm:tracking-[0.22em]">Recent Announcements</h2>
                   <span className="rounded-full bg-[#0f1b28] px-2 py-0.5 text-[9px] font-black text-[#526179]">{announcements.length}</span>
-                  <div className="ml-3 h-px flex-1 bg-[#131f30]" />
+                  <div className="order-last h-px min-w-[2rem] flex-1 bg-[#131f30] sm:order-none sm:ml-3" />
                   <button
                     type="button"
                     onClick={() => setTab("announcements")}
-                    className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.15em] text-[#4384ff] transition-colors hover:text-white"
+                    className="ml-auto flex min-h-9 items-center gap-1 text-[10px] font-black uppercase tracking-[0.15em] text-[#4384ff] transition-colors hover:text-white sm:ml-0"
                   >
                     View all <ChevronLeft className="h-3 w-3 rotate-180" />
                   </button>
@@ -681,8 +717,8 @@ const PublicView = () => {
                 <div className="space-y-3">
                   {announcements.slice(0, 3).map(a => (
                     <div key={a.id} className="rounded-xl border border-[#131f30] bg-[#070d16] px-4 py-4 sm:px-6 sm:py-5">
-                      <div className="flex items-start justify-between gap-4">
-                        <h3 className="text-sm font-black text-white">{a.title}</h3>
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="min-w-0 break-words text-sm font-black text-white">{a.title}</h3>
                         <span className="shrink-0 text-[10px] text-[#3f5470]">{formatRelative(a.created_at)}</span>
                       </div>
                       <p className="mt-2 line-clamp-3 text-xs leading-relaxed whitespace-pre-wrap text-[#8392aa]">{a.message}</p>
@@ -710,15 +746,15 @@ const PublicView = () => {
             )}
 
             <section>
-              <div className="mb-5 flex items-center gap-3 sm:mb-6">
-                <ImageIcon className="h-4 w-4 text-[#4384ff]" />
-                <h2 className="text-sm font-black uppercase tracking-[0.22em] text-white">Gallery</h2>
+              <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 sm:mb-6">
+                <ImageIcon className="h-4 w-4 shrink-0 text-[#4384ff]" />
+                <h2 className="min-w-0 text-sm font-black uppercase tracking-[0.14em] text-white sm:tracking-[0.22em]">Gallery</h2>
                 <span className="rounded-full bg-[#0f1b28] px-2 py-0.5 text-[9px] font-black text-[#526179]">{gallery.length}</span>
-                <div className="ml-3 h-px flex-1 bg-[#131f30]" />
+                <div className="order-last h-px min-w-[2rem] flex-1 bg-[#131f30] sm:order-none sm:ml-3" />
                 <button
                   type="button"
                   onClick={() => setTab("gallery")}
-                  className="flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.15em] text-[#4384ff] transition-colors hover:text-white"
+                  className="ml-auto flex min-h-9 items-center gap-1 text-[10px] font-black uppercase tracking-[0.15em] text-[#4384ff] transition-colors hover:text-white sm:ml-0"
                 >
                   View all <ChevronLeft className="h-3 w-3 rotate-180" />
                 </button>
@@ -730,15 +766,10 @@ const PublicView = () => {
                 </div>
               ) : (
                 <div
-                  ref={galleryScrollerRef}
-                  className="home-gallery-scroller -mx-1 overflow-hidden px-1 pb-2"
-                  onMouseEnter={() => { galleryPausedRef.current = true; }}
-                  onMouseLeave={() => { galleryPausedRef.current = false; }}
+                  ref={setGalleryScrollerNode}
+                  className="home-gallery-scroller -mx-1 overflow-x-auto overscroll-x-contain px-1 pb-2"
                 >
-                  <div
-                    ref={setGalleryTrackNode}
-                    className="flex w-max will-change-transform"
-                  >
+                  <div className="flex w-max">
                     {Array.from({ length: galleryCopies }, (_, copy) => (
                       <div
                         key={copy}
@@ -751,7 +782,10 @@ const PublicView = () => {
                             key={`${copy}-${img.id}`}
                             type="button"
                             tabIndex={copy > 0 ? -1 : undefined}
-                            onClick={() => setLightbox(img)}
+                            onClick={() => {
+                              pauseGalleryAutoScroll();
+                              setLightbox(img);
+                            }}
                             className="group relative aspect-video w-[min(78vw,280px)] shrink-0 overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16] text-left transition-all hover:border-[#2f70ff]/50 hover:shadow-[0_0_30px_rgba(47,112,255,0.10)] sm:w-[300px]"
                           >
                             <img
@@ -935,7 +969,77 @@ const PublicView = () => {
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16]">
-                  <div className="overflow-x-auto">
+                  {/* Mobile / tablet card list */}
+                  <div className="divide-y divide-[#0f1b28] md:hidden">
+                    {visibleGroups.map(group => (
+                      <div key={group.key}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 bg-[#0a1525] px-4 py-3 text-left transition-colors hover:bg-[#0c1830]"
+                          onClick={() => toggleStaffGroup(group.key)}
+                        >
+                          {staffCollapsed[group.key]
+                            ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[#4384ff]" />
+                            : <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#4384ff]" />}
+                          <span className="min-w-0 flex-1 truncate text-xs font-black text-white">{group.label}</span>
+                          <span className="rounded-full bg-[#172235] px-2 py-0.5 text-[9px] font-black text-[#526179]">
+                            {group.members.length}
+                          </span>
+                        </button>
+                        {!staffCollapsed[group.key] && (
+                          group.members.length === 0 ? (
+                            <p className="px-4 py-3 text-[11px] text-[#3f5470]">No members in this title.</p>
+                          ) : (
+                            <ul className="space-y-0">
+                              {group.members.map(m => {
+                                const rankMeta = getRankMeta(m.staff_rank);
+                                const active = (m.status ?? "").toLowerCase() === "active";
+                                return (
+                                  <li key={m.id} className="border-t border-[#0f1b28] px-4 py-3.5">
+                                    <div className="flex items-start gap-3">
+                                      <StaffAvatar
+                                        name={m.discord_username || m.username}
+                                        discordId={m.discord_id}
+                                        avatarHash={m.avatar_hash}
+                                      />
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate text-xs font-black text-white">{m.username || "—"}</p>
+                                        {m.discord_username && (
+                                          <p className="truncate text-[10px] text-[#526179]">@{m.discord_username}</p>
+                                        )}
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                          <span
+                                            className="text-[10px] font-black"
+                                            style={{ color: rankMeta?.color_hex ?? "#a8b7cd" }}
+                                          >
+                                            {m.staff_rank || "—"}
+                                          </span>
+                                          <span className={`inline-flex items-center rounded px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] ${
+                                            active ? "bg-emerald-500 text-white" : "bg-[#1a2638] text-[#526179]"
+                                          }`}>
+                                            {m.status || "Active"}
+                                          </span>
+                                        </div>
+                                        <p className="mt-1.5 text-[10px] text-[#3f5470]">
+                                          Appointed {m.staff_appointed_date ? formatDate(m.staff_appointed_date) : "—"}
+                                        </p>
+                                        {m.discord_id && (
+                                          <p className="mt-0.5 break-all font-mono text-[10px] text-[#526179]">{m.discord_id}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop table */}
+                  <div className="hidden overflow-x-auto md:block">
                     <table className="w-full min-w-[720px] border-collapse text-left text-xs">
                       <thead>
                         <tr className="border-b border-[#131f30]">
@@ -1359,8 +1463,8 @@ const PublicView = () => {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-[#0f1b28] py-8 text-center">
-        <p className="text-[9px] font-black uppercase tracking-[0.3em] text-[#1e2e42]">
+      <footer className="border-t border-[#0f1b28] px-4 py-8 text-center">
+        <p className="text-[9px] font-black uppercase tracking-[0.16em] text-[#1e2e42] sm:tracking-[0.3em]">
           For roleplay use only  ·  Not affiliated with any real agency
         </p>
       </footer>
@@ -1378,15 +1482,15 @@ const PublicView = () => {
 
       {/* DPS Resources popup */}
       {resourcesOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-8">
-          <div className="relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#1b2738] bg-[#0d1422] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#131f30] px-5 py-4 sm:px-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#2f66ee]/25 bg-[#2f66ee]/10">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 px-3 py-4 sm:items-center sm:px-4 sm:py-8">
+          <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#1b2738] bg-[#0d1422] shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-[#131f30] px-4 py-4 sm:px-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#2f66ee]/25 bg-[#2f66ee]/10">
                   <BookOpen className="h-4 w-4 text-[#4384ff]" />
                 </div>
-                <div>
-                  <h3 className="text-sm font-black text-white">DPS Resources</h3>
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-black text-white">DPS Resources</h3>
                   <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#526179]">
                     Public department guides &amp; reference materials
                   </p>
@@ -1395,7 +1499,7 @@ const PublicView = () => {
               <button
                 type="button"
                 onClick={() => setResourcesOpen(false)}
-                className="rounded-full p-1.5 text-[#4a5568] transition-colors hover:bg-white/5 hover:text-white"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#4a5568] transition-colors hover:bg-white/5 hover:text-white"
                 aria-label="Close"
               >
                 <X className="h-4 w-4" />
@@ -1447,15 +1551,15 @@ const PublicView = () => {
 
       {/* DPH Resources popup */}
       {dphResourcesOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-8">
-          <div className="relative flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#1b2738] bg-[#0d1422] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#131f30] px-5 py-4 sm:px-6">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-[#ef4444]/25 bg-[#ef4444]/10">
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 px-3 py-4 sm:items-center sm:px-4 sm:py-8">
+          <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#1b2738] bg-[#0d1422] shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-[#131f30] px-4 py-4 sm:px-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-[#ef4444]/25 bg-[#ef4444]/10">
                   <BookOpen className="h-4 w-4 text-[#f87171]" />
                 </div>
-                <div>
-                  <h3 className="text-sm font-black text-white">DPH Resources</h3>
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-black text-white">DPH Resources</h3>
                   <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#526179]">
                     Public department guides &amp; reference materials
                   </p>
@@ -1464,7 +1568,7 @@ const PublicView = () => {
               <button
                 type="button"
                 onClick={() => setDphResourcesOpen(false)}
-                className="rounded-full p-1.5 text-[#4a5568] transition-colors hover:bg-white/5 hover:text-white"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[#4a5568] transition-colors hover:bg-white/5 hover:text-white"
                 aria-label="Close"
               >
                 <X className="h-4 w-4" />
@@ -1547,27 +1651,28 @@ const PublicView = () => {
       {/* Lightbox */}
       {lightbox && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-3 py-6 sm:px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/85 px-3 py-6 sm:px-4"
           onClick={() => setLightbox(null)}
         >
-          <div className="relative max-h-[90vh] max-w-4xl w-full" onClick={e => e.stopPropagation()}>
+          <div className="relative my-auto max-h-[90vh] w-full max-w-4xl overflow-y-auto" onClick={e => e.stopPropagation()}>
             <img
               src={lightbox.image_url}
               alt={lightbox.title || "Gallery image"}
-              className="max-h-[80vh] w-full rounded-xl object-contain shadow-2xl"
+              className="max-h-[min(80vh,720px)] w-full rounded-xl object-contain shadow-2xl"
             />
             {(lightbox.title || lightbox.caption) && (
-              <div className="mt-3 text-center">
-                {lightbox.title && <p className="text-sm font-black text-white">{lightbox.title}</p>}
-                {lightbox.caption && <p className="mt-1 text-xs text-[#526179]">{lightbox.caption}</p>}
+              <div className="mt-3 px-1 pb-2 text-center">
+                {lightbox.title && <p className="break-words text-sm font-black text-white">{lightbox.title}</p>}
+                {lightbox.caption && <p className="mt-1 break-words text-xs text-[#526179]">{lightbox.caption}</p>}
               </div>
             )}
             <button
               type="button"
               onClick={() => setLightbox(null)}
-              className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full border border-[#2a3a50] bg-[#070d16]/90 text-[#a8b7cd] hover:text-white"
+              aria-label="Close"
+              className="absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-full border border-[#2a3a50] bg-[#070d16]/90 text-[#a8b7cd] hover:text-white"
             >
-              âœ•
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>

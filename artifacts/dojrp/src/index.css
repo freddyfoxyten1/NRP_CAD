@@ -390,13 +390,26 @@
 .table-context-toolbar { animation: fadeIn 0.1s ease; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* Home tab Gallery scroller: JS drives translate3d; keep overflow clipped */
+/* Home tab Gallery: manual scrollbar + JS auto-scroll (pauses on interaction) */
 .home-gallery-scroller {
-  touch-action: pan-y;
+  touch-action: pan-x;
+  scrollbar-width: thin;
+  scrollbar-color: #1b2738 transparent;
+}
+.home-gallery-scroller::-webkit-scrollbar {
+  height: 6px;
+}
+.home-gallery-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+.home-gallery-scroller::-webkit-scrollbar-thumb {
+  background: #1b2738;
+  border-radius: 999px;
 }
 
 /* Index tab buttons: single-row sideways scroll with a thin bar */
 .tab-button-scroller {
+  touch-action: pan-x;
   scrollbar-width: thin;
   scrollbar-color: #1b2738 transparent;
 }
