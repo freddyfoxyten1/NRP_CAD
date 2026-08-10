@@ -278,7 +278,11 @@ const MemberPortalIndex = () => {
                       {
                         label: 'Account Status',
                         icon: BadgeCheck,
-                        value: portalData?.profile.status || '—',
+                        value: (() => {
+                          const status = portalData?.profile.status?.trim();
+                          if (!status) return '—';
+                          return status.charAt(0).toUpperCase() + status.slice(1);
+                        })(),
                         color: 'border-[#1b3320] text-[#3ecf8e]',
                       },
                       {
