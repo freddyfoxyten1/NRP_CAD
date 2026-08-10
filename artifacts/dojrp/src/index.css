@@ -390,23 +390,7 @@
 .table-context-toolbar { animation: fadeIn 0.1s ease; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* Home tab Gallery: continuous automatic side-scroll */
-@keyframes home-gallery-marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-.home-gallery-marquee {
-  animation-name: home-gallery-marquee;
-  animation-timing-function: linear;
-  animation-iteration-count: infinite;
-  will-change: transform;
-}
-.home-gallery-scroller:hover .home-gallery-marquee,
-.home-gallery-scroller:focus-within .home-gallery-marquee {
-  animation-play-state: paused;
-}
-@media (prefers-reduced-motion: reduce) {
-  .home-gallery-marquee {
-    animation: none;
-  }
+/* Home tab Gallery scroller: JS drives translate3d; keep overflow clipped */
+.home-gallery-scroller {
+  touch-action: pan-y;
 }
