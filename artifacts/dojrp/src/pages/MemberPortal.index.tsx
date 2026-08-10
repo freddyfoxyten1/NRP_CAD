@@ -4,6 +4,7 @@ import DojrpShield from '@/components/shared/DojrpShield';
 import { getCadSession } from '@/lib/cad-session';
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
 import { renderContentBlocks } from '@/components/shared/ContentBlocks';
+import { cadModeLabel } from '@/hooks/useCadStatus';
 import { MEMBER_PORTAL_NAV_ITEMS, useMemberPortal } from './member-portal-shared';
 
 function SectionHeading({ icon: Icon, title, count }: {
@@ -39,6 +40,7 @@ const MemberPortalIndex = () => {
     handleSignOut,
     handleAdminPortal,
     cadOnline,
+    cadMode,
     username,
     rank,
     role,
@@ -58,7 +60,7 @@ const MemberPortalIndex = () => {
         <div className={`flex items-center gap-2 rounded-full border px-3 py-1 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
           <span className={`text-[9px] font-black uppercase tracking-[0.34em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-            {cadOnline === false ? 'Terminal Offline' : 'Terminal Online'}
+            {cadOnline === null ? 'Terminal Online' : `Terminal ${cadModeLabel(cadMode)}`}
           </span>
         </div>
         <button
@@ -194,7 +196,7 @@ const MemberPortalIndex = () => {
               <div className={`flex items-center gap-2 rounded-full border px-4 py-2 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
                 <span className={`h-2 w-2 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
                 <span className={`text-[10px] font-black uppercase tracking-[0.34em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-                  {cadOnline === false ? 'Terminal Offline' : 'Terminal Online'}
+                  {cadOnline === null ? 'Terminal Online' : `Terminal ${cadModeLabel(cadMode)}`}
                 </span>
               </div>
             </div>

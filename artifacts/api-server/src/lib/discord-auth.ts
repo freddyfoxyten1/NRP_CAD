@@ -1,5 +1,6 @@
 import type { Request } from "express";
 import { pool } from "@workspace/db";
+import { denyMessageForMode, getCadMode, modeToOnline, type CadMode } from "./cad-mode";
 import { isSuperAdminDiscordId } from "./superadmin";
 
 export const COMMUNITY_GUILD_ID =
@@ -73,6 +74,7 @@ export type CadSessionPayload = {
   can_access_iab: boolean;
   can_access_system_logs: boolean;
   can_access_terms_privacy: boolean;
+  can_access_terminal_offline: boolean;
 };
 
 export function getRedirectUri(req: Request): string {
@@ -176,7 +178,8 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
             NULLIF(p.avatar_hash, '') AS avatar_hash,
             COALESCE(p.can_access_iab, false) AS can_access_iab,
             COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
-            COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy
+            COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
+            COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
      FROM cad_user_profiles p
      LEFT JOIN dps_users d ON d.profile_id = p.id
      WHERE p.id = $1
@@ -191,26 +194,32 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
     can_access_iab: Boolean(row.can_access_iab),
     can_access_system_logs: Boolean(row.can_access_system_logs),
     can_access_terms_privacy: Boolean(row.can_access_terms_privacy),
+    can_access_terminal_offline: Boolean(row.can_access_terminal_offline),
   };
 }
 
-const PRIVILEGED_ROLES = new Set([
-  "executive team",
-  "owner",
-  "executive",
-  "executive board",
-  "management",
-  "admin",
-]);
+function hasStaffAssignment(staffRole: string | null | undefined, staffRank: string | null | undefined): boolean {
+  return Boolean(staffRole?.trim() || staffRank?.trim());
+}
 
-export async function canSignInWhileCadOffline(profileId: number): Promise<boolean> {
+export async function canSignInForCadMode(profileId: number): Promise<{
+  allowed: boolean;
+  mode: CadMode;
+  error?: string;
+}> {
+  const mode = await getCadMode();
+  if (mode === "online") {
+    return { allowed: true, mode };
+  }
+
   const result = await pool.query<{
-    role: string;
     staff_role: string | null;
-    whitelisted: boolean | null;
+    staff_rank: string | null;
     discord_id: string | null;
+    can_access_terminal_offline: boolean | number | null;
   }>(
-    `SELECT role, staff_role, whitelisted, discord_id
+    `SELECT staff_role, staff_rank, discord_id,
+            COALESCE(can_access_terminal_offline, false) AS can_access_terminal_offline
      FROM cad_user_profiles
      WHERE id = $1
      LIMIT 1`,
@@ -219,34 +228,35 @@ export async function canSignInWhileCadOffline(profileId: number): Promise<boole
 
   const account = result.rows[0];
   if (!account) {
-    return false;
+    return { allowed: false, mode, error: denyMessageForMode(mode) };
   }
 
   if (isSuperAdminDiscordId(account.discord_id)) {
-    return true;
+    return { allowed: true, mode };
   }
 
-  const effectiveRole = (account.staff_role ?? account.role).toLowerCase();
-  if (PRIVILEGED_ROLES.has(effectiveRole)) {
-    return true;
+  if (mode === "members_locked") {
+    if (hasStaffAssignment(account.staff_role, account.staff_rank)) {
+      return { allowed: true, mode };
+    }
+    return { allowed: false, mode, error: denyMessageForMode(mode) };
   }
 
-  if (account.whitelisted) {
-    return true;
+  // lockdown
+  if (Boolean(account.can_access_terminal_offline)) {
+    return { allowed: true, mode };
   }
+  return { allowed: false, mode, error: denyMessageForMode(mode) };
+}
 
-  const status = await pool.query<{ value: string }>(
-    `SELECT value FROM cad_settings WHERE key = 'cad_online' LIMIT 1`,
-  );
-
-  return status.rows[0]?.value === "false" ? false : true;
+/** @deprecated Prefer canSignInForCadMode — kept for call-site compatibility. */
+export async function canSignInWhileCadOffline(profileId: number): Promise<boolean> {
+  const result = await canSignInForCadMode(profileId);
+  return result.allowed;
 }
 
 export async function isCadOnline(): Promise<boolean> {
-  const status = await pool.query<{ value: string }>(
-    `SELECT value FROM cad_settings WHERE key = 'cad_online' LIMIT 1`,
-  );
-  return status.rows[0]?.value !== "false";
+  return modeToOnline(await getCadMode());
 }
 
 export async function createCadAccountFromDiscord(input: {

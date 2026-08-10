@@ -2,164 +2,137 @@ import type { ContentBlock } from '@/components/shared/ContentBlocks';
 
 /** Built-in Terms of Service shown until an admin publishes a custom version. */
 export const DEFAULT_TERMS_SECTIONS: ContentBlock[] = [
-  { type: 'heading', text: '1. What this is' },
   {
     type: 'text',
-    body:
-      '"The portal" means this DOJRP CAD & Roster site — a private staff and community tool used to manage Discord and Emergency Response: Liberty County (ERLC) game servers (shift tracking, rosters, moderation records, and related staff work).',
+    body: 'Last updated: August 2026',
   },
-  { type: 'heading', text: '2. Who can use it' },
+  { type: 'heading', text: '1. What DOJ CAD is' },
   {
     type: 'text',
     body:
-      'Access is limited to members of the DOJRP Discord community and approved staff. You must sign in with Discord and belong to the DOJRP Discord server. Some areas require a staff role.',
+      '"DOJ CAD" (also called "the CAD") means this DOJ:RP Computer-Aided Dispatch and community website. It is operated by the DOJ:RP leadership team for the DOJ:RP Emergency Response: Liberty County (ER:LC) roleplay community.\n\nIt includes the public community site (announcements, gallery, departments, staff directory, events, store links, and news) and the signed-in CAD tools used by members and staff for roleplay records, department rosters, resources, and related community operations.',
   },
-  { type: 'heading', text: '3. Your account' },
+  { type: 'heading', text: '2. Roleplay only' },
   {
     type: 'text',
     body:
-      'You sign in with Discord. Optional Roblox linking may be available in settings where enabled.\n\n• Use only your own Discord account.\n• Keep your Discord account secure.\n• Use the portal only for legitimate community and staff duties.',
+      'DOJ CAD and DOJ:RP are for entertainment and roleplay only. Nothing in this system represents a real government agency, law enforcement department, or official public service. Do not treat CAD records, callsigns, or department content as real-world legal or emergency information.',
   },
-  { type: 'heading', text: '4. Acceptable use' },
+  { type: 'heading', text: '3. Who can use it' },
   {
     type: 'text',
     body:
-      'Do not misuse the portal, attempt unauthorized access, scrape data, abuse APIs, or disrupt the service for others.',
+      'Anyone may view public pages on the community site.\n\nSigned-in CAD access is limited to members of the DOJ:RP Discord server who sign in with Discord. Some areas (staff tools, admin tools, department tools, and similar) require approved ranks or staff permissions. Leadership may grant, change, or revoke access at any time.',
   },
-  { type: 'heading', text: '5. Moderation records' },
+  { type: 'heading', text: '4. Your account' },
   {
     type: 'text',
     body:
-      'Actions taken through the portal (such as punishments and administrative commands) may be recorded for accountability and review by leadership.',
+      'You sign in with Discord OAuth. You must use your own Discord account and remain a member of the DOJ:RP Discord server where required.\n\n• Keep your Discord account secure.\n• Do not share your session or attempt to use another person\'s account.\n• Use DOJ CAD only for legitimate DOJ:RP community and staff purposes.',
   },
-  { type: 'heading', text: '6. Support tickets and the Helper Bot' },
+  { type: 'heading', text: '5. Acceptable use' },
   {
     type: 'text',
     body:
-      'If you use Discord ticket applications or the Helper Bot, ticket content and transcripts may be stored and reviewed by staff for support and moderation. See our Privacy Policy for details.',
+      'You agree not to misuse DOJ CAD. That includes, without limitation:\n\n• Attempting unauthorized access to staff, admin, or other users\' data\n• Scraping, abusing APIs, or disrupting the service\n• Uploading unlawful, harmful, or clearly abusive content\n• Using the CAD to harass others outside normal roleplay boundaries\n• Circumventing rank, department, or permission controls',
+  },
+  { type: 'heading', text: '6. Community content and records' },
+  {
+    type: 'text',
+    body:
+      'Content you create or submit in DOJ CAD (for example civilian characters, vehicle records, reports, gallery uploads by authorized staff, announcements, or department resources) may be stored and reviewed by authorized staff and leadership for roleplay operations, moderation, and accountability.\n\nPublic pages may display community-facing content such as announcements, gallery images, events, staff listings, and store information.',
   },
   { type: 'heading', text: '7. Availability' },
   {
     type: 'text',
     body:
-      'The portal is provided "as is" and free of charge. We do not guarantee uninterrupted or error-free service.',
+      'DOJ CAD is provided free of charge for the DOJ:RP community on an "as is" and "as available" basis. We do not guarantee uninterrupted, error-free, or permanent availability. Features may change as the community and systems evolve.',
   },
   { type: 'heading', text: '8. Third parties' },
   {
     type: 'text',
     body:
-      'The portal connects to Discord and may use Roblox or ERLC-related APIs. We are not affiliated with Discord Inc., Roblox Corporation, or Police Roleplay Community.',
+      'DOJ CAD uses Discord for sign-in and community membership checks, and may display live information from ER:LC / related game or Discord integrations where configured. Optional third-party store links may also appear.\n\nDOJ:RP and DOJ CAD are not affiliated with, endorsed by, or officially connected to Discord Inc., Roblox Corporation, Police Roleplay Community, or any real-world government or law enforcement agency.',
   },
   { type: 'heading', text: '9. Changes to these terms' },
   {
     type: 'text',
     body:
-      'We may update these terms from time to time. Continued use of the portal after changes means you accept the updated terms.',
+      'Leadership may update these Terms of Service from time to time. The current default or published version will be shown in DOJ CAD. Continued use of DOJ CAD after updates means you accept the revised terms.',
   },
   { type: 'heading', text: '10. Contact' },
   {
     type: 'text',
-    body: 'Questions? Reach the leadership team through the DOJRP Discord server.',
+    body:
+      'Questions about these terms should be raised with DOJ:RP leadership through the official DOJ:RP Discord server.',
   },
 ];
 
 /** Built-in Privacy Policy shown until an admin publishes a custom version. */
 export const DEFAULT_PRIVACY_SECTIONS: ContentBlock[] = [
-  { type: 'bold_heading', text: 'Staff Portal' },
+  {
+    type: 'text',
+    body: 'Last updated: August 2026',
+  },
   { type: 'heading', text: '1. Who we are' },
   {
     type: 'text',
     body:
-      'This CAD & Roster system is used by departments to publish and manage their policies, events, restrictions, and other departmental information.\n\nIt is also available for the wider community, allowing members to view public events, manage their businesses, and access other community resources.',
+      'This Privacy Policy explains how DOJ CAD (the DOJ:RP CAD & community website) handles information when you visit the public site or sign in to DOJ CAD.\n\nDOJ CAD is operated by the DOJ:RP community leadership for roleplay and community management. It is not a real government or commercial advertising platform.',
   },
-  { type: 'heading', text: '2. What we collect' },
+  { type: 'heading', text: '2. Information we collect' },
   {
     type: 'text',
     body:
-      'When you sign in, we may store:\n\n• Discord account details — ID, username, display name, avatar, and roles.\n• Roblox account details — ID and username (if you link Roblox).\n• Shift / roster records — such as start and end times or department assignments.\n• Moderation records — punishments or actions issued through the portal.\n• A session cookie — to keep you signed in.',
+      'Depending on how you use DOJ CAD, we may store:\n\n• Discord account details from sign-in — Discord ID, username, display name, avatar, and role information used for access control\n• Session information — a local session so you can stay signed in for a limited time\n• CAD / roleplay records you or staff create — such as civilian characters, vehicles, citations, arrests, and similar roleplay data\n• Staff and department data — roster membership, ranks, callsigns, resources, and related CAD content where applicable\n• Community content — announcements, gallery images, events, press items, store product cards, and similar public or staff-managed content\n• Basic technical logs needed to operate and secure the service (for example error or access logs)',
   },
-  { type: 'heading', text: '3. What we don\'t do' },
+  { type: 'heading', text: '3. What we do not do' },
   {
     type: 'text',
     body:
-      'We do not sell your data to advertisers, do not use tracking or analytics cookies for ads, and do not store your Discord password (sign-in happens on Discord\'s official site).',
+      'We do not sell your personal data to advertisers.\n\nWe do not use advertising trackers or ad cookies on DOJ CAD.\n\nWe do not receive or store your Discord password — Discord handles authentication on Discord\'s own systems.',
   },
-  { type: 'heading', text: '4. How we use it' },
+  { type: 'heading', text: '4. How we use information' },
   {
     type: 'text',
     body:
-      'We use this information to run the portal, confirm guild and staff access, manage rosters and shifts, and connect your Discord identity to CAD records.',
+      'We use this information to:\n\n• Run the public DOJ:RP community website and signed-in CAD tools\n• Confirm Discord membership and staff or department permissions\n• Support roleplay operations, rosters, resources, and moderation accountability\n• Publish community-facing updates (such as announcements, events, and gallery content) when authorized\n• Maintain and improve the reliability and security of DOJ CAD',
   },
-  { type: 'heading', text: '5. Where it\'s stored' },
+  { type: 'heading', text: '5. Where information is stored' },
   {
     type: 'text',
     body:
-      'Data is stored in a private database used by this portal and accessible only to the portal and its maintainers.',
+      'DOJ CAD data is stored in the private database and hosting environment used for this project. Access is limited to the DOJ CAD systems and authorized maintainers / leadership who need it to operate the community tools.',
   },
   { type: 'heading', text: '6. How long we keep it' },
   {
     type: 'text',
     body:
-      'Records are kept for staff and community accountability. Linked Roblox details stay until unlinked. Members who leave may ask leadership about data removal.',
+      'We keep information for as long as it is needed for community operations, roleplay continuity, moderation accountability, or technical maintenance.\n\nIf you leave the DOJ:RP Discord community, you may contact leadership to ask about removing or limiting personal account-linked data where that is reasonably possible. Some roleplay or moderation history may be retained for accountability.',
   },
   { type: 'heading', text: '7. Your choices' },
   {
     type: 'text',
     body:
-      'Linking Roblox (where available) is optional. You can ask the leadership team to see or delete your data where reasonable.',
+      'You can stop using signed-in features by signing out and not returning through Discord login.\n\nYou may ask DOJ:RP leadership, via the official Discord server, to review or remove personal data associated with your Discord account where reasonable and practical.',
   },
   { type: 'heading', text: '8. Third parties' },
   {
     type: 'text',
     body:
-      'We use Discord\'s sign-in system and may use Roblox or ERLC game server APIs. Their own privacy policies apply to those services.',
+      'Discord provides authentication and community membership. Live player or Discord stats, and optional store links, may rely on third-party services when configured.\n\nThose services have their own privacy policies. DOJ CAD only uses them as needed to run the community site and CAD.',
   },
   { type: 'heading', text: '9. Changes to this policy' },
   {
     type: 'text',
-    body: 'Meaningful changes will be announced in the DOJRP Discord server.',
+    body:
+      'We may update this Privacy Policy as DOJ CAD features change. Meaningful updates will be reflected in DOJ CAD and may also be announced in the DOJ:RP Discord server.',
   },
   { type: 'heading', text: '10. Contact' },
   {
     type: 'text',
-    body: 'Questions? Contact the leadership team in the DOJRP Discord server.',
-  },
-  { type: 'divider' },
-  { type: 'bold_heading', text: 'The Helper Bot / Ticketing System' },
-  { type: 'heading', text: '1. What the Helper Bot does' },
-  {
-    type: 'text',
     body:
-      'The Helper Bot / ticketing system helps members open support tickets in Discord and helps staff handle those tickets.',
-  },
-  { type: 'heading', text: '2. What we collect' },
-  {
-    type: 'text',
-    body:
-      'Ticket messages, attachments, usernames, Discord IDs, and transcripts may be stored so staff can review and resolve requests.',
-  },
-  { type: 'heading', text: '3. How we use it' },
-  {
-    type: 'text',
-    body:
-      'Ticket data is used only for support, moderation follow-up, and internal accountability — not for advertising.',
-  },
-  { type: 'heading', text: '4. Who can see it' },
-  {
-    type: 'text',
-    body:
-      'Authorized staff and leadership may review tickets and transcripts. Do not share sensitive personal information you would not want staff to see.',
-  },
-  { type: 'heading', text: '5. Retention' },
-  {
-    type: 'text',
-    body:
-      'Transcripts may be kept for a period needed for accountability and then removed or archived according to leadership policy.',
-  },
-  { type: 'heading', text: '6. Contact' },
-  {
-    type: 'text',
-    body: 'Questions about tickets or the Helper Bot can be raised with leadership in Discord.',
+      'Privacy questions should be directed to DOJ:RP leadership through the official DOJ:RP Discord server.',
   },
 ];
 

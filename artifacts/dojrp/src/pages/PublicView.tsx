@@ -429,6 +429,16 @@ const PublicView = () => {
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
+  // Gallery lightbox: Escape closes (no close control overlaid on the photo)
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightbox(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightbox]);
+
   useEffect(() => {
     void fetchJsonArray<Announcement>("/api/announcements").then(setAnnouncements);
     void fetchJsonArray<GalleryImage>("/api/public/gallery").then(setGallery);
@@ -542,7 +552,7 @@ const PublicView = () => {
       <div className="h-px bg-[#1b2738]" />
 
       {/* Header */}
-      <header className="sticky top-0 z-30 h-14 border-b border-[#131f30] bg-[#02060b]/90 backdrop-blur-md">
+      <header className="sticky top-0 z-30 h-14 border-b border-[#131f30] bg-[#02060b]">
         <div className="mx-auto flex h-full max-w-6xl items-center gap-3 px-4 sm:gap-4 sm:px-8">
           <div className="flex min-w-0 items-center gap-2.5">
             <img src={`${import.meta.env.BASE_URL}dojrp-shield.png`} alt="" className="h-7 w-7 shrink-0" />
@@ -551,15 +561,15 @@ const PublicView = () => {
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {/* Live ERLC badge */}
-            <div className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 sm:px-3 ${
+            <div className={`flex h-9 items-center gap-1.5 rounded-full border px-2.5 sm:px-3 ${
               statsLoading ? "border-[#1b2738] bg-[#070d16]" : "border-[#173053] bg-[#071120]"
             }`}>
               <span className={`h-1.5 w-1.5 rounded-full ${statsLoading ? "bg-[#2a3a50]" : "animate-pulse bg-[#3ecf8e]"}`} />
-              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-[#4384ff]">
+              <span className="text-[9px] font-black uppercase tracking-[0.12em] text-[#4384ff] tabular-nums sm:tracking-[0.2em]">
                 {statsLoading
-                  ? " - "
+                  ? "…"
                   : <>
-                      {stats?.erlc_players ?? 0}/{stats?.erlc_max_players && stats.erlc_max_players > 0 ? stats.erlc_max_players : " - "}
+                      {stats?.erlc_players ?? 0}/{stats?.erlc_max_players && stats.erlc_max_players > 0 ? stats.erlc_max_players : "—"}
                       <span className="hidden sm:inline"> In-Game</span>
                     </>
                 }
@@ -568,7 +578,7 @@ const PublicView = () => {
             <button
               type="button"
               onClick={handleSignIn}
-              className="min-h-10 rounded-full px-3.5 py-2 text-xs font-bold text-[#526179] transition-colors hover:bg-white/5 hover:text-white"
+              className="inline-flex h-9 items-center rounded-full px-3.5 text-xs font-bold text-[#526179] transition-colors hover:bg-white/5 hover:text-white"
             >
               Sign in
             </button>
@@ -622,43 +632,45 @@ const PublicView = () => {
       </section>
 
       {/* Tab bar */}
-      <div className="sticky top-14 z-20 border-b border-[#0f1b28] bg-[#02060b]/95 backdrop-blur-md">
-        <div
-          ref={tabScrollRef}
-          className="tab-button-scroller overflow-x-auto overscroll-x-contain"
-        >
-          <div className="mx-auto flex w-max min-w-full max-w-6xl px-4 sm:px-8">
-            {([
-              { id: "home",          label: "Home",          shortLabel: "Home",    icon: Shield },
-              { id: "departments",   label: "Departments",   shortLabel: "Depts",   icon: Building2 },
-              { id: "staff",         label: "Staff Team",    shortLabel: "Staff",   icon: Users },
-              { id: "events",        label: "Public Events", shortLabel: "Events",  icon: CalendarDays },
-              { id: "announcements", label: "Announcements", shortLabel: "News",    icon: Megaphone },
-              { id: "gallery",       label: "Gallery",       shortLabel: "Gallery", icon: ImageIcon },
-              { id: "store",         label: "Server Store",  shortLabel: "Store",   icon: ShoppingBag },
-              { id: "press",         label: "Press & News",  shortLabel: "Press",   icon: Newspaper },
-            ] as { id: Tab; label: string; shortLabel: string; icon: React.ElementType }[]).map(t => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setTab(t.id)}
-                className={`flex min-h-11 shrink-0 items-center gap-1.5 border-b-2 px-3 py-3 text-[10px] font-black uppercase tracking-[0.12em] transition-colors sm:gap-2 sm:px-3.5 sm:py-3.5 sm:text-[11px] sm:tracking-[0.16em] ${
+      <div className="sticky top-14 z-20 border-b border-[#0f1b28] bg-[#02060b]">
+        <div className="mx-auto max-w-6xl">
+          <div
+            ref={tabScrollRef}
+            className="tab-button-scroller overflow-x-auto overscroll-x-contain px-4 sm:px-8"
+          >
+            <div className="flex w-max min-w-full">
+              {([
+                { id: "home",          label: "Home",          shortLabel: "Home",    icon: Shield },
+                { id: "departments",   label: "Departments",   shortLabel: "Depts",   icon: Building2 },
+                { id: "staff",         label: "Staff Team",    shortLabel: "Staff",   icon: Users },
+                { id: "events",        label: "Public Events", shortLabel: "Events",  icon: CalendarDays },
+                { id: "announcements", label: "Announcements", shortLabel: "News",    icon: Megaphone },
+                { id: "gallery",       label: "Gallery",       shortLabel: "Gallery", icon: ImageIcon },
+                { id: "store",         label: "Server Store",  shortLabel: "Store",   icon: ShoppingBag },
+                { id: "press",         label: "Press & News",  shortLabel: "Press",   icon: Newspaper },
+              ] as { id: Tab; label: string; shortLabel: string; icon: React.ElementType }[]).map(t => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setTab(t.id)}
+                className={`flex min-h-11 shrink-0 items-center gap-1.5 px-3 py-3 text-[10px] font-black uppercase tracking-[0.12em] transition-colors sm:gap-2 sm:px-3.5 sm:py-3.5 sm:text-[11px] sm:tracking-[0.16em] ${
                   tab === t.id
-                    ? "border-[#4384ff] text-white"
-                    : "border-transparent text-[#526179] hover:text-[#8392aa]"
+                    ? "text-white shadow-[inset_0_-2px_0_0_#4384ff]"
+                    : "text-[#526179] hover:text-[#8392aa]"
                 }`}
-              >
-                <t.icon className="h-3.5 w-3.5 shrink-0" />
-                <span className="md:hidden">{t.shortLabel}</span>
-                <span className="hidden md:inline">{t.label}</span>
-                {t.id === "announcements" && announcements.length > 0 && (
-                  <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{announcements.length}</span>
-                )}
-                {t.id === "gallery" && gallery.length > 0 && (
-                  <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{gallery.length}</span>
-                )}
-              </button>
-            ))}
+                >
+                  <t.icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="md:hidden">{t.shortLabel}</span>
+                  <span className="hidden md:inline">{t.label}</span>
+                  {t.id === "announcements" && announcements.length > 0 && (
+                    <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{announcements.length}</span>
+                  )}
+                  {t.id === "gallery" && gallery.length > 0 && (
+                    <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{gallery.length}</span>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -1648,12 +1660,20 @@ const PublicView = () => {
         </div>
       )}
 
-      {/* Lightbox */}
+      {/* Lightbox — close via backdrop / Escape; no overlay on the photo */}
       {lightbox && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/85 px-3 py-6 sm:px-4"
           onClick={() => setLightbox(null)}
         >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            aria-label="Close"
+            className="fixed right-3 top-3 z-[51] flex h-10 w-10 items-center justify-center rounded-full border border-[#2a3a50] bg-[#070d16]/90 text-[#a8b7cd] hover:text-white sm:right-5 sm:top-5"
+          >
+            <X className="h-4 w-4" />
+          </button>
           <div className="relative my-auto max-h-[90vh] w-full max-w-4xl overflow-y-auto" onClick={e => e.stopPropagation()}>
             <img
               src={lightbox.image_url}
@@ -1666,14 +1686,6 @@ const PublicView = () => {
                 {lightbox.caption && <p className="mt-1 break-words text-xs text-[#526179]">{lightbox.caption}</p>}
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => setLightbox(null)}
-              aria-label="Close"
-              className="absolute right-2 top-2 flex h-10 w-10 items-center justify-center rounded-full border border-[#2a3a50] bg-[#070d16]/90 text-[#a8b7cd] hover:text-white"
-            >
-              <X className="h-4 w-4" />
-            </button>
           </div>
         </div>
       )}

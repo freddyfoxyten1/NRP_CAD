@@ -14,7 +14,7 @@ import PhonePanel from '@/components/overlays/PhonePanel';
 import IncomingCallOverlay, { type IncomingCall } from '@/components/overlays/IncomingCallOverlay';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
 import { isSuperAdminSession } from '@/lib/superadmin';
-import { useCadStatus } from '@/hooks/useCadStatus';
+import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -600,7 +600,7 @@ const AddMemberModal = ({
 // ── Main page ──────────────────────────────────────────────────────────────────
 const DepartmentOfCommunications = () => {
   const navigate = useNavigate();
-  const cadOnline = useCadStatus();
+  const { online: cadOnline, mode: cadMode } = useCadStatus();
 
   const [session,      setSession]      = useState<CadSession | null>(null);
   const [isLoading,    setIsLoading]    = useState(true);
@@ -1116,7 +1116,7 @@ const DepartmentOfCommunications = () => {
         <div className={`flex items-center gap-2 rounded-full border px-3 py-1 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
           <span className={`text-[9px] font-black uppercase tracking-[0.34em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-            {cadOnline === false ? 'Offline' : 'Online'}
+            {cadOnline === null ? 'Online' : cadModeLabel(cadMode)}
           </span>
         </div>
         <button type="button" onClick={handleSignOut} disabled={isSigningOut}
@@ -1203,7 +1203,7 @@ const DepartmentOfCommunications = () => {
               <div className={`flex items-center gap-2 rounded-full border px-4 py-2 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
                 <span className={`h-2 w-2 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
                 <span className={`text-[10px] font-black uppercase tracking-[0.34em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-                  {cadOnline === false ? 'Terminal Offline' : 'Terminal Online'}
+                  {cadOnline === null ? 'Terminal Online' : `Terminal ${cadModeLabel(cadMode)}`}
                 </span>
               </div>
             </div>

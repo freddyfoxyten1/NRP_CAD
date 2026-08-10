@@ -34,6 +34,8 @@ export type CadSession = {
   can_access_system_logs?: boolean;
   /** Admin Portal — Terms of Service & Privacy Policy tab */
   can_access_terms_privacy?: boolean;
+  /** Sign-in during Terminal lockdown (staff roster grant) */
+  can_access_terminal_offline?: boolean;
   /** ISO timestamp when this local session expires (set on Discord login). */
   expires_at?: string;
 };
