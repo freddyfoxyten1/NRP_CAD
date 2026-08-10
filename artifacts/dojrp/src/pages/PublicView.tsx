@@ -547,7 +547,7 @@ const PublicView = () => {
             { id: "staff",         label: "Staff Team",    shortLabel: "Staff",   icon: Users },
             { id: "events",        label: "Public Events", shortLabel: "Events",  icon: CalendarDays },
             { id: "announcements", label: "Announcements", shortLabel: "News",    icon: Megaphone },
-            { id: "gallery",       label: "Gallery",       shortLabel: "Gallery", icon: ImageIcon },
+            { id: "gallery",       label: "In-game Gallery", shortLabel: "In-game", icon: ImageIcon },
             { id: "store",         label: "Server Store",  shortLabel: "Store",   icon: ShoppingBag },
             { id: "press",         label: "Press & News",  shortLabel: "Press",   icon: Newspaper },
           ] as { id: Tab; label: string; shortLabel: string; icon: React.ElementType }[]).map(t => (
@@ -660,7 +660,7 @@ const PublicView = () => {
             <section>
               <div className="mb-5 flex items-center gap-3 sm:mb-6">
                 <ImageIcon className="h-4 w-4 text-[#4384ff]" />
-                <h2 className="text-sm font-black uppercase tracking-[0.22em] text-white">Gallery</h2>
+                <h2 className="text-sm font-black uppercase tracking-[0.22em] text-white">In-game Gallery</h2>
                 <span className="rounded-full bg-[#0f1b28] px-2 py-0.5 text-[9px] font-black text-[#526179]">{gallery.length}</span>
                 <div className="ml-3 h-px flex-1 bg-[#131f30]" />
                 <button
@@ -761,7 +761,7 @@ const PublicView = () => {
         {/* -- Gallery tab ---- */}
         {tab === "gallery" && (
           <section>
-            <SectionHeading icon={ImageIcon} title="Gallery" count={gallery.length} />
+            <SectionHeading icon={ImageIcon} title="In-game Gallery" count={gallery.length} />
             {gallery.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-xl border border-[#0f1b28] py-12 text-center">
                 <ImageIcon className="h-7 w-7 text-[#1e2e42]" />
