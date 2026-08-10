@@ -47,7 +47,8 @@ function findWorkspaceRoot(startDir: string): string {
   let dir = resolve(startDir);
   for (;;) {
     if (
-      existsSync(join(dir, "pnpm-workspace.yaml")) ||
+      existsSync(join(dir, "package.json")) ||
+      existsSync(join(dir, "bun.lock")) ||
       existsSync(join(dir, "cad-database"))
     ) {
       return dir;
