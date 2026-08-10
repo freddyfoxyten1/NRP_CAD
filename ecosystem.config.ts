@@ -1,0 +1,39 @@
+/**
+ * BM2 (Bun Process Manager) ecosystem config for the DOJCAD API server.
+ *
+ * Usage:
+ *   bm2 start ecosystem.config.ts
+ *   bm2 save && bm2 startup install     # persist + auto-start on boot
+ *   bm2 logs dojcad-api --lines 100
+ *   bm2 restart dojcad-api
+ */
+export default {
+  apps: [
+    {
+      name: "dojcad-api",
+      // Bun runs the bundled ESM output directly. bootstrap-env.ts inside the
+      // bundle walks up to the repo root and loads .env automatically.
+      script: "./artifacts/api-server/dist/index.mjs",
+      // bm2 normally uses bun; set explicitly to be safe.
+      interpreter: "bun",
+      cwd: ".",
+      // Fork mode, single instance. The API holds an in-process SQLite pool
+      // (or Postgres pool) — clustering would split state, so keep it at 1.
+      exec_mode: "fork",
+      instances: 1,
+      // Restart if it exceeds ~500MB or crashes repeatedly.
+      max_memory_restart: "500M",
+      max_restarts: 10,
+      env: {
+        NODE_ENV: "production",
+        // Port the API listens on. nginx proxies /api here.
+        API_PORT: "8080",
+        // Frontend port is unused in production (nginx serves static files),
+        // but Vite config reads it — keep it consistent.
+        WEB_PORT: "5173",
+      },
+      // Heartbeat/health check — the API exposes /api/healthz.
+      health_check_url: "http://127.0.0.1:8080/api/healthz",
+    },
+  ],
+};

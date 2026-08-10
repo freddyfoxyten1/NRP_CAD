@@ -20,7 +20,7 @@ app.listen(port, (err) => {
     if (code === "EADDRINUSE") {
       logger.error(
         { err, port },
-        `Port ${port} is already in use. Stop the other API process (or free the port), then run pnpm dev again.`,
+        `Port ${port} is already in use. Stop the other API process (or free the port), then run bun dev again.`,
       );
     } else {
       logger.error({ err }, "Error listening on port");

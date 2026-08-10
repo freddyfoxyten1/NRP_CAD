@@ -2,8 +2,9 @@
 
 const userAgent = process.env.npm_config_user_agent ?? '';
 
-if (!userAgent.startsWith('pnpm/')) {
-  console.error('Use pnpm instead');
+// Allow both bun and pnpm to install. Bun is the primary package manager now.
+if (!/^(bun|pnpm)\//.test(userAgent)) {
+  console.error(`Unsupported package manager. Use bun or pnpm. (got: ${userAgent})`);
   process.exit(1);
 }
 

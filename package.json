@@ -2,16 +2,21 @@
   "name": "workspace",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {
-    "preinstall": "node scripts/preinstall.mjs",
-    "dev": "pnpm -r --parallel --filter @workspace/dojrp --filter @workspace/api-server run dev",
-    "dev:web": "pnpm --filter @workspace/dojrp run dev",
-    "dev:api": "pnpm --filter @workspace/api-server run dev",
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
-  },
   "private": true,
+  "workspaces": [
+    "artifacts/*",
+    "lib/*",
+    "lib/integrations/*",
+    "scripts"
+  ],
+  "scripts": {
+    "dev": "bun --parallel --filter @workspace/dojrp --filter @workspace/api-server run dev",
+    "dev:web": "bun --filter @workspace/dojrp run dev",
+    "dev:api": "bun --filter @workspace/api-server run dev",
+    "build": "bun --filter @workspace/api-server --filter @workspace/dojrp run build",
+    "typecheck:libs": "bunx tsc --build",
+    "typecheck": "bun run typecheck:libs && bun --filter '*' --if-present run typecheck"
+  },
   "dependencies": {
     "@replit/connectors-sdk": "^0.4.1"
   },
