@@ -1,28 +1,23 @@
 /**
- * BM2 (Bun Process Manager) ecosystem config for the DOJCAD API server.
+ * BM2 ecosystem config for the DOJCAD API server (CJS — maximally compatible).
  *
  * IMPORTANT: Run `bun run build` FIRST to generate the API bundle:
  *   bun install && bun run build
  *
- * NOTE: This config uses ABSOLUTE paths (via import.meta.dir — the directory
- * of THIS config file) so that bm2's daemon can find the bundle regardless of
- * its own working directory. bm2's daemon does NOT inherit your shell's cwd,
- * and it validates the `script` path against ITS OWN cwd — so relative paths
- * like "./artifacts/..." fail with "Script not found".
+ * This is a CommonJS config so `__dirname` (the repo root, where this file
+ * lives) is always available — no reliance on ESM `import.meta` or cwd.
  *
  * Usage:
- *   bm2 start ecosystem.config.ts
- *   bm2 save && bm2 startup install     # persist + auto-start on boot
- *   bm2 logs dojcad-api --lines 100
- *   bm2 restart dojcad-api
+ *   bm2 start ecosystem.config.js
+ *   bm2 save && bm2 startup install
  */
-import path from "node:path";
+const path = require("node:path");
 
-// import.meta.dir = the directory this config file lives in = the repo root.
+// __dirname = the directory this config file lives in = the repo root.
 // This is ALWAYS correct, no matter what cwd bm2's daemon uses.
-const repoRoot = import.meta.dir;
+const repoRoot = __dirname;
 
-export default {
+module.exports = {
   apps: [
     {
       name: "dojcad-api",
