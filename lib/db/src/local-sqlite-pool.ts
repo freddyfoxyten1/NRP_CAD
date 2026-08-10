@@ -1,7 +1,10 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+// Bun's built-in SQLite module — same API as node:sqlite (DatabaseSync,
+// prepare/all/run/exec/close) but works under the bun runtime. The project
+// runs exclusively on bun + bm2 (no node), so we use bun:sqlite.
+import { DatabaseSync } from "bun:sqlite";
 import type pg from "pg";
 
 type QueryResult<T = Record<string, unknown>> = {

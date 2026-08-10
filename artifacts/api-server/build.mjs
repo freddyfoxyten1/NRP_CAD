@@ -47,6 +47,7 @@ async function buildAll() {
       "isolated-vm",
       "lightningcss",
       "pg-native",
+      "bun:sqlite",
       "node:sqlite",
       "oracledb",
       "mongodb-client-encryption",
