@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-// Bun's built-in SQLite module — same API as node:sqlite (DatabaseSync,
-// prepare/all/run/exec/close) but works under the bun runtime. The project
-// runs exclusively on bun + bm2 (no node), so we use bun:sqlite.
-import { DatabaseSync } from "bun:sqlite";
+// Bun's built-in SQLite module. bun:sqlite exports the class as `Database`
+// (not `DatabaseSync` like node:sqlite). It has the same prepare/all/run/exec
+// API. The project runs exclusively on bun + bm2 (no node), so we use
+// bun:sqlite's `Database` class.
+import { Database } from "bun:sqlite";
 import type pg from "pg";
 
 type QueryResult<T = Record<string, unknown>> = {
@@ -205,7 +206,7 @@ function ensureAutoIncrement(sql: string): string {
   );
 }
 
-function bootstrapSchema(db: DatabaseSync): void {
+function bootstrapSchema(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS cad_user_profiles (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -907,7 +908,7 @@ export function createLocalSqlitePool(): pg.Pool {
   mkdirSync(dataDir, { recursive: true });
   const dbPath = join(dataDir, "dojcad.sqlite");
 
-  const db = new DatabaseSync(dbPath);
+  const db = new Database(dbPath);
   db.exec("PRAGMA foreign_keys = ON;");
   db.exec("PRAGMA journal_mode = WAL;");
   bootstrapSchema(db);
