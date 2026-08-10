@@ -179,7 +179,8 @@ The API will now auto-start on boot via the bm2 daemon.
 
 ## 7. Configure nginx
 
-Copy the included site config:
+Copy the included site config (it serves on port 80 immediately — no TLS
+needed to get started):
 
 ```bash
 sudo cp deploy/nginx/dojcad.conf /etc/nginx/sites-available/dojcad.conf
@@ -193,7 +194,15 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
+> **Important**: the config's `root` points to `/root/DOJCAD/artifacts/dojrp/dist/public`.
+> If you cloned the repo elsewhere, update that path in the config.
+
 At this point `http://cad.dojrblx.com` should show the CAD (API proxied).
+Verify:
+```bash
+curl http://cad.dojrblx.com/api/healthz   # → {"status":"ok"}
+curl -sI http://cad.dojrblx.com/ | head -3  # → 200 text/html
+```
 
 ---
 
