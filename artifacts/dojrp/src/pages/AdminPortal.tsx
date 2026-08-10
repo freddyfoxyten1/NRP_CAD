@@ -741,6 +741,10 @@ const AdminPortal = () => {
   const [galleryCredit,     setGalleryCredit]     = useState('');
   const [galleryDeleteId,   setGalleryDeleteId]   = useState<number | null>(null);
   const [galleryDeletingId, setGalleryDeletingId] = useState<number | null>(null);
+  const [galleryEditId,     setGalleryEditId]     = useState<number | null>(null);
+  const [galleryEditTitle,  setGalleryEditTitle]  = useState('');
+  const [galleryEditCredit, setGalleryEditCredit] = useState('');
+  const [gallerySavingId,   setGallerySavingId]   = useState<number | null>(null);
   const [galleryDragIdx,    setGalleryDragIdx]    = useState<number | null>(null);
   const [galleryDragOver,   setGalleryDragOver]   = useState<number | null>(null);
   const [gallerySavingOrder,setGallerySavingOrder]= useState(false);
@@ -1150,11 +1154,57 @@ const AdminPortal = () => {
       });
       setGalleryImages(prev => prev.filter(img => img.id !== id));
       setGalleryDeleteId(null);
+      if (galleryEditId === id) {
+        setGalleryEditId(null);
+        setGalleryEditTitle('');
+        setGalleryEditCredit('');
+      }
       toast.success('Image removed from gallery.');
     } catch {
       toast.error('Failed to remove image.');
     } finally {
       setGalleryDeletingId(null);
+    }
+  };
+
+  const openGalleryEdit = (img: GalleryImage) => {
+    setGalleryDeleteId(null);
+    setGalleryEditId(img.id);
+    setGalleryEditTitle(img.title ?? '');
+    setGalleryEditCredit(img.caption ?? '');
+  };
+
+  const handleGallerySaveEdit = async (id: number) => {
+    setGallerySavingId(id);
+    try {
+      const res = await fetch(`/api/public/gallery/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json',
+          'x-admin-code': ADMIN_CODE,
+          'x-actor': currentAdmin?.username ?? 'Admin',
+        },
+        body: JSON.stringify({
+          title: galleryEditTitle.trim(),
+          caption: galleryEditCredit.trim(),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? 'Failed to update image.');
+      }
+      const updated = await res.json() as { id: number; title: string; caption: string };
+      setGalleryImages(prev => prev.map(img =>
+        img.id === id ? { ...img, title: updated.title, caption: updated.caption } : img
+      ));
+      setGalleryEditId(null);
+      setGalleryEditTitle('');
+      setGalleryEditCredit('');
+      toast.success('Gallery image updated.');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to update image.');
+    } finally {
+      setGallerySavingId(null);
     }
   };
 
@@ -3934,8 +3984,8 @@ const AdminPortal = () => {
                         {galleryImages.map((img, idx) => (
                           <div
                             key={img.id}
-                            draggable
-                            onDragStart={() => setGalleryDragIdx(idx)}
+                            draggable={galleryEditId !== img.id}
+                            onDragStart={() => { if (galleryEditId === img.id) return; setGalleryDragIdx(idx); }}
                             onDragEnd={() => { setGalleryDragIdx(null); setGalleryDragOver(null); }}
                             onDragOver={e => { e.preventDefault(); if (galleryDragOver !== idx) setGalleryDragOver(idx); }}
                             onDrop={async e => {
@@ -3982,16 +4032,68 @@ const AdminPortal = () => {
                               />
                             </div>
                             <div className="px-4 py-3">
-                              {img.caption
-                                ? <p className="text-[10px] text-[#526179]"><span className="font-black text-[#6f7f99]">Credit:</span> {img.caption}</p>
-                                : <p className="text-[10px] italic text-[#3f5470]">No credit</p>
-                              }
-                              <p className="mt-1 text-[10px] text-[#2a3a50]">
-                                {new Date(img.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                              </p>
+                              {galleryEditId === img.id ? (
+                                <div className="space-y-3" onMouseDown={e => e.stopPropagation()}>
+                                  <label className="block">
+                                    <span className="text-[9px] font-black uppercase tracking-[0.16em] text-[#6f7f99]">Info / Title</span>
+                                    <input
+                                      type="text"
+                                      value={galleryEditTitle}
+                                      onChange={e => setGalleryEditTitle(e.target.value)}
+                                      placeholder="Optional title shown on the public gallery"
+                                      className="mt-1.5 h-9 w-full rounded-md border border-[#27354c] bg-[#101827] px-3 text-xs font-bold text-white outline-none placeholder:text-[#66748a] focus:border-[#2f70ff]"
+                                    />
+                                  </label>
+                                  <label className="block">
+                                    <span className="text-[9px] font-black uppercase tracking-[0.16em] text-[#6f7f99]">Credit</span>
+                                    <input
+                                      type="text"
+                                      value={galleryEditCredit}
+                                      onChange={e => setGalleryEditCredit(e.target.value)}
+                                      placeholder="e.g. Photo by Officer Smith"
+                                      className="mt-1.5 h-9 w-full rounded-md border border-[#27354c] bg-[#101827] px-3 text-xs font-bold text-white outline-none placeholder:text-[#66748a] focus:border-[#2f70ff]"
+                                    />
+                                  </label>
+                                  <div className="flex gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleGallerySaveEdit(img.id)}
+                                      disabled={gallerySavingId === img.id}
+                                      className="rounded-md bg-[#2f70ff] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-white transition-colors hover:bg-[#4384ff] disabled:opacity-60"
+                                    >
+                                      {gallerySavingId === img.id ? 'Saving...' : 'Save'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setGalleryEditId(null);
+                                        setGalleryEditTitle('');
+                                        setGalleryEditCredit('');
+                                      }}
+                                      disabled={gallerySavingId === img.id}
+                                      className="rounded-md border border-[#263247] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-[#a8b7cd] transition-colors hover:text-white disabled:opacity-60"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  {img.title
+                                    ? <p className="text-[10px] font-black text-white">{img.title}</p>
+                                    : null}
+                                  {img.caption
+                                    ? <p className={`text-[10px] text-[#526179] ${img.title ? 'mt-1' : ''}`}><span className="font-black text-[#6f7f99]">Credit:</span> {img.caption}</p>
+                                    : <p className={`text-[10px] italic text-[#3f5470] ${img.title ? 'mt-1' : ''}`}>No credit</p>
+                                  }
+                                  <p className="mt-1 text-[10px] text-[#2a3a50]">
+                                    {new Date(img.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </p>
+                                </>
+                              )}
                             </div>
 
-                            {galleryDeleteId === img.id ? (
+                            {galleryEditId === img.id ? null : galleryDeleteId === img.id ? (
                               <div className="px-4 pb-3">
                                 <p className="mb-2 text-[10px] font-bold text-red-200">Remove this image?</p>
                                 <div className="flex gap-2">
@@ -4014,7 +4116,15 @@ const AdminPortal = () => {
                                 </div>
                               </div>
                             ) : (
-                              <div className="px-4 pb-3">
+                              <div className="flex gap-2 px-4 pb-3">
+                                <button
+                                  type="button"
+                                  onClick={() => openGalleryEdit(img)}
+                                  className="inline-flex items-center gap-1.5 rounded-md border border-[#1f3050] bg-[#0a1525] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-[#a8b7cd] transition-colors hover:border-[#2f70ff] hover:text-white"
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                  Edit
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => setGalleryDeleteId(img.id)}

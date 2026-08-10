@@ -4,6 +4,7 @@
 // GET  /public/stats   — live ERLC player count + Discord guild member count
 // GET  /public/gallery — gallery images
 // POST /public/gallery (admin) — add image
+// PATCH /public/gallery/:id (admin) — update title/caption (credit)
 // DELETE /public/gallery/:id (admin)
 // GET  /public/press   — press / news items
 // POST /public/press (admin)
@@ -215,6 +216,48 @@ router.put("/public/gallery/reorder", requireAdmin, async (req, res) => {
     res.status(500).json({ error: "Failed to save order." });
   } finally {
     client.release();
+  }
+});
+
+// ── PATCH /public/gallery/:id (admin) ─────────────────────────────────────────
+router.patch("/public/gallery/:id", requireAdmin, async (req, res) => {
+  await ensureTables;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
+  const body = req.body ?? {};
+  if (!("title" in body) && !("caption" in body)) {
+    res.status(400).json({ error: "Provide title and/or caption." }); return;
+  }
+  try {
+    const existing = await pool.query<{ id: number; title: string; caption: string }>(
+      `SELECT id, title, caption FROM public_gallery WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
+    if (!existing.rows[0]) { res.status(404).json({ error: "Gallery image not found." }); return; }
+
+    const title = "title" in body
+      ? String(body.title ?? "").trim()
+      : existing.rows[0].title;
+    const caption = "caption" in body
+      ? String(body.caption ?? "").trim()
+      : existing.rows[0].caption;
+
+    const r = await pool.query<{ id: number; title: string; caption: string }>(
+      `UPDATE public_gallery SET title = $2, caption = $3
+       WHERE id = $1 AND deleted_at IS NULL
+       RETURNING id, title, caption`,
+      [id, title, caption]
+    );
+    void writeLog(
+      "gallery",
+      actorFrom(req),
+      "Updated gallery image",
+      title || caption || `ID ${id}`
+    );
+    res.json(r.rows[0]);
+  } catch (err) {
+    req.log.error({ err }, "public/gallery PATCH error");
+    res.status(500).json({ error: "Unable to update image." });
   }
 });
 
