@@ -394,3 +394,19 @@
 .home-gallery-scroller {
   touch-action: pan-y;
 }
+
+/* Index tab buttons: single-row sideways scroll with a thin bar */
+.tab-button-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: #1b2738 transparent;
+}
+.tab-button-scroller::-webkit-scrollbar {
+  height: 6px;
+}
+.tab-button-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tab-button-scroller::-webkit-scrollbar-thumb {
+  background: #1b2738;
+  border-radius: 999px;
+}
