@@ -4,7 +4,7 @@
 // No authentication required. Displays live stats, announcements, gallery,
 // and press/news items for the DOJRP community.
 // ----
-import { useEffect, useRef, useState, Fragment } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   CalendarDays, Gamepad2, Users, Megaphone, Image as ImageIcon,
@@ -267,8 +267,6 @@ const PublicView = () => {
   const [gallery,       setGallery]       = useState<GalleryImage[]>([]);
   const [press,         setPress]         = useState<PressItem[]>([]);
   const [lightbox,      setLightbox]      = useState<GalleryImage | null>(null);
-  const galleryScrollRef = useRef<HTMLDivElement>(null);
-  const galleryPausedRef = useRef(false);
   const [statsLoading,  setStatsLoading]  = useState(true);
   const [events,        setEvents]        = useState<DpsEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -306,34 +304,6 @@ const PublicView = () => {
     const id = setInterval(load, 60_000);
     return () => clearInterval(id);
   }, []);
-
-  // Home Gallery: continuous automatic side-scroll (pauses on hover / reduced motion)
-  useEffect(() => {
-    if (tab !== "home" || gallery.length === 0) return;
-    const el = galleryScrollRef.current;
-    if (!el) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    let raf = 0;
-    let last = performance.now();
-    const speedPxPerSec = 36;
-
-    const tick = (now: number) => {
-      const dt = Math.min(now - last, 48);
-      last = now;
-      if (!galleryPausedRef.current && !document.hidden) {
-        el.scrollLeft += (speedPxPerSec * dt) / 1000;
-        const loopAt = el.scrollWidth / 2;
-        if (loopAt > 0 && el.scrollLeft >= loopAt) {
-          el.scrollLeft -= loopAt;
-        }
-      }
-      raf = requestAnimationFrame(tick);
-    };
-
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [tab, gallery.length]);
 
   useEffect(() => {
     void fetchJsonArray<Announcement>("/api/announcements").then(setAnnouncements);
@@ -666,35 +636,40 @@ const PublicView = () => {
                   <p className="text-sm font-bold text-[#2a3a50]">No gallery images yet.</p>
                 </div>
               ) : (
-                <div
-                  ref={galleryScrollRef}
-                  className="-mx-1 overflow-x-auto px-1 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                  onMouseEnter={() => { galleryPausedRef.current = true; }}
-                  onMouseLeave={() => { galleryPausedRef.current = false; }}
-                  onFocusCapture={() => { galleryPausedRef.current = true; }}
-                  onBlurCapture={() => { galleryPausedRef.current = false; }}
-                >
-                  <div className="flex w-max gap-3">
-                    {[...gallery, ...gallery].map((img, i) => (
-                      <button
-                        key={`${img.id}-${i}`}
-                        type="button"
-                        onClick={() => setLightbox(img)}
-                        className="group relative aspect-video w-[min(78vw,280px)] shrink-0 overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16] text-left transition-all hover:border-[#2f70ff]/50 hover:shadow-[0_0_30px_rgba(47,112,255,0.10)] sm:w-[300px]"
+                <div className="home-gallery-scroller -mx-1 overflow-hidden px-1 pb-2">
+                  <div
+                    className="home-gallery-marquee flex w-max"
+                    style={{ animationDuration: `${Math.max(gallery.length, 1) * 6}s` }}
+                  >
+                    {[0, 1].map(copy => (
+                      <div
+                        key={copy}
+                        className="flex gap-3 pr-3"
+                        aria-hidden={copy === 1 ? true : undefined}
                       >
-                        <img
-                          src={img.image_url}
-                          alt={img.title || "Gallery image"}
-                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                        {(img.title || img.caption) && (
-                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 py-3">
-                            {img.title && <p className="text-xs font-black text-white">{img.title}</p>}
-                            {img.caption && <p className="mt-0.5 text-[10px] text-[#a8b7cd]">{img.caption}</p>}
-                          </div>
-                        )}
-                      </button>
+                        {gallery.map(img => (
+                          <button
+                            key={`${copy}-${img.id}`}
+                            type="button"
+                            tabIndex={copy === 1 ? -1 : undefined}
+                            onClick={() => setLightbox(img)}
+                            className="group relative aspect-video w-[min(78vw,280px)] shrink-0 overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16] text-left transition-all hover:border-[#2f70ff]/50 hover:shadow-[0_0_30px_rgba(47,112,255,0.10)] sm:w-[300px]"
+                          >
+                            <img
+                              src={img.image_url}
+                              alt={img.title || "Gallery image"}
+                              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                              onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            />
+                            {(img.title || img.caption) && (
+                              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 py-3">
+                                {img.title && <p className="text-xs font-black text-white">{img.title}</p>}
+                                {img.caption && <p className="mt-0.5 text-[10px] text-[#a8b7cd]">{img.caption}</p>}
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 </div>
