@@ -1,4 +1,4 @@
 #!/bin/bash
 set -e
 bun install --frozen-lockfile
-bun --filter @workspace/db run push
+bun run --cwd ./lib/db push
