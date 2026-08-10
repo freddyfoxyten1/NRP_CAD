@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { pool } from "@workspace/db";
+import { pool, isMongoStore, contentRepo } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 
 const router = Router();
@@ -14,8 +14,10 @@ const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 
-// Ensure table exists with soft-delete columns
-const ensureTable = pool.query(`
+// Ensure table exists with soft-delete columns (SQL mode only)
+const ensureTable = isMongoStore()
+  ? Promise.resolve()
+  : pool.query(`
   CREATE TABLE IF NOT EXISTS cad_announcements (
     id SERIAL PRIMARY KEY,
     title TEXT NOT NULL,
@@ -26,7 +28,6 @@ const ensureTable = pool.query(`
     deleted_by TEXT
   )
 `).then(() =>
-  // Add columns if table was created before soft-delete support
   Promise.all([
     pool.query(`ALTER TABLE cad_announcements ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`),
     pool.query(`ALTER TABLE cad_announcements ADD COLUMN IF NOT EXISTS deleted_by TEXT`),
@@ -37,6 +38,10 @@ const ensureTable = pool.query(`
 router.get("/announcements", async (req, res) => {
   await ensureTable;
   try {
+    if (isMongoStore()) {
+      res.json(await contentRepo.listAnnouncements(50, false));
+      return;
+    }
     const result = await pool.query<{
       id: number; title: string; message: string; posted_by: string; created_at: string;
     }>(
@@ -57,6 +62,10 @@ router.get("/announcements", async (req, res) => {
 router.get("/admin/announcements", requireAdmin, async (req, res) => {
   await ensureTable;
   try {
+    if (isMongoStore()) {
+      res.json(await contentRepo.listAnnouncements(50, true));
+      return;
+    }
     const result = await pool.query<{
       id: number; title: string; message: string; posted_by: string;
       created_at: string; deleted_at: string | null; deleted_by: string | null;
@@ -84,6 +93,13 @@ router.post("/announcements", requireAdmin, async (req, res) => {
 
     if (!title || !message) {
       res.status(400).json({ error: "Title and message are required." });
+      return;
+    }
+
+    if (isMongoStore()) {
+      const doc = await contentRepo.insertAnnouncement({ title, message, posted_by });
+      res.status(201).json(doc);
+      void writeLog("announcements", posted_by, "Posted announcement", `"${title}"`);
       return;
     }
 
@@ -119,6 +135,18 @@ router.patch("/announcements/:id", requireAdmin, async (req, res) => {
       return;
     }
 
+    if (isMongoStore()) {
+      const existing = await contentRepo.findByNumericId("announcements", id);
+      if (!existing || (existing as { deleted_at?: string | null }).deleted_at) {
+        res.status(404).json({ error: "Announcement not found or already deleted." });
+        return;
+      }
+      const updated = await contentRepo.updateAnnouncement(id, { title, message });
+      void writeLog("announcements", actor, "Edited announcement", `"${title}" (ID: ${id})`);
+      res.json(updated);
+      return;
+    }
+
     const result = await pool.query<{
       id: number; title: string; message: string; posted_by: string;
       created_at: string; deleted_at: string | null; deleted_by: string | null;
@@ -151,6 +179,17 @@ router.delete("/announcements/:id", requireAdmin, async (req, res) => {
     const body = req.body as { deleted_by?: string };
     const deleted_by = typeof body.deleted_by === "string" ? body.deleted_by.trim() : "Admin";
     const actor = deleted_by || "Admin";
+
+    if (isMongoStore()) {
+      const updated = await contentRepo.softDeleteAnnouncement(id, deleted_by);
+      if (!updated) {
+        res.status(404).json({ error: "Announcement not found." });
+        return;
+      }
+      void writeLog("announcements", actor, "Deleted announcement", `"${updated.title}" (ID: ${id})`);
+      res.json(updated);
+      return;
+    }
 
     const result = await pool.query<{
       id: number; title: string; message: string; posted_by: string;

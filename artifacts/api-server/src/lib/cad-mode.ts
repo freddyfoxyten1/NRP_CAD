@@ -1,4 +1,4 @@
-import { pool } from "@workspace/db";
+import { isMongoStore, pool, settingsRepo } from "@workspace/db";
 
 export type CadMode = "online" | "members_locked" | "lockdown";
 
@@ -32,6 +32,16 @@ export function auditLabelForMode(mode: CadMode): string {
 
 /** Resolve cad_mode, migrating once from legacy cad_online when needed. */
 export async function getCadMode(): Promise<CadMode> {
+  if (isMongoStore()) {
+    await settingsRepo.ensureDefaultSettings();
+    const parsed = parseCadMode(await settingsRepo.getSetting("cad_mode"));
+    if (parsed) return parsed;
+    const legacy = await settingsRepo.getSetting("cad_online");
+    const mode: CadMode = legacy === "false" ? "lockdown" : "online";
+    await settingsRepo.setSetting("cad_mode", mode);
+    return mode;
+  }
+
   const modeRow = await pool.query<{ value: string }>(
     `SELECT value FROM cad_settings WHERE key = 'cad_mode' LIMIT 1`,
   );
@@ -52,12 +62,17 @@ export async function getCadMode(): Promise<CadMode> {
 }
 
 export async function setCadMode(mode: CadMode): Promise<CadMode> {
+  if (isMongoStore()) {
+    await settingsRepo.setSetting("cad_mode", mode);
+    await settingsRepo.setSetting("cad_online", mode === "online" ? "true" : "false");
+    return mode;
+  }
+
   await pool.query(
     `INSERT INTO cad_settings (key, value, updated_at) VALUES ('cad_mode', $1, NOW())
      ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
     [mode],
   );
-  // Keep legacy key in sync for any older readers
   await pool.query(
     `INSERT INTO cad_settings (key, value, updated_at) VALUES ('cad_online', $1, NOW())
      ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,

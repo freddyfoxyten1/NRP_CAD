@@ -118,6 +118,20 @@ router.get("/staff/resources/:id/file", async (req, res) => {
     return;
   }
   try {
+    const { isMongoStore, resourcesRepo } = await import("@workspace/db");
+    if (isMongoStore()) {
+      const file = await resourcesRepo.getResourceFile("staff", id);
+      if (!file) {
+        res.status(404).json({ error: "PDF not found." });
+        return;
+      }
+      const meta = await resourcesRepo.getResource("staff", id);
+      const safeName = String(meta?.title || "resource").replace(/[^\w\- ]+/g, "").trim() || "resource";
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${safeName}.pdf"`);
+      res.send(file.data);
+      return;
+    }
     const result = await pool.query<{ title: string; file_data: Buffer | null }>(
       `SELECT title, file_data FROM staff_resources WHERE id = $1 AND type = 'pdf'`,
       [id]
@@ -202,6 +216,18 @@ router.post("/staff/resources/upload", requireAdmin, (req, res) => {
     }
 
     try {
+      const { isMongoStore, resourcesRepo } = await import("@workspace/db");
+      if (isMongoStore()) {
+        const row = await resourcesRepo.insertResource("staff", {
+          title,
+          type: "pdf",
+          created_by: createdBy,
+        });
+        await resourcesRepo.saveResourceFile("staff", Number(row.id), pdf, "application/pdf", `${title}.pdf`);
+        void writeLog("staff", createdBy || "Admin", "Uploaded staff resource", title);
+        res.status(201).json(normalizeResourceRow(row as Record<string, unknown>));
+        return;
+      }
       const result = await pool.query(
         `INSERT INTO staff_resources (title, type, file_data, created_by)
          VALUES ($1, 'pdf', $2, $3)

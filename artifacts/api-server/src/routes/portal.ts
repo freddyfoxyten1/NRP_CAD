@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { pool } from "@workspace/db";
+import { pool, isMongoStore, contentRepo } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 
 const router = Router();
@@ -13,15 +13,17 @@ const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 
-const ensurePortalContent = pool
-  .query(
-    `CREATE TABLE IF NOT EXISTS portal_content (
+const ensurePortalContent = isMongoStore()
+  ? Promise.resolve()
+  : pool
+    .query(
+      `CREATE TABLE IF NOT EXISTS portal_content (
        key TEXT PRIMARY KEY,
        content jsonb NOT NULL DEFAULT '{}',
        updated_at TIMESTAMPTZ DEFAULT NOW()
      )`
-  )
-  .catch(() => {});
+    )
+    .catch(() => {});
 
 const ALLOWED_KEYS = new Set([
   "information_support",
@@ -54,6 +56,11 @@ router.get("/portal/content/:key", async (req, res) => {
     return;
   }
   try {
+    if (isMongoStore()) {
+      const doc = await contentRepo.getPortalContent(key);
+      res.json(parseContent(doc?.content));
+      return;
+    }
     const result = await pool.query<{ content: unknown }>(
       `SELECT content FROM portal_content WHERE key = $1 LIMIT 1`,
       [key]
@@ -81,11 +88,15 @@ router.put("/portal/content/:key", requireAdmin, async (req, res) => {
     || (typeof req.headers["x-actor"] === "string" ? req.headers["x-actor"] : "Admin");
 
   try {
-    await pool.query(
-      `INSERT INTO portal_content (key, content, updated_at) VALUES ($1, $2, NOW())
-       ON CONFLICT (key) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()`,
-      [key, JSON.stringify(content)]
-    );
+    if (isMongoStore()) {
+      await contentRepo.setPortalContent(key, JSON.stringify(content));
+    } else {
+      await pool.query(
+        `INSERT INTO portal_content (key, content, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()`,
+        [key, JSON.stringify(content)]
+      );
+    }
     const CONTENT_LABELS: Record<string, string> = {
       information_support: "Information & Support",
       terms_of_service: "Terms of Service",

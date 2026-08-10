@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { pool } from "@workspace/db";
+import { pool, isMongoStore, settingsRepo } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 import {
   auditLabelForMode,
@@ -21,31 +21,28 @@ const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 
-const ensureSettings = pool
-  .query(
+const ensureSettings = (async () => {
+  if (isMongoStore()) {
+    await settingsRepo.ensureDefaultSettings();
+    await getCadMode();
+    return;
+  }
+  await pool.query(
     `CREATE TABLE IF NOT EXISTS cad_settings (
        key TEXT PRIMARY KEY,
        value TEXT NOT NULL,
        updated_at TIMESTAMPTZ DEFAULT NOW()
-     )`
-  )
-  .then(() =>
-    pool.query(
-      `INSERT INTO cad_settings (key, value) VALUES ('cad_online', 'true') ON CONFLICT DO NOTHING`
-    )
-  )
-  .then(() =>
-    pool.query(
-      `INSERT INTO cad_settings (key, value) VALUES ('self_dispatch', 'false') ON CONFLICT DO NOTHING`
-    )
-  )
-  .then(async () => {
-    // Migrate legacy cad_online → cad_mode once
-    await getCadMode();
-  })
-  .catch(() => {});
+     )`,
+  );
+  await pool.query(
+    `INSERT INTO cad_settings (key, value) VALUES ('cad_online', 'true') ON CONFLICT DO NOTHING`,
+  );
+  await pool.query(
+    `INSERT INTO cad_settings (key, value) VALUES ('self_dispatch', 'false') ON CONFLICT DO NOTHING`,
+  );
+  await getCadMode();
+})().catch(() => {});
 
-// Public — anyone can read CAD status
 router.get("/settings/cad-status", async (_req, res) => {
   await ensureSettings;
   try {
@@ -56,13 +53,11 @@ router.get("/settings/cad-status", async (_req, res) => {
   }
 });
 
-// Admin only — set CAD mode (online / members_locked / lockdown)
 router.post("/settings/cad-status", requireAdmin, async (req, res) => {
   await ensureSettings;
   try {
     const body = req.body as { mode?: string; online?: boolean; actor?: string };
     let mode = parseCadMode(body.mode);
-    // Backward compat: { online: true|false }
     if (!mode && typeof body.online === "boolean") {
       mode = body.online ? "online" : "lockdown";
     }
@@ -88,31 +83,38 @@ router.post("/settings/cad-status", requireAdmin, async (req, res) => {
   }
 });
 
-// Public — anyone can read Self Dispatch status
 router.get("/settings/self-dispatch", async (req, res) => {
   await ensureSettings;
   try {
+    if (isMongoStore()) {
+      const value = await settingsRepo.getSetting("self_dispatch");
+      res.json({ enabled: value === "true" });
+      return;
+    }
     const result = await pool.query<{ value: string }>(
-      `SELECT value FROM cad_settings WHERE key='self_dispatch' LIMIT 1`
+      `SELECT value FROM cad_settings WHERE key='self_dispatch' LIMIT 1`,
     );
     res.json({ enabled: result.rows[0]?.value === "true" });
   } catch {
-    res.json({ enabled: false }); // safe default
+    res.json({ enabled: false });
   }
 });
 
-// Admin only — toggle Self Dispatch
 router.post("/settings/self-dispatch", requireAdmin, async (req, res) => {
   await ensureSettings;
   try {
     const body = req.body as { enabled?: boolean; actor?: string };
     const enabled = body.enabled === true;
     const actor = typeof body.actor === "string" ? body.actor : (typeof req.headers["x-actor"] === "string" ? req.headers["x-actor"] : "Admin");
-    await pool.query(
-      `INSERT INTO cad_settings (key, value, updated_at) VALUES ('self_dispatch', $1, NOW())
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
-      [enabled ? "true" : "false"]
-    );
+    if (isMongoStore()) {
+      await settingsRepo.setSetting("self_dispatch", enabled ? "true" : "false");
+    } else {
+      await pool.query(
+        `INSERT INTO cad_settings (key, value, updated_at) VALUES ('self_dispatch', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+        [enabled ? "true" : "false"],
+      );
+    }
     req.log.info({ enabled }, "Self Dispatch status updated");
     void writeLog("terminal", actor, enabled ? "Enabled Self Dispatch" : "Disabled Self Dispatch");
     res.json({ enabled });
@@ -124,17 +126,19 @@ router.post("/settings/self-dispatch", requireAdmin, async (req, res) => {
 
 const ENV_SERVER_STORE_URL = (process.env.VITE_SERVER_STORE_URL ?? process.env.SERVER_STORE_URL ?? "").trim();
 
-/** Resolve store URL: DB setting first, then env fallback. */
 async function resolveServerStoreUrl(): Promise<string> {
   await ensureSettings;
+  if (isMongoStore()) {
+    const fromDb = (await settingsRepo.getSetting("server_store_url") ?? "").trim();
+    return fromDb || ENV_SERVER_STORE_URL;
+  }
   const result = await pool.query<{ value: string }>(
-    `SELECT value FROM cad_settings WHERE key='server_store_url' LIMIT 1`
+    `SELECT value FROM cad_settings WHERE key='server_store_url' LIMIT 1`,
   );
   const fromDb = (result.rows[0]?.value ?? "").trim();
   return fromDb || ENV_SERVER_STORE_URL;
 }
 
-// Public — anyone can read the Server Store URL used on the index page
 router.get("/settings/server-store", async (_req, res) => {
   try {
     const url = await resolveServerStoreUrl();
@@ -144,7 +148,6 @@ router.get("/settings/server-store", async (_req, res) => {
   }
 });
 
-// Admin only — set the Server Store URL shown on the public index
 router.post("/settings/server-store", requireAdmin, async (req, res) => {
   await ensureSettings;
   try {
@@ -154,11 +157,15 @@ router.post("/settings/server-store", requireAdmin, async (req, res) => {
     if (url && !/^https?:\/\//i.test(url)) {
       res.status(400).json({ error: "Store URL must start with http:// or https://." }); return;
     }
-    await pool.query(
-      `INSERT INTO cad_settings (key, value, updated_at) VALUES ('server_store_url', $1, NOW())
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
-      [url]
-    );
+    if (isMongoStore()) {
+      await settingsRepo.setSetting("server_store_url", url);
+    } else {
+      await pool.query(
+        `INSERT INTO cad_settings (key, value, updated_at) VALUES ('server_store_url', $1, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
+        [url],
+      );
+    }
     void writeLog("terminal", actor, url ? "Updated Server Store URL" : "Cleared Server Store URL", url || "(empty)");
     res.json({ url });
   } catch (err) {

@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import { pool } from "@workspace/db";
+import { pool, isMongoStore, usersRepo } from "@workspace/db";
 import { denyMessageForMode, getCadMode, modeToOnline, type CadMode } from "./cad-mode";
 import { isSuperAdminDiscordId } from "./superadmin";
 
@@ -169,6 +169,30 @@ export async function isCommunityGuildMemberViaOAuth(
 }
 
 export async function loadCadSession(profileId: number): Promise<CadSessionPayload | null> {
+  if (isMongoStore()) {
+    const user = await usersRepo.getUserById(profileId);
+    if (!user) return null;
+    const merged = await usersRepo.withDpsRanks(user);
+    return {
+      id: merged.id,
+      username: merged.username,
+      email: String(merged.email ?? ""),
+      rank: String(merged.rank ?? ""),
+      role: String(merged.role ?? ""),
+      status: String(merged.status ?? ""),
+      dps_rank: merged.dps_rank,
+      dps_role: merged.dps_role,
+      staff_rank: merged.staff_rank ?? null,
+      staff_role: merged.staff_role ?? null,
+      discord_id: merged.discord_id?.trim() ? merged.discord_id : null,
+      avatar_hash: merged.avatar_hash?.trim() ? merged.avatar_hash : null,
+      can_access_iab: Boolean(merged.can_access_iab),
+      can_access_system_logs: Boolean(merged.can_access_system_logs),
+      can_access_terms_privacy: Boolean(merged.can_access_terms_privacy),
+      can_access_terminal_offline: Boolean(merged.can_access_terminal_offline),
+    };
+  }
+
   const result = await pool.query<CadSessionPayload>(
     `SELECT p.id, p.username, p.email, p.rank, p.role, p.status,
             COALESCE(NULLIF(d.dps_rank, ''), p.dps_rank) AS dps_rank,
@@ -212,21 +236,40 @@ export async function canSignInForCadMode(profileId: number): Promise<{
     return { allowed: true, mode };
   }
 
-  const result = await pool.query<{
+  let account: {
     staff_role: string | null;
     staff_rank: string | null;
     discord_id: string | null;
     can_access_terminal_offline: boolean | number | null;
-  }>(
-    `SELECT staff_role, staff_rank, discord_id,
-            COALESCE(can_access_terminal_offline, false) AS can_access_terminal_offline
-     FROM cad_user_profiles
-     WHERE id = $1
-     LIMIT 1`,
-    [profileId],
-  );
+  } | null = null;
 
-  const account = result.rows[0];
+  if (isMongoStore()) {
+    const user = await usersRepo.getUserById(profileId);
+    if (user) {
+      account = {
+        staff_role: user.staff_role ?? null,
+        staff_rank: user.staff_rank ?? null,
+        discord_id: user.discord_id ?? null,
+        can_access_terminal_offline: user.can_access_terminal_offline ?? false,
+      };
+    }
+  } else {
+    const result = await pool.query<{
+      staff_role: string | null;
+      staff_rank: string | null;
+      discord_id: string | null;
+      can_access_terminal_offline: boolean | number | null;
+    }>(
+      `SELECT staff_role, staff_rank, discord_id,
+              COALESCE(can_access_terminal_offline, false) AS can_access_terminal_offline
+       FROM cad_user_profiles
+       WHERE id = $1
+       LIMIT 1`,
+      [profileId],
+    );
+    account = result.rows[0] ?? null;
+  }
+
   if (!account) {
     return { allowed: false, mode, error: denyMessageForMode(mode) };
   }
@@ -274,36 +317,63 @@ export async function createCadAccountFromDiscord(input: {
     cadUsername = `user_${input.id.slice(-6)}`;
   }
 
-  const taken = await pool.query<{ username: string }>(
-    `SELECT username FROM cad_user_profiles WHERE lower(username) = lower($1) LIMIT 1`,
-    [cadUsername],
-  );
-
-  if (taken.rows.length > 0) {
-    cadUsername = `${cadUsername}_${input.id.slice(-4)}`;
+  if (isMongoStore()) {
+    const existing = await usersRepo.getUserByUsername(cadUsername);
+    if (existing) {
+      cadUsername = `${cadUsername}_${input.id.slice(-4)}`;
+    }
+  } else {
+    const taken = await pool.query<{ username: string }>(
+      `SELECT username FROM cad_user_profiles WHERE lower(username) = lower($1) LIMIT 1`,
+      [cadUsername],
+    );
+    if (taken.rows.length > 0) {
+      cadUsername = `${cadUsername}_${input.id.slice(-4)}`;
+    }
   }
 
   const email = `discord_${input.id}@discord.local`;
   const authUserId = `discord-${input.id}`;
 
-  const inserted = await pool.query<{ id: number }>(
-    `INSERT INTO cad_user_profiles
-       (auth_user_id, username, discord_username, discord_id, email,
-        community_code, rank, role, status, callsign, avatar_hash, password_salt, password_hash)
-     VALUES ($1,$2,$3,$4,$5,$6,'Member','Community Members','active','4D-XX',$7,'','')
-     RETURNING id`,
-    [
-      authUserId,
-      cadUsername,
-      input.username,
-      input.id,
+  let newId: number;
+  if (isMongoStore()) {
+    const created = await usersRepo.insertUser({
+      auth_user_id: authUserId,
+      username: cadUsername,
+      discord_username: input.username,
+      discord_id: input.id,
       email,
-      "DISCORD",
-      input.avatarHash ?? "",
-    ],
-  );
+      community_code: "DISCORD",
+      rank: "Member",
+      role: "Community Members",
+      status: "active",
+      callsign: "4D-XX",
+      avatar_hash: input.avatarHash ?? "",
+      password_salt: "",
+      password_hash: "",
+    });
+    newId = created.id;
+  } else {
+    const inserted = await pool.query<{ id: number }>(
+      `INSERT INTO cad_user_profiles
+         (auth_user_id, username, discord_username, discord_id, email,
+          community_code, rank, role, status, callsign, avatar_hash, password_salt, password_hash)
+       VALUES ($1,$2,$3,$4,$5,$6,'Member','Community Members','active','4D-XX',$7,'','')
+       RETURNING id`,
+      [
+        authUserId,
+        cadUsername,
+        input.username,
+        input.id,
+        email,
+        "DISCORD",
+        input.avatarHash ?? "",
+      ],
+    );
+    newId = inserted.rows[0].id;
+  }
 
-  const session = await loadCadSession(inserted.rows[0].id);
+  const session = await loadCadSession(newId);
   if (!session) {
     throw new Error("Unable to load newly created account.");
   }

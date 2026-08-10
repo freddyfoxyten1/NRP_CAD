@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { Router } from "express";
 import multer from "multer";
-import { pool } from "@workspace/db";
+import { pool, isMongoStore, resourcesRepo } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
 import { ConversionError, convertDocxToPdf, isDocx, isLegacyDoc, isPdf } from "../lib/docx-to-pdf";
 
@@ -208,6 +208,24 @@ router.post("/dph/resources/upload", (req, res) => {
         && (personnelOnlyRaw === "1" || personnelOnlyRaw.toLowerCase() === "true" || allowedDphRanks.length > 0);
       const savedDphRanks = divisionId == null ? allowedDphRanks : [];
 
+      if (isMongoStore()) {
+        const row = await resourcesRepo.insertResource("dph", {
+          title,
+          type: "pdf",
+          created_by: createdBy,
+          division_id: divisionId,
+          division_only: divisionOnly,
+          allowed_ranks: JSON.stringify(allowedRanks),
+          personnel_only: personnelOnly,
+          allowed_dph_ranks: JSON.stringify(savedDphRanks),
+        });
+        const resourceId = Number(row.id);
+        await resourcesRepo.saveResourceFile("dph", resourceId, pdf, "application/pdf", `${title}.pdf`);
+        void writeLog("dph_personnel", createdBy || actorFrom(req), "Uploaded DPH resource", title);
+        res.status(201).json(normalizeResourceRow({ ...row, id: resourceId } as Record<string, unknown>));
+        return;
+      }
+
       const { rows } = await pool.query(
         `INSERT INTO dph_resources
            (title, type, created_by, file_data, division_id, division_only, allowed_ranks, personnel_only, allowed_dph_ranks)
@@ -230,6 +248,16 @@ router.get("/dph/resources/:id/file", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    if (isMongoStore()) {
+      const file = await resourcesRepo.getResourceFile("dph", id);
+      if (!file) { res.status(404).json({ error: "File not found." }); return; }
+      const meta = await resourcesRepo.getResource("dph", id);
+      const safeName = String(meta?.title || "resource").replace(/[^\w\- ]+/g, "").trim() || "resource";
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${safeName}.pdf"`);
+      res.send(file.data);
+      return;
+    }
     const { rows } = await pool.query(
       `SELECT title, file_data FROM dph_resources WHERE id = $1 AND file_data IS NOT NULL`,
       [id],

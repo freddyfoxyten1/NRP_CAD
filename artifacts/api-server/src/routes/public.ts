@@ -12,7 +12,7 @@
 // DELETE /public/press/:id (admin)
 // ─────────────────────────────────────────────────────────────────────────────
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { pool } from "@workspace/db";
+import { pool, isMongoStore, contentRepo } from "@workspace/db";
 import { fetchInGameStats } from "./stats";
 import { writeLog } from "../lib/audit-log";
 
@@ -164,6 +164,10 @@ router.get("/public/stats", async (req, res) => {
 router.get("/public/gallery", async (req, res) => {
   await ensureTables;
   try {
+    if (isMongoStore()) {
+      res.json(await contentRepo.listGallery());
+      return;
+    }
     const rows = await pool.query<{ id: number; title: string; caption: string; image_url: string; created_at: string }>(
       `SELECT id, title, caption, image_url, created_at::text
        FROM public_gallery WHERE deleted_at IS NULL
@@ -182,6 +186,12 @@ router.post("/public/gallery", requireAdmin, async (req, res) => {
   const { title = "", caption = "", image_url } = req.body ?? {};
   if (!image_url?.trim()) { res.status(400).json({ error: "image_url is required." }); return; }
   try {
+    if (isMongoStore()) {
+      const doc = await contentRepo.insertGallery({ title, caption, image_url });
+      void writeLog("gallery", actorFrom(req), "Added gallery image", title.trim() || `ID ${doc.id}`);
+      res.status(201).json({ id: doc.id });
+      return;
+    }
     const r = await pool.query<{ id: number }>(
       `INSERT INTO public_gallery (title, caption, image_url) VALUES ($1,$2,$3) RETURNING id`,
       [title.trim(), caption.trim(), image_url.trim()]
@@ -201,21 +211,31 @@ router.put("/public/gallery/reorder", requireAdmin, async (req, res) => {
   if (!Array.isArray(ids) || ids.some(id => typeof id !== "number")) {
     res.status(400).json({ error: "ids must be an array of numbers." }); return;
   }
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    for (let i = 0; i < ids.length; i++) {
-      await client.query(`UPDATE public_gallery SET sort_order = $1 WHERE id = $2`, [i + 1, ids[i]]);
+    if (isMongoStore()) {
+      await contentRepo.reorderGallery(ids);
+      void writeLog("gallery", actorFrom(req), "Reordered gallery", `${ids.length} image(s)`);
+      res.json({ ok: true });
+      return;
     }
-    await client.query("COMMIT");
-    void writeLog("gallery", actorFrom(req), "Reordered gallery", `${ids.length} image(s)`);
-    res.json({ ok: true });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (let i = 0; i < ids.length; i++) {
+        await client.query(`UPDATE public_gallery SET sort_order = $1 WHERE id = $2`, [i + 1, ids[i]]);
+      }
+      await client.query("COMMIT");
+      void writeLog("gallery", actorFrom(req), "Reordered gallery", `${ids.length} image(s)`);
+      res.json({ ok: true });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
-    await client.query("ROLLBACK");
     req.log.error({ err }, "public/gallery reorder error");
     res.status(500).json({ error: "Failed to save order." });
-  } finally {
-    client.release();
   }
 });
 
@@ -229,6 +249,16 @@ router.patch("/public/gallery/:id", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "Provide title and/or caption." }); return;
   }
   try {
+    if (isMongoStore()) {
+      const patch: { title?: string; caption?: string } = {};
+      if ("title" in body) patch.title = String(body.title ?? "").trim();
+      if ("caption" in body) patch.caption = String(body.caption ?? "").trim();
+      const updated = await contentRepo.updateGallery(id, patch);
+      if (!updated) { res.status(404).json({ error: "Gallery image not found." }); return; }
+      void writeLog("gallery", actorFrom(req), "Updated gallery image", updated.title || updated.caption || `ID ${id}`);
+      res.json({ id: updated.id, title: updated.title, caption: updated.caption });
+      return;
+    }
     const existing = await pool.query<{ id: number; title: string; caption: string }>(
       `SELECT id, title, caption FROM public_gallery WHERE id = $1 AND deleted_at IS NULL`,
       [id]
@@ -275,6 +305,10 @@ router.delete("/public/gallery/:id", requireAdmin, async (req, res) => {
 router.get("/public/press", async (req, res) => {
   await ensureTables;
   try {
+    if (isMongoStore()) {
+      res.json(await contentRepo.listPress());
+      return;
+    }
     const rows = await pool.query<{
       id: number; title: string; content: string; author: string;
       source_url: string; image_url: string; created_at: string;
@@ -296,6 +330,17 @@ router.post("/public/press", requireAdmin, async (req, res) => {
   const { title, content = "", author = "", source_url = "", image_url = "" } = req.body ?? {};
   if (!title?.trim()) { res.status(400).json({ error: "title is required." }); return; }
   try {
+    if (isMongoStore()) {
+      const doc = await contentRepo.insertPress({
+        title: title.trim(),
+        content: content.trim(),
+        author: author.trim(),
+        source_url: source_url.trim(),
+        image_url: image_url.trim(),
+      });
+      res.status(201).json({ id: doc.id });
+      return;
+    }
     const r = await pool.query<{ id: number }>(
       `INSERT INTO public_press (title, content, author, source_url, image_url)
        VALUES ($1,$2,$3,$4,$5) RETURNING id`,
@@ -314,6 +359,17 @@ router.patch("/public/press/:id", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   const { title, content, author, source_url, image_url } = req.body ?? {};
+  if (isMongoStore()) {
+    const patch: Record<string, string> = {};
+    if (title != null) patch.title = String(title).trim();
+    if (content != null) patch.content = String(content).trim();
+    if (author != null) patch.author = String(author).trim();
+    if (source_url != null) patch.source_url = String(source_url).trim();
+    if (image_url != null) patch.image_url = String(image_url).trim();
+    await contentRepo.updatePress(id, patch);
+    res.json({ ok: true });
+    return;
+  }
   await pool.query(
     `UPDATE public_press SET
        title      = COALESCE($2, title),
@@ -333,6 +389,11 @@ router.delete("/public/press/:id", requireAdmin, async (req, res) => {
   await ensureTables;
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
+  if (isMongoStore()) {
+    await contentRepo.deletePress(id);
+    res.json({ ok: true });
+    return;
+  }
   await pool.query(`UPDATE public_press SET deleted_at = NOW() WHERE id = $1`, [id]);
   res.json({ ok: true });
 });
@@ -370,6 +431,10 @@ function normalizePriceIcon(value: unknown): "robux" | "dollar" | "custom" {
 router.get("/public/store-products", async (req, res) => {
   await ensureTables;
   try {
+    if (isMongoStore()) {
+      res.json(await contentRepo.listStoreProducts());
+      return;
+    }
     const rows = await pool.query<StoreProductRow>(
       `SELECT ${STORE_PRODUCT_SELECT}
        FROM public_store_products WHERE deleted_at IS NULL
@@ -402,11 +467,35 @@ router.post("/public/store-products", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "heading is required." }); return;
   }
   try {
+    const icon = normalizePriceIcon(price_icon);
+    if (isMongoStore()) {
+      const existing = await contentRepo.listStoreProducts();
+      const nextOrder = existing.reduce(
+        (m: number, p: { sort_order?: number | null }) => Math.max(m, Number(p.sort_order ?? 0)),
+        0,
+      ) + 1;
+      const doc = await contentRepo.insertStoreProduct({
+        badge_label: String(badge_label).trim(),
+        heading: String(heading).trim(),
+        description: String(description).trim(),
+        price: String(price).trim(),
+        price_label: String(price_label).trim(),
+        price_icon: icon,
+        price_icon_url: icon === "custom" ? String(price_icon_url).trim() : "",
+        footer_text: String(footer_text).trim(),
+        button_text: String(button_text).trim(),
+        button_url: String(button_url).trim(),
+        image_url: String(image_url).trim(),
+        sort_order: nextOrder,
+      });
+      void writeLog("store", actorFrom(req), "Created store product", String(heading).trim());
+      res.status(201).json(doc);
+      return;
+    }
     const mx = await pool.query<{ m: number | null }>(
       `SELECT MAX(sort_order) AS m FROM public_store_products WHERE deleted_at IS NULL`
     );
     const nextOrder = (mx.rows[0]?.m ?? 0) + 1;
-    const icon = normalizePriceIcon(price_icon);
     const r = await pool.query<StoreProductRow>(
       `INSERT INTO public_store_products
          (badge_label, heading, description, price, price_label, price_icon, price_icon_url,
@@ -446,6 +535,29 @@ router.patch("/public/store-products/:id", requireAdmin, async (req, res) => {
     const hasIcon = Object.prototype.hasOwnProperty.call(b, "price_icon");
     const icon = hasIcon ? normalizePriceIcon(b.price_icon) : null;
     const hasIconUrl = Object.prototype.hasOwnProperty.call(b, "price_icon_url");
+    if (isMongoStore()) {
+      const patch: Record<string, unknown> = {};
+      if (Object.prototype.hasOwnProperty.call(b, "badge_label")) patch.badge_label = String(b.badge_label ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(b, "heading")) patch.heading = String(b.heading ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(b, "description")) patch.description = String(b.description ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(b, "price")) patch.price = String(b.price ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(b, "price_label")) patch.price_label = String(b.price_label ?? "").trim();
+      if (hasIcon) patch.price_icon = icon ?? "robux";
+      if (hasIconUrl || hasIcon) {
+        patch.price_icon_url = hasIcon
+          ? (icon === "custom" ? String(b.price_icon_url ?? "").trim() : "")
+          : String(b.price_icon_url ?? "").trim();
+      }
+      if (Object.prototype.hasOwnProperty.call(b, "footer_text")) patch.footer_text = String(b.footer_text ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(b, "button_text")) patch.button_text = String(b.button_text ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(b, "button_url")) patch.button_url = String(b.button_url ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(b, "image_url")) patch.image_url = String(b.image_url ?? "").trim();
+      const updated = await contentRepo.updateStoreProduct(id, patch);
+      if (!updated) { res.status(404).json({ error: "Product not found." }); return; }
+      void writeLog("store", actorFrom(req), "Updated store product", updated.heading ?? `ID ${id}`);
+      res.json(updated);
+      return;
+    }
     const r = await pool.query<StoreProductRow>(
       `UPDATE public_store_products SET
          badge_label    = CASE WHEN $2::boolean THEN $3  ELSE badge_label END,
@@ -496,9 +608,13 @@ router.put("/public/store-products/reorder", requireAdmin, async (req, res) => {
     res.status(400).json({ error: "ids must be an array of numbers." }); return;
   }
   try {
-    await Promise.all(ids.map((id: number, i: number) =>
-      pool.query(`UPDATE public_store_products SET sort_order = $1 WHERE id = $2`, [i + 1, id])
-    ));
+    if (isMongoStore()) {
+      await contentRepo.reorderStoreProducts(ids);
+    } else {
+      await Promise.all(ids.map((id: number, i: number) =>
+        pool.query(`UPDATE public_store_products SET sort_order = $1 WHERE id = $2`, [i + 1, id])
+      ));
+    }
     void writeLog("store", actorFrom(req), "Reordered store products", `${ids.length} product(s)`);
     res.json({ ok: true });
   } catch (err) {
@@ -512,6 +628,13 @@ router.delete("/public/store-products/:id", requireAdmin, async (req, res) => {
   await ensureTables;
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
+  if (isMongoStore()) {
+    const existing = await contentRepo.findByNumericId("store_products", id);
+    await contentRepo.deleteStoreProduct(id);
+    void writeLog("store", actorFrom(req), "Deleted store product", String((existing as { heading?: string } | null)?.heading ?? `ID ${id}`));
+    res.json({ ok: true });
+    return;
+  }
   const deleted = await pool.query<{ heading: string }>(
     `UPDATE public_store_products SET deleted_at = NOW() WHERE id = $1 RETURNING heading`,
     [id]

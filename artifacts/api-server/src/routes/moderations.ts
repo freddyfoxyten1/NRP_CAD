@@ -1,10 +1,11 @@
 import { Router } from "express";
-import { pool } from "@workspace/db";
+import { pool, isMongoStore, contentRepo, usersRepo } from "@workspace/db";
 
 const router = Router();
 
 // ── One-time migration ────────────────────────────────────────────────────────
 (async () => {
+  if (isMongoStore()) return;
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS moderations (
@@ -26,6 +27,11 @@ const VALID_TYPES = ["Warning", "Strike", "BOLO", "Kick", "Ban"];
 // ── GET /moderations — recent 50 ─────────────────────────────────────────────
 router.get("/moderations", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      const rows = await contentRepo.listModerations();
+      res.json(rows.slice(0, 50));
+      return;
+    }
     const r = await pool.query(
       `SELECT id, target_username, type, reason, issued_by, created_at
        FROM moderations ORDER BY created_at DESC LIMIT 50`
@@ -41,6 +47,30 @@ router.get("/moderations/user/:username", async (req, res) => {
   const username = req.params.username.trim();
   if (!username) { res.status(400).json({ error: "Username required." }); return; }
   try {
+    if (isMongoStore()) {
+      const account = await usersRepo.getUserByUsername(username);
+      const all = await contentRepo.listModerations();
+      const moderations = all.filter(
+        (m: { target_username?: unknown }) =>
+          String(m.target_username ?? "").toLowerCase() === username.toLowerCase(),
+      );
+      res.json({
+        account: account
+          ? {
+              id: account.id,
+              username: account.username,
+              rank: account.rank,
+              role: account.role,
+              status: account.status,
+              discord_username: account.discord_username,
+              discord_id: account.discord_id,
+              avatar_hash: account.avatar_hash,
+            }
+          : null,
+        moderations,
+      });
+      return;
+    }
     const [profileRes, modRes] = await Promise.all([
       pool.query(
         `SELECT id, username, rank, role, status, discord_username, discord_id, avatar_hash
@@ -72,6 +102,17 @@ router.post("/moderations", async (req, res) => {
     res.status(400).json({ error: `Invalid type. Must be one of: ${VALID_TYPES.join(", ")}.` }); return;
   }
   try {
+    if (isMongoStore()) {
+      const doc = await contentRepo.insertModeration({
+        target_username: target_username.trim(),
+        type: type.trim(),
+        reason: reason.trim(),
+        issued_by: issued_by.trim(),
+        created_at: new Date().toISOString(),
+      });
+      res.json(doc);
+      return;
+    }
     const r = await pool.query(
       `INSERT INTO moderations (target_username, type, reason, issued_by)
        VALUES ($1, $2, $3, $4)
