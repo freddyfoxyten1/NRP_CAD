@@ -104,6 +104,9 @@ API_PORT=8080
 > `bun run build` **must succeed before** starting bm2 — the API bundle
 > (`artifacts/api-server/dist/index.mjs`) is gitignored and only exists after
 > building.
+>
+> The API uses `bun:sqlite` (Bun's built-in SQLite) for the local database —
+> if you change the DB layer, rebuild before restarting.
 
 ```bash
 # Install all workspace dependencies
