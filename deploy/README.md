@@ -127,16 +127,20 @@ ls -la artifacts/dojrp/dist/public/index.html
 
 ## 6. Start the API with bm2
 
-The repo includes `ecosystem.config.ts`:
+The repo includes `ecosystem.config.js` (CJS, uses `__dirname` absolute paths
+so bm2's daemon always resolves the bundle correctly):
 
-```ts
-export default {
+```js
+const path = require("node:path");
+const repoRoot = __dirname; // repo root
+
+module.exports = {
   apps: [
     {
       name: "dojcad-api",
-      script: "./artifacts/api-server/dist/index.mjs",
+      script: path.join(repoRoot, "artifacts", "api-server", "dist", "index.mjs"),
       interpreter: "bun",
-      cwd: ".",
+      cwd: repoRoot,
       exec_mode: "fork",
       instances: 1,
       max_memory_restart: "500M",
@@ -149,8 +153,9 @@ export default {
 ```
 
 ```bash
-# Start the daemon + API
-bm2 start ecosystem.config.ts
+# Start the daemon + API (use the .js config — it uses __dirname absolute
+# paths so bm2's daemon always finds the bundle)
+bm2 start ecosystem.config.js
 
 # Verify
 bm2 list                       # should show dojcad-api online
