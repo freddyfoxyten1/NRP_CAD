@@ -15,7 +15,7 @@ declare module "bun:sqlite" {
     get(...params: Params): Return | undefined;
   }
 
-  export class DatabaseSync {
+  export class Database {
     constructor(path: string, options?: { readOnly?: boolean; create?: boolean });
     exec(sql: string): void;
     prepare<Params extends unknown[] = unknown[], Return = unknown>(
