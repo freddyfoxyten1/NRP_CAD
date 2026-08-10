@@ -1,6 +1,14 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
+import {
+  auditLabelForMode,
+  getCadMode,
+  modeToOnline,
+  parseCadMode,
+  setCadMode,
+  type CadMode,
+} from "../lib/cad-mode";
 
 const router = Router();
 const ADMIN_CODE = process.env.ADMIN_PORTAL_CODE ?? "ADMIN2026";
@@ -31,36 +39,49 @@ const ensureSettings = pool
       `INSERT INTO cad_settings (key, value) VALUES ('self_dispatch', 'false') ON CONFLICT DO NOTHING`
     )
   )
+  .then(async () => {
+    // Migrate legacy cad_online → cad_mode once
+    await getCadMode();
+  })
   .catch(() => {});
 
 // Public — anyone can read CAD status
-router.get("/settings/cad-status", async (req, res) => {
+router.get("/settings/cad-status", async (_req, res) => {
   await ensureSettings;
   try {
-    const result = await pool.query<{ value: string }>(
-      `SELECT value FROM cad_settings WHERE key='cad_online' LIMIT 1`
-    );
-    res.json({ online: result.rows[0]?.value !== "false" });
+    const mode = await getCadMode();
+    res.json({ mode, online: modeToOnline(mode) });
   } catch {
-    res.json({ online: true }); // safe default
+    res.json({ mode: "online" as CadMode, online: true });
   }
 });
 
-// Admin only — toggle CAD online/offline
+// Admin only — set CAD mode (online / members_locked / lockdown)
 router.post("/settings/cad-status", requireAdmin, async (req, res) => {
   await ensureSettings;
   try {
-    const body = req.body as { online?: boolean; actor?: string };
-    const online = body.online !== false;
-    const actor = typeof body.actor === "string" ? body.actor : (typeof req.headers["x-actor"] === "string" ? req.headers["x-actor"] : "Admin");
-    await pool.query(
-      `INSERT INTO cad_settings (key, value, updated_at) VALUES ('cad_online', $1, NOW())
-       ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = NOW()`,
-      [online ? "true" : "false"]
-    );
-    req.log.info({ online }, "CAD status updated");
-    void writeLog("terminal", actor, online ? "Set terminal Online" : "Set terminal Offline");
-    res.json({ online });
+    const body = req.body as { mode?: string; online?: boolean; actor?: string };
+    let mode = parseCadMode(body.mode);
+    // Backward compat: { online: true|false }
+    if (!mode && typeof body.online === "boolean") {
+      mode = body.online ? "online" : "lockdown";
+    }
+    if (!mode) {
+      res.status(400).json({
+        error: "mode must be 'online', 'members_locked', or 'lockdown'.",
+      });
+      return;
+    }
+    const actor =
+      typeof body.actor === "string"
+        ? body.actor
+        : typeof req.headers["x-actor"] === "string"
+          ? req.headers["x-actor"]
+          : "Admin";
+    await setCadMode(mode);
+    req.log.info({ mode }, "CAD status updated");
+    void writeLog("terminal", actor, auditLabelForMode(mode));
+    res.json({ mode, online: modeToOnline(mode) });
   } catch (err) {
     req.log.error({ err }, "settings/cad-status POST error");
     res.status(500).json({ error: "Unable to update CAD status." });

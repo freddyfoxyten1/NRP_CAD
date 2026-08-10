@@ -387,6 +387,13 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
   } catch (e) {
     console.error("admin tab access migration failed:", e);
   }
+  try {
+    await pool.query(
+      `ALTER TABLE cad_user_profiles ADD COLUMN IF NOT EXISTS can_access_terminal_offline boolean NOT NULL DEFAULT false`
+    );
+  } catch (e) {
+    console.error("can_access_terminal_offline migration failed:", e);
+  }
   // Discord role link column
   try {
     await pool.query(`ALTER TABLE staff_ranks ADD COLUMN IF NOT EXISTS discord_role_id text`);
@@ -457,7 +464,8 @@ router.get("/staff/roster", async (req, res) => {
               p.staff_rank, p.staff_role, p.status, p.staff_appointed_date,
               COALESCE(p.can_access_iab, false) AS can_access_iab,
               COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
-              COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy
+              COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
+              COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
        FROM cad_user_profiles p
        LEFT JOIN staff_ranks sr ON lower(sr.name) = lower(trim(COALESCE(p.staff_rank, '')))
        WHERE (
@@ -515,6 +523,50 @@ router.patch("/staff/roster/:id/iab-access", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "staff iab-access PATCH error");
     res.status(500).json({ error: "Unable to update Internal Affairs access." });
+  }
+});
+
+// ── PATCH /staff/roster/:id/terminal-offline-access — sign-in during lockdown ──
+router.patch("/staff/roster/:id/terminal-offline-access", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id." }); return;
+  }
+  const body = req.body as { can_access_terminal_offline?: boolean; actor?: string };
+  if (typeof body.can_access_terminal_offline !== "boolean") {
+    res.status(400).json({ error: "can_access_terminal_offline (boolean) is required." });
+    return;
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE cad_user_profiles SET
+          can_access_terminal_offline = $2,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, username, can_access_terminal_offline`,
+      [id, body.can_access_terminal_offline],
+    );
+    if (!result.rows.length) {
+      res.status(404).json({ error: "Member not found." }); return;
+    }
+    const actor = body.actor
+      || (req.headers["x-actor"] as string)
+      || "Admin";
+    void writeLog(
+      "staff",
+      actor,
+      body.can_access_terminal_offline
+        ? "Granted terminal lockdown access"
+        : "Revoked terminal lockdown access",
+      String(result.rows[0].username ?? id),
+    );
+    res.json({
+      id: result.rows[0].id,
+      can_access_terminal_offline: Boolean(result.rows[0].can_access_terminal_offline),
+    });
+  } catch (err) {
+    req.log.error({ err }, "staff terminal-offline-access PATCH error");
+    res.status(500).json({ error: "Unable to update terminal lockdown access." });
   }
 });
 

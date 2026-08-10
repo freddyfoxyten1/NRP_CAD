@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getCadSession, clearCadSession } from '@/lib/cad-session';
-import { useCadStatus } from '@/hooks/useCadStatus';
+import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { useSelfDispatch } from '@/hooks/useSelfDispatch';
 import { useCadData, type CadCall, type CadGroup } from '@/hooks/useCadData';
 import {
@@ -3390,7 +3390,7 @@ function SkeletonRows({ count = 4 }: { count?: number }) {
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function DocCadPage() {
   const navigate   = useNavigate();
-  const cadOnline      = useCadStatus();
+  const { online: cadOnline, mode: cadMode } = useCadStatus();
   const selfDispatch   = useSelfDispatch();
   const clock      = useClock();
   const isMounted  = useRef(true);
@@ -3915,7 +3915,7 @@ export default function DocCadPage() {
               : 'border-[#0f1c2e] bg-[#02060b] text-[#4384ff]'
           }`}>
             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${cadOnline === false ? 'bg-red-500' : 'bg-[#4384ff] shadow-[0_0_6px_rgba(67,132,255,0.7)]'}`} />
-            {cadOnline === false ? 'Terminal Offline' : 'Terminal Online'}
+            {cadOnline === null ? 'Terminal Online' : `Terminal ${cadModeLabel(cadMode)}`}
           </div>
 
           {/* Active / Self Dispatch status — click for dropdown */}

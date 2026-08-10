@@ -2,7 +2,7 @@ import React, { FormEvent, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle, BookOpen, CalendarDays, Car, ChevronDown, ChevronRight, ChevronUp,
-  Clock, FileText, Globe, GripVertical, Info, LayoutDashboard, Layers, LogOut, MapPin, Package,
+  Clock, FileText, Globe, GripVertical, Info, LayoutDashboard, Layers, Lock, LogOut, MapPin, Package,
   Pencil, Phone, Plus, Radio, RefreshCw, Scale, Search, Settings,
   Shield, Trash2, Users, X,
 } from 'lucide-react';
@@ -23,7 +23,7 @@ import {
 } from '@/components/dps/DivisionRoster';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
 import { isSuperAdminSession } from '@/lib/superadmin';
-import { useCadStatus } from '@/hooks/useCadStatus';
+import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
 
@@ -540,6 +540,95 @@ const EditModal = ({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+};
+
+// ── Roster Access Permissions Modal ───────────────────────────────────────────
+const RosterAccessPermissionsModal = ({
+  member,
+  iabLabel,
+  resourceSaving,
+  iabSaving,
+  onClose,
+  onToggleResources,
+  onToggleIab,
+}: {
+  member: RosterMember;
+  iabLabel: string;
+  resourceSaving: boolean;
+  iabSaving: boolean;
+  onClose: () => void;
+  onToggleResources: (enabled: boolean) => void;
+  onToggleIab: (enabled: boolean) => void;
+}) => {
+  const rows = [
+    {
+      key: 'resources',
+      label: 'Resources',
+      description: 'View all restricted department resources',
+      enabled: Boolean(member.can_view_all_resources),
+      saving: resourceSaving,
+      icon: <BookOpen className="h-3.5 w-3.5" />,
+      on: 'border-[#a78bfa]/50 bg-[#a78bfa]/10 text-[#a78bfa]',
+      off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#a78bfa]/40 hover:text-[#a78bfa]',
+      onClick: () => onToggleResources(!member.can_view_all_resources),
+    },
+    {
+      key: 'iab',
+      label: 'IAB',
+      description: iabLabel,
+      enabled: Boolean(member.can_access_iab),
+      saving: iabSaving,
+      icon: <Scale className="h-3.5 w-3.5" />,
+      on: 'border-[#f4c542]/50 bg-[#f4c542]/10 text-[#f4c542]',
+      off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#f4c542]/40 hover:text-[#f4c542]',
+      onClick: () => onToggleIab(!member.can_access_iab),
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <div className="relative w-full max-w-md rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-black text-white">Access Permissions</h3>
+            <p className="mt-0.5 text-xs text-[#526179]">{member.username}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-2">
+          {rows.map(row => (
+            <button
+              key={row.key}
+              type="button"
+              disabled={row.saving}
+              onClick={row.onClick}
+              className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors disabled:opacity-40 ${row.enabled ? row.on : row.off}`}
+            >
+              <span className="shrink-0">{row.icon}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs font-black">{row.saving ? '…' : row.label}</span>
+                <span className="mt-0.5 block text-[10px] opacity-70">{row.description}</span>
+              </span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] ${
+                row.enabled ? 'bg-white/10' : 'bg-black/20 text-[#8392aa]'
+              }`}>
+                {row.enabled ? 'On' : 'Off'}
+              </span>
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-5 h-10 w-full rounded-lg border border-[#1e2d42] bg-transparent text-xs font-bold text-[#a8b7cd] hover:bg-white/5"
+        >
+          Done
+        </button>
       </div>
     </div>
   );
@@ -1378,7 +1467,7 @@ type PageBlock =
 
 const DepartmentOfPublicHealth = () => {
   const navigate = useNavigate();
-  const cadOnline = useCadStatus();
+  const { online: cadOnline, mode: cadMode } = useCadStatus();
 
   const [session,      setSession]      = useState<CadSession | null>(null);
   const [isLoading,    setIsLoading]    = useState(true);
@@ -1410,6 +1499,7 @@ const DepartmentOfPublicHealth = () => {
   const [panelLoading,  setPanelLoading]  = useState(false);
   const [panelSearch,   setPanelSearch]   = useState('');
   const [editMember,    setEditMember]    = useState<RosterMember | null>(null);
+  const [accessMemberId, setAccessMemberId] = useState<number | null>(null);
   const [addOpen,       setAddOpen]       = useState(false);
   // Department panel — ranks (for modal dropdowns)
   const [ranksRaw,        setRanksRaw]        = useState<DphRank[]>([]);
@@ -2690,6 +2780,23 @@ const DepartmentOfPublicHealth = () => {
           onClose={() => setEditMember(null)}
           onSave={async (id, form) => { await handleSaveEdit(id, form); }} />
       )}
+      {(() => {
+        const accessMember = accessMemberId == null
+          ? null
+          : panelMembers.find(m => m.id === accessMemberId) ?? null;
+        if (!accessMember) return null;
+        return (
+          <RosterAccessPermissionsModal
+            member={accessMember}
+            iabLabel="DPH Internal Affairs access"
+            resourceSaving={resourceAccessSavingId === accessMember.id}
+            iabSaving={iabAccessSavingId === accessMember.id}
+            onClose={() => setAccessMemberId(null)}
+            onToggleResources={enabled => void handleToggleViewAllResources(accessMember, enabled)}
+            onToggleIab={enabled => void handleToggleIabAccess(accessMember, enabled)}
+          />
+        );
+      })()}
       {addOpen && (
         <AddOfficerModal ranks={ranks} onClose={() => setAddOpen(false)} onAdd={handleAddOfficer} />
       )}
@@ -2708,7 +2815,7 @@ const DepartmentOfPublicHealth = () => {
         <div className={`flex items-center gap-2 rounded-full border px-3 py-1 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
           <span className={`text-[9px] font-black uppercase tracking-[0.34em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-            {cadOnline === false ? 'Offline' : 'Online'}
+            {cadOnline === null ? 'Online' : cadModeLabel(cadMode)}
           </span>
         </div>
         <button type="button" onClick={handleSignOut} disabled={isSigningOut}
@@ -2802,7 +2909,7 @@ const DepartmentOfPublicHealth = () => {
               <div className={`flex items-center gap-2 rounded-full border px-4 py-2 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
                 <span className={`h-2 w-2 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
                 <span className={`text-[10px] font-black uppercase tracking-[0.34em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-                  {cadOnline === false ? 'Terminal Offline' : 'Terminal Online'}
+                  {cadOnline === null ? 'Terminal Online' : `Terminal ${cadModeLabel(cadMode)}`}
                 </span>
               </div>
             </div>
@@ -4089,35 +4196,12 @@ const DepartmentOfPublicHealth = () => {
                                     <div className="flex items-center justify-end gap-2">
                                       <button
                                         type="button"
-                                        title={m.can_view_all_resources
-                                          ? 'Can view all restricted department resources — click to revoke'
-                                          : 'Grant access to view all restricted department resources'}
-                                        disabled={resourceAccessSavingId === m.id}
-                                        onClick={() => void handleToggleViewAllResources(m, !m.can_view_all_resources)}
-                                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-black transition-colors disabled:opacity-40 ${
-                                          m.can_view_all_resources
-                                            ? 'border-[#a78bfa]/50 bg-[#a78bfa]/10 text-[#a78bfa] hover:bg-[#a78bfa]/20'
-                                            : 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#a78bfa]/50 hover:text-[#a78bfa]'
-                                        }`}
+                                        title="Access permissions"
+                                        onClick={() => setAccessMemberId(m.id)}
+                                        className="flex items-center gap-1.5 rounded-lg border border-[#1f3050] bg-[#0a1525] px-3 py-1.5 text-[10px] font-black text-[#a8b7cd] hover:border-[#f4c542]/50 hover:text-[#f4c542] transition-colors"
                                       >
-                                        <BookOpen className="h-3 w-3" />
-                                        {resourceAccessSavingId === m.id ? '…' : 'Resources'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        title={m.can_access_iab
-                                          ? 'DPH Internal Affairs access ON — click to revoke'
-                                          : 'Grant access to DPH Internal Affairs'}
-                                        disabled={iabAccessSavingId === m.id}
-                                        onClick={() => void handleToggleIabAccess(m, !m.can_access_iab)}
-                                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-black transition-colors disabled:opacity-40 ${
-                                          m.can_access_iab
-                                            ? 'border-[#f4c542]/50 bg-[#f4c542]/10 text-[#f4c542] hover:bg-[#f4c542]/20'
-                                            : 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#f4c542]/50 hover:text-[#f4c542]'
-                                        }`}
-                                      >
-                                        <Scale className="h-3 w-3" />
-                                        {iabAccessSavingId === m.id ? '…' : 'IAB'}
+                                        <Lock className="h-3 w-3" />
+                                        Access
                                       </button>
                                       <button type="button" onClick={() => setEditMember(m)}
                                         className="flex items-center gap-1.5 rounded-lg border border-[#1f3050] bg-[#0a1525] px-3 py-1.5 text-[10px] font-black text-[#a8b7cd] hover:border-[#2f70ff] hover:text-white transition-colors">

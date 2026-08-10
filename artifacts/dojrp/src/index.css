@@ -407,19 +407,15 @@
   border-radius: 999px;
 }
 
-/* Index tab buttons: single-row sideways scroll with a thin bar */
+/* Index tab buttons: sideways scroll without a visible scrollbar
+   (wheel/touch still work; a visible bar fights the active underline) */
 .tab-button-scroller {
   touch-action: pan-x;
-  scrollbar-width: thin;
-  scrollbar-color: #1b2738 transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .tab-button-scroller::-webkit-scrollbar {
-  height: 6px;
-}
-.tab-button-scroller::-webkit-scrollbar-track {
-  background: transparent;
-}
-.tab-button-scroller::-webkit-scrollbar-thumb {
-  background: #1b2738;
-  border-radius: 999px;
+  display: none;
+  height: 0;
+  width: 0;
 }

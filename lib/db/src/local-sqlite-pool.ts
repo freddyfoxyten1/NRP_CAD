@@ -616,6 +616,9 @@ function bootstrapSchema(db: Database): void {
     ["callsign", "TEXT"],
     ["whitelisted", "INTEGER DEFAULT 0"],
     ["can_access_iab", "INTEGER NOT NULL DEFAULT 0"],
+    ["can_access_system_logs", "INTEGER NOT NULL DEFAULT 0"],
+    ["can_access_terms_privacy", "INTEGER NOT NULL DEFAULT 0"],
+    ["can_access_terminal_offline", "INTEGER NOT NULL DEFAULT 0"],
   ];
 
   for (const [column, def] of optionalProfileColumns) {

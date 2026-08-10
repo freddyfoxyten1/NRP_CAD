@@ -259,7 +259,7 @@ export function useMemberPortal() {
     navigate('/admin');
   };
 
-  const cadOnline = useCadStatus();
+  const { online: cadOnline, mode: cadMode } = useCadStatus();
   const username = portalData?.profile.username ?? 'Member';
   const rank = getMemberDisplayRank(portalData?.profile);
   const role = getMemberDisplayRole(portalData?.profile);
@@ -327,6 +327,7 @@ export function useMemberPortal() {
     handleSignOut,
     handleAdminPortal,
     cadOnline,
+    cadMode,
     username,
     rank,
     role,

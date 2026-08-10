@@ -19,6 +19,7 @@ import {
 } from '@/lib/legal-defaults';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { getStaffRosterTitle, getStaffSidebarTitle } from '@/lib/display-rank';
+import { cadModeLabel, type CadMode } from '@/hooks/useCadStatus';
 
 type StoreProductRow = StoreProduct & { id: number; sort_order?: number | null; created_at?: string };
 
@@ -116,7 +117,7 @@ type AuditLog = {
 type StaffGroup  = { id: number; name: string; sort_order: number; locked: boolean; staff_access: boolean; admin_access: boolean; doc_access: boolean };
 type StaffRank        = { id: number; name: string; sort_order: number; group_id: number | null; color_hex: string | null; discord_role_id: string | null; };
 type DiscordRoleOption = { id: string; name: string; position: number };
-type StaffMember = { id: number; username: string; discord_username: string; discord_id: string; avatar_hash: string | null; staff_rank: string | null; staff_role: string | null; status: string; staff_appointed_date: string | null; can_access_iab?: boolean; can_access_system_logs?: boolean; can_access_terms_privacy?: boolean };
+type StaffMember = { id: number; username: string; discord_username: string; discord_id: string; avatar_hash: string | null; staff_rank: string | null; staff_role: string | null; status: string; staff_appointed_date: string | null; can_access_iab?: boolean; can_access_system_logs?: boolean; can_access_terms_privacy?: boolean; can_access_terminal_offline?: boolean };
 type UserHit     = { id: number | null; username: string; discord_username: string | null; discord_id: string | null; nick: string | null; rank: string | null; source: 'cad' | 'discord' };
 
 type Announcement = {
@@ -451,6 +452,127 @@ const EditStaffMemberModal = ({ member, onClose, onSave, ranks }: { member: Staf
   );
 };
 
+// -- Staff Access Permissions Modal ----
+const StaffAccessPermissionsModal = ({
+  member,
+  onClose,
+  iabSaving,
+  adminTabSaving,
+  onToggleIab,
+  onToggleAdminTab,
+  onToggleTerminalOffline,
+}: {
+  member: StaffMember;
+  onClose: () => void;
+  iabSaving: boolean;
+  adminTabSaving: boolean;
+  onToggleIab: (enabled: boolean) => void;
+  onToggleAdminTab: (field: 'can_access_system_logs' | 'can_access_terms_privacy', enabled: boolean) => void;
+  onToggleTerminalOffline: (enabled: boolean) => void;
+}) => {
+  const rows: Array<{
+    key: string;
+    label: string;
+    description: string;
+    enabled: boolean;
+    saving: boolean;
+    icon: React.ReactNode;
+    on: string;
+    off: string;
+    onClick: () => void;
+  }> = [
+    {
+      key: 'iab',
+      label: 'IAB',
+      description: 'DPS Internal Affairs access',
+      enabled: Boolean(member.can_access_iab),
+      saving: iabSaving,
+      icon: <Scale className="h-3.5 w-3.5" />,
+      on: 'border-[#f4c542]/50 bg-[#f4c542]/10 text-[#f4c542]',
+      off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#f4c542]/40 hover:text-[#f4c542]',
+      onClick: () => onToggleIab(!member.can_access_iab),
+    },
+    {
+      key: 'logs',
+      label: 'System Logs',
+      description: 'Admin portal System Logs tab',
+      enabled: Boolean(member.can_access_system_logs),
+      saving: adminTabSaving,
+      icon: <FileText className="h-3.5 w-3.5" />,
+      on: 'border-[#38bdf8]/50 bg-[#38bdf8]/10 text-[#38bdf8]',
+      off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#38bdf8]/40 hover:text-[#38bdf8]',
+      onClick: () => onToggleAdminTab('can_access_system_logs', !member.can_access_system_logs),
+    },
+    {
+      key: 'tspp',
+      label: 'TS&PP',
+      description: 'Terms of Service & Privacy Policy',
+      enabled: Boolean(member.can_access_terms_privacy),
+      saving: adminTabSaving,
+      icon: <Shield className="h-3.5 w-3.5" />,
+      on: 'border-[#a78bfa]/50 bg-[#a78bfa]/10 text-[#a78bfa]',
+      off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#a78bfa]/40 hover:text-[#a78bfa]',
+      onClick: () => onToggleAdminTab('can_access_terms_privacy', !member.can_access_terms_privacy),
+    },
+    {
+      key: 'term',
+      label: 'Terminal Lockdown',
+      description: 'Sign in during Terminal lockdown',
+      enabled: Boolean(member.can_access_terminal_offline),
+      saving: adminTabSaving,
+      icon: <TerminalIcon className="h-3.5 w-3.5" />,
+      on: 'border-[#ff7070]/50 bg-[#ff7070]/10 text-[#ff7070]',
+      off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#ff7070]/40 hover:text-[#ff7070]',
+      onClick: () => onToggleTerminalOffline(!member.can_access_terminal_offline),
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+      <div className="relative w-full max-w-md rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-black text-white">Access Permissions</h3>
+            <p className="mt-0.5 text-xs text-[#526179]">{member.username}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-2">
+          {rows.map(row => (
+            <button
+              key={row.key}
+              type="button"
+              disabled={row.saving}
+              onClick={row.onClick}
+              className={`flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors disabled:opacity-40 ${row.enabled ? row.on : row.off}`}
+            >
+              <span className="shrink-0">{row.icon}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs font-black">{row.saving ? '…' : row.label}</span>
+                <span className="mt-0.5 block text-[10px] opacity-70">{row.description}</span>
+              </span>
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] ${
+                row.enabled ? 'bg-white/10' : 'bg-black/20 text-[#8392aa]'
+              }`}>
+                {row.enabled ? 'On' : 'Off'}
+              </span>
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-5 h-10 w-full rounded-lg border border-[#1e2d42] bg-transparent text-xs font-bold text-[#a8b7cd] hover:bg-white/5"
+        >
+          Done
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // -- Staff Rank Edit Modal ----
 const SrRankEditModal = ({ rank, discordRoles, onClose, onSaved }: {
   rank: StaffRank;
@@ -642,9 +764,10 @@ const AdminPortal = () => {
   const [confirmingDeleteAll, setConfirmingDeleteAll] = useState(false);
   const [confirmingRankSaveMemberId, setConfirmingRankSaveMemberId] = useState<number | null>(null);
   const [confirmingRemoveStaffId, setConfirmingRemoveStaffId] = useState<number | null>(null);
-  const [cadOnline, setCadOnline] = useState<boolean | null>(null);
+  const [cadMode, setCadMode] = useState<CadMode | null>(null);
+  const cadOnline = cadMode === null ? null : cadMode === 'online';
   const [isTogglingCad, setIsTogglingCad] = useState(false);
-  const [confirmingCadAction, setConfirmingCadAction] = useState<'shutdown' | 'open' | null>(null);
+  const [confirmingCadAction, setConfirmingCadAction] = useState<'members_locked' | 'lockdown' | 'open' | null>(null);
   const [memberCivData, setMemberCivData] = useState<Record<number, MemberCivData>>({});
   const [expandedCivSection, setExpandedCivSection] = useState<Record<number, 'characters' | 'vehicles' | 'weapons' | null>>({});
   const [editingCivItem, setEditingCivItem] = useState<{ type: 'character' | 'vehicle' | 'weapon'; id: number } | null>(null);
@@ -695,6 +818,7 @@ const AdminPortal = () => {
   const [srPanelSearch,       setSrPanelSearch]       = useState('');
   const [srAddOpen,           setSrAddOpen]           = useState(false);
   const [srEditMember,        setSrEditMember]        = useState<StaffMember | null>(null);
+  const [srAccessMemberId,    setSrAccessMemberId]    = useState<number | null>(null);
   const [srEditRank,          setSrEditRank]          = useState<StaffRank | null>(null);
   // rank drag-and-drop
   const [srDragRankId,        setSrDragRankId]        = useState<number | null>(null);
@@ -1543,22 +1667,35 @@ const AdminPortal = () => {
     // Load initial CAD status
     fetch('/api/settings/cad-status', { headers: { accept: 'application/json' } })
       .then((r) => r.json())
-      .then((d: { online: boolean }) => setCadOnline(d.online))
-      .catch(() => setCadOnline(true));
+      .then((d: { mode?: string; online?: boolean }) => {
+        if (d.mode === 'online' || d.mode === 'members_locked' || d.mode === 'lockdown') {
+          setCadMode(d.mode);
+        } else {
+          setCadMode(d.online === false ? 'lockdown' : 'online');
+        }
+      })
+      .catch(() => setCadMode('online'));
   }, [adminCode, navigate]);
 
-  const handleToggleCad = async (newOnline: boolean) => {
+  const handleSetCadMode = async (mode: CadMode) => {
     setConfirmingCadAction(null);
     setIsTogglingCad(true);
     try {
       const res = await fetch('/api/settings/cad-status', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-admin-code': adminCode },
-        body: JSON.stringify({ online: newOnline, actor: currentAdmin?.username ?? 'Admin' }),
+        body: JSON.stringify({ mode, actor: currentAdmin?.username ?? 'Admin' }),
       });
       if (!res.ok) throw new Error();
-      setCadOnline(newOnline);
-      toast.success(newOnline ? 'CAD is now online. Members can sign in.' : 'CAD has been shut down. Only admins can sign in.');
+      const data = await res.json() as { mode?: CadMode };
+      setCadMode(data.mode === 'online' || data.mode === 'members_locked' || data.mode === 'lockdown' ? data.mode : mode);
+      toast.success(
+        mode === 'online'
+          ? 'CAD is now online. Members can sign in.'
+          : mode === 'members_locked'
+            ? 'Members Locked. Staff can still sign in.'
+            : 'Lockdown on. Everyone including staff is blocked except superadmins and authorised staff.',
+      );
     } catch {
       toast.error('Failed to update CAD status. Please try again.');
     } finally {
@@ -1935,6 +2072,55 @@ const AdminPortal = () => {
       toast.error('Failed to update Internal Affairs access.');
     } finally {
       setIabAccessSavingId(null);
+    }
+  };
+
+  const handleToggleStaffTerminalOfflineAccess = async (
+    member: StaffMember,
+    enabled: boolean,
+  ) => {
+    setAdminTabAccessSavingId(member.id);
+    setStaffRosterMembers(prev => prev.map(m =>
+      m.id === member.id ? { ...m, can_access_terminal_offline: enabled } : m
+    ));
+    try {
+      const res = await fetch(`/api/staff/roster/${member.id}/terminal-offline-access`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          can_access_terminal_offline: enabled,
+          actor: currentAdmin?.username ?? 'Admin',
+        }),
+      });
+      if (!res.ok) {
+        setStaffRosterMembers(prev => prev.map(m =>
+          m.id === member.id ? { ...m, can_access_terminal_offline: !enabled } : m
+        ));
+        toast.error('Failed to update terminal lockdown access.');
+        return;
+      }
+      const data = await res.json() as { can_access_terminal_offline?: boolean };
+      setStaffRosterMembers(prev => prev.map(m =>
+        m.id === member.id
+          ? { ...m, can_access_terminal_offline: Boolean(data.can_access_terminal_offline) }
+          : m
+      ));
+      if (currentAdmin && currentAdmin.id === member.id) {
+        const next = {
+          ...currentAdmin,
+          can_access_terminal_offline: Boolean(data.can_access_terminal_offline),
+        };
+        setCurrentAdmin(next);
+        setCadSession(next);
+      }
+      toast.success(enabled ? 'Terminal lockdown access granted.' : 'Terminal lockdown access revoked.');
+    } catch {
+      setStaffRosterMembers(prev => prev.map(m =>
+        m.id === member.id ? { ...m, can_access_terminal_offline: !enabled } : m
+      ));
+      toast.error('Failed to update terminal lockdown access.');
+    } finally {
+      setAdminTabAccessSavingId(null);
     }
   };
 
@@ -2345,7 +2531,7 @@ const AdminPortal = () => {
         <div className={`flex items-center gap-2 rounded-full border px-3 py-1 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
           <span className={`text-[9px] font-black uppercase tracking-[0.34em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-            {cadOnline === false ? 'Terminal Offline' : 'Terminal Online'}
+            {cadOnline === null ? 'Terminal Online' : `Terminal ${cadModeLabel(cadMode)}`}
           </span>
         </div>
         <button
@@ -2436,7 +2622,7 @@ const AdminPortal = () => {
               <div className={`flex items-center gap-2 rounded-full border px-4 py-2 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
                 <span className={`h-2 w-2 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
                 <span className={`text-[10px] font-black uppercase tracking-[0.34em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-                  {cadOnline === false ? 'Terminal Offline' : 'Terminal Online'}
+                  {cadOnline === null ? 'Terminal Online' : `Terminal ${cadModeLabel(cadMode)}`}
                 </span>
               </div>
             </div>
@@ -2740,6 +2926,23 @@ const AdminPortal = () => {
                     }}
                   />
                 )}
+                {(() => {
+                  const accessMember = srAccessMemberId == null
+                    ? null
+                    : staffRosterMembers.find(m => m.id === srAccessMemberId) ?? null;
+                  if (!accessMember) return null;
+                  return (
+                    <StaffAccessPermissionsModal
+                      member={accessMember}
+                      onClose={() => setSrAccessMemberId(null)}
+                      iabSaving={iabAccessSavingId === accessMember.id}
+                      adminTabSaving={adminTabAccessSavingId === accessMember.id}
+                      onToggleIab={enabled => void handleToggleStaffIabAccess(accessMember, enabled)}
+                      onToggleAdminTab={(field, enabled) => void handleToggleStaffAdminTabAccess(accessMember, field, enabled)}
+                      onToggleTerminalOffline={enabled => void handleToggleStaffTerminalOfflineAccess(accessMember, enabled)}
+                    />
+                  );
+                })()}
                 {srEditRank && (
                   <SrRankEditModal
                     rank={srEditRank}
@@ -3135,51 +3338,11 @@ const AdminPortal = () => {
                                     <div className="flex items-center justify-end gap-2">
                                       <button
                                         type="button"
-                                        title={m.can_access_iab
-                                          ? 'DPS Internal Affairs access ON — click to revoke'
-                                          : 'Grant access to DPS Internal Affairs'}
-                                        disabled={iabAccessSavingId === m.id}
-                                        onClick={() => void handleToggleStaffIabAccess(m, !m.can_access_iab)}
-                                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-black transition-colors disabled:opacity-40 ${
-                                          m.can_access_iab
-                                            ? 'border-[#f4c542]/50 bg-[#f4c542]/10 text-[#f4c542] hover:bg-[#f4c542]/20'
-                                            : 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#f4c542]/50 hover:text-[#f4c542]'
-                                        }`}
+                                        title="Access permissions"
+                                        onClick={() => setSrAccessMemberId(m.id)}
+                                        className="flex items-center gap-1.5 rounded-lg border border-[#1f3050] bg-[#0a1525] px-3 py-1.5 text-[10px] font-black text-[#a8b7cd] hover:border-[#f4c542]/50 hover:text-[#f4c542] transition-colors"
                                       >
-                                        <Scale className="h-3 w-3" />
-                                        {iabAccessSavingId === m.id ? '…' : 'IAB'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        title={m.can_access_system_logs
-                                          ? 'System Logs access ON — click to revoke'
-                                          : 'Grant access to System Logs'}
-                                        disabled={adminTabAccessSavingId === m.id}
-                                        onClick={() => void handleToggleStaffAdminTabAccess(m, 'can_access_system_logs', !m.can_access_system_logs)}
-                                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-black transition-colors disabled:opacity-40 ${
-                                          m.can_access_system_logs
-                                            ? 'border-[#38bdf8]/50 bg-[#38bdf8]/10 text-[#38bdf8] hover:bg-[#38bdf8]/20'
-                                            : 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#38bdf8]/50 hover:text-[#38bdf8]'
-                                        }`}
-                                      >
-                                        <FileText className="h-3 w-3" />
-                                        {adminTabAccessSavingId === m.id ? '…' : 'Logs'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        title={m.can_access_terms_privacy
-                                          ? 'Terms of Service & Privacy Policy access ON — click to revoke'
-                                          : 'Grant access to Terms of Service & Privacy Policy'}
-                                        disabled={adminTabAccessSavingId === m.id}
-                                        onClick={() => void handleToggleStaffAdminTabAccess(m, 'can_access_terms_privacy', !m.can_access_terms_privacy)}
-                                        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-black transition-colors disabled:opacity-40 ${
-                                          m.can_access_terms_privacy
-                                            ? 'border-[#a78bfa]/50 bg-[#a78bfa]/10 text-[#a78bfa] hover:bg-[#a78bfa]/20'
-                                            : 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#a78bfa]/50 hover:text-[#a78bfa]'
-                                        }`}
-                                      >
-                                        <Shield className="h-3 w-3" />
-                                        {adminTabAccessSavingId === m.id ? '…' : 'TS&PP'}
+                                        <Lock className="h-3 w-3" />Access
                                       </button>
                                       <button type="button" onClick={() => setSrEditMember(m)}
                                         className="flex items-center gap-1.5 rounded-lg border border-[#1f3050] bg-[#0a1525] px-3 py-1.5 text-[10px] font-black text-[#a8b7cd] hover:border-[#2f70ff] hover:text-white transition-colors">
@@ -4148,22 +4311,42 @@ const AdminPortal = () => {
 
                   {/* Big status indicator */}
                   <div className="mb-8 flex flex-col items-center gap-4 py-6">
-                    <div className={`flex h-20 w-20 items-center justify-center rounded-full border-2 ${cadOnline === false ? 'border-red-500/40 bg-red-500/10' : 'border-blue-500/40 bg-blue-500/10'}`}>
-                      <span className={`h-8 w-8 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d] shadow-[0_0_18px_rgba(255,93,93,0.6)]' : 'bg-[#4384ff] shadow-[0_0_18px_rgba(67,132,255,0.6)]'}`} />
+                    <div className={`flex h-20 w-20 items-center justify-center rounded-full border-2 ${
+                      cadMode === 'lockdown'
+                        ? 'border-red-500/40 bg-red-500/10'
+                        : cadMode === 'members_locked'
+                          ? 'border-amber-500/40 bg-amber-500/10'
+                          : 'border-blue-500/40 bg-blue-500/10'
+                    }`}>
+                      <span className={`h-8 w-8 rounded-full ${
+                        cadMode === 'lockdown'
+                          ? 'bg-[#ff5d5d] shadow-[0_0_18px_rgba(255,93,93,0.6)]'
+                          : cadMode === 'members_locked'
+                            ? 'bg-[#f4c542] shadow-[0_0_18px_rgba(244,197,66,0.55)]'
+                            : 'bg-[#4384ff] shadow-[0_0_18px_rgba(67,132,255,0.6)]'
+                      }`} />
                     </div>
                     <div className="text-center">
-                      <p className={`text-2xl font-black tracking-tight ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-                        {cadOnline === null ? 'Loading...' : cadOnline ? 'Terminal Online' : 'Terminal Offline'}
+                      <p className={`text-2xl font-black tracking-tight ${
+                        cadMode === 'lockdown'
+                          ? 'text-[#ff7070]'
+                          : cadMode === 'members_locked'
+                            ? 'text-[#f4c542]'
+                            : 'text-[#4384ff]'
+                      }`}>
+                        {cadMode === null ? 'Loading...' : `Terminal ${cadModeLabel(cadMode)}`}
                       </p>
                       <p className="mt-1 text-sm text-[#526179]">
-                        {cadOnline === false
-                          ? 'CAD is shut down. Only Executive Board, Management, and Admin accounts can sign in.'
-                          : 'CAD is active. All members can sign in normally.'}
+                        {cadMode === 'lockdown'
+                          ? 'Everyone including staff is blocked except superadmins and staff with Terminal lockdown access.'
+                          : cadMode === 'members_locked'
+                            ? 'Members cannot sign in. Staff can still sign in normally.'
+                            : 'CAD is active. All members can sign in normally.'}
                       </p>
                     </div>
                   </div>
 
-                  {/* Action */}
+                  {/* Actions */}
                   {cadOnline === false ? (
                     confirmingCadAction === 'open' ? (
                       <div className="rounded-lg border border-blue-400/30 bg-blue-500/10 p-4">
@@ -4171,11 +4354,11 @@ const AdminPortal = () => {
                         <div className="flex gap-2">
                           <button
                             type="button"
-                            onClick={() => handleToggleCad(true)}
+                            onClick={() => void handleSetCadMode('online')}
                             disabled={isTogglingCad}
                             className="rounded-md bg-[#4384ff] px-5 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-[#2f70ff] disabled:opacity-60"
                           >
-                            {isTogglingCad ? 'Opening...' : 'Confirm Open CAD'}
+                            {isTogglingCad ? 'Opening...' : 'Confirm Open Terminal'}
                           </button>
                           <button
                             type="button"
@@ -4191,47 +4374,78 @@ const AdminPortal = () => {
                       <button
                         type="button"
                         onClick={() => setConfirmingCadAction('open')}
-                        disabled={isTogglingCad || cadOnline === null}
+                        disabled={isTogglingCad || cadMode === null}
                         className="inline-flex items-center gap-2 rounded-lg bg-[#4384ff] px-6 py-3 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-[#2f70ff] disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <TerminalIcon className="h-4 w-4" />
-                        Open CAD
+                        Open Terminal
                       </button>
                     )
-                  ) : (
-                    confirmingCadAction === 'shutdown' ? (
-                      <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-4">
-                        <p className="mb-3 text-sm font-bold text-red-200">Shut down the CAD? Members will not be able to sign in until it is reopened.</p>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleCad(false)}
-                            disabled={isTogglingCad}
-                            className="rounded-md bg-red-500 px-5 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-red-400 disabled:opacity-60"
-                          >
-                            {isTogglingCad ? 'Shutting down...' : 'Confirm Shutdown'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmingCadAction(null)}
-                            disabled={isTogglingCad}
-                            className="rounded-md border border-[#263247] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#a8b7cd] transition-colors hover:text-white disabled:opacity-60"
-                          >
-                            Cancel
-                          </button>
-                        </div>
+                  ) : confirmingCadAction === 'members_locked' ? (
+                    <div className="rounded-lg border border-amber-400/30 bg-amber-500/10 p-4">
+                      <p className="mb-3 text-sm font-bold text-amber-100">Lock members out? Staff can still sign in. Members will be blocked until you reopen.</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleSetCadMode('members_locked')}
+                          disabled={isTogglingCad}
+                          className="rounded-md bg-[#f4c542] px-5 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#1a1400] transition-colors hover:bg-[#ffd45a] disabled:opacity-60"
+                        >
+                          {isTogglingCad ? 'Updating...' : 'Confirm Members Locked'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingCadAction(null)}
+                          disabled={isTogglingCad}
+                          className="rounded-md border border-[#263247] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#a8b7cd] transition-colors hover:text-white disabled:opacity-60"
+                        >
+                          Cancel
+                        </button>
                       </div>
-                    ) : (
+                    </div>
+                  ) : confirmingCadAction === 'lockdown' ? (
+                    <div className="rounded-lg border border-red-400/30 bg-red-500/10 p-4">
+                      <p className="mb-3 text-sm font-bold text-red-200">Full lockdown? Everyone including staff is blocked. Only superadmins and staff with Terminal lockdown access (roster) can sign in.</p>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleSetCadMode('lockdown')}
+                          disabled={isTogglingCad}
+                          className="rounded-md bg-red-500 px-5 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-white transition-colors hover:bg-red-400 disabled:opacity-60"
+                        >
+                          {isTogglingCad ? 'Updating...' : 'Confirm Lockdown'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingCadAction(null)}
+                          disabled={isTogglingCad}
+                          className="rounded-md border border-[#263247] px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#a8b7cd] transition-colors hover:text-white disabled:opacity-60"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row">
                       <button
                         type="button"
-                        onClick={() => setConfirmingCadAction('shutdown')}
-                        disabled={isTogglingCad || cadOnline === null}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-400/30 bg-red-500/10 px-6 py-3 text-[10px] font-black uppercase tracking-[0.16em] text-red-100 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => setConfirmingCadAction('members_locked')}
+                        disabled={isTogglingCad || cadMode === null}
+                        className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-amber-400/30 bg-amber-500/10 px-6 py-3 text-[10px] font-black uppercase tracking-[0.16em] text-amber-100 transition-colors hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        <TerminalIcon className="h-4 w-4" />
-                        Shutdown CAD
+                        <Users className="h-4 w-4" />
+                        Members Locked
                       </button>
-                    )
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingCadAction('lockdown')}
+                        disabled={isTogglingCad || cadMode === null}
+                        className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-400/30 bg-red-500/10 px-6 py-3 text-[10px] font-black uppercase tracking-[0.16em] text-red-100 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Lock className="h-4 w-4" />
+                        Lockdown
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -4241,11 +4455,15 @@ const AdminPortal = () => {
                   <div className="space-y-3 text-sm text-[#8392aa]">
                     <div className="flex items-start gap-3">
                       <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#4384ff]" />
-                      <p><span className="font-bold text-white">When Online</span>  -  All members with valid accounts can sign in.</p>
+                      <p><span className="font-bold text-white">Online</span> — All members with valid accounts can sign in.</p>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#f4c542]" />
+                      <p><span className="font-bold text-white">Members Locked</span> — Regular members cannot sign in. Staff (anyone on the staff roster) can still sign in.</p>
                     </div>
                     <div className="flex items-start gap-3">
                       <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#ff5d5d]" />
-                      <p><span className="font-bold text-white">When Offline</span>  -  Only Executive Board, Management, Admin, and whitelisted accounts can sign in. All other sign-in attempts are blocked.</p>
+                      <p><span className="font-bold text-white">Lockdown</span> — Everyone including staff cannot sign in except superadmins and members granted Terminal lockdown access on the staff roster (Access → Terminal Lockdown).</p>
                     </div>
                   </div>
                 </div>

@@ -63,7 +63,7 @@ const LegalDocModal = ({ doc, onClose, onSwitch }: LegalDocModalProps) => {
           className="mb-6 inline-flex items-center gap-2 text-[13px] font-bold text-[#7b91ad] transition-colors hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to the portal
+          Back to sign in
         </button>
 
         <div className="mb-6 text-center">

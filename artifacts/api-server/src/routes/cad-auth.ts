@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
+import { canSignInForCadMode } from "../lib/discord-auth";
 import { heartbeat } from "../lib/online-tracker";
 
 const router = Router();
@@ -39,6 +40,7 @@ router.post("/cad-auth/sign-in", async (req, res) => {
       can_access_iab: boolean | number | null;
       can_access_system_logs: boolean | number | null;
       can_access_terms_privacy: boolean | number | null;
+      can_access_terminal_offline: boolean | number | null;
     }>(
       `SELECT p.id, p.username, p.email, p.rank, p.role, p.status,
               COALESCE(NULLIF(d.dps_rank,''), p.dps_rank) AS dps_rank,
@@ -47,7 +49,8 @@ router.post("/cad-auth/sign-in", async (req, res) => {
               p.password_salt, p.password_hash,
               COALESCE(p.can_access_iab, false) AS can_access_iab,
               COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
-              COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy
+              COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
+              COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
        FROM cad_user_profiles p
        LEFT JOIN dps_users d ON d.profile_id = p.id
        WHERE lower(p.username) = $1
@@ -69,30 +72,14 @@ router.post("/cad-auth/sign-in", async (req, res) => {
       return;
     }
 
-    // Check if CAD is online — if offline, only admin roles + whitelisted accounts may sign in.
-    // Prefer staff_role (new) over legacy role field.
-    const effectiveRole = (account.staff_role ?? account.role).toLowerCase();
-    const isPrivileged =
-      ["executive team", "owner", "executive", "executive board", "management", "admin"].includes(effectiveRole);
-
-    if (!isPrivileged) {
-      const whitelistCheck = await pool.query<{ whitelisted: boolean }>(
-        `SELECT whitelisted FROM cad_user_profiles WHERE id=$1 LIMIT 1`,
-        [account.id]
-      );
-      const whitelisted = whitelistCheck.rows[0]?.whitelisted ?? false;
-
-      if (!whitelisted) {
-        const statusCheck = await pool.query<{ value: string }>(
-          `SELECT value FROM cad_settings WHERE key='cad_online' LIMIT 1`
-        );
-        const cadOnline = statusCheck.rows[0]?.value !== "false";
-
-        if (!cadOnline) {
-          res.status(503).json({ error: "CAD is currently offline. Only administrators may sign in." });
-          return;
-        }
-      }
+    const access = await canSignInForCadMode(account.id);
+    if (!access.allowed) {
+      res.status(503).json({
+        error: access.error ?? "CAD is currently offline.",
+        code: "cad_offline",
+        mode: access.mode,
+      });
+      return;
     }
 
     res.json({
@@ -109,6 +96,7 @@ router.post("/cad-auth/sign-in", async (req, res) => {
       can_access_iab: Boolean(account.can_access_iab),
       can_access_system_logs: Boolean(account.can_access_system_logs),
       can_access_terms_privacy: Boolean(account.can_access_terms_privacy),
+      can_access_terminal_offline: Boolean(account.can_access_terminal_offline),
     });
   } catch (err) {
     req.log.error({ err }, "cad-auth/sign-in error");
@@ -143,6 +131,7 @@ router.post("/cad-auth/session-status", async (req, res) => {
       can_access_iab: boolean | number | null;
       can_access_system_logs: boolean | number | null;
       can_access_terms_privacy: boolean | number | null;
+      can_access_terminal_offline: boolean | number | null;
     }>(
       `SELECT p.id, p.username, p.email, p.rank, p.role, p.status,
               COALESCE(NULLIF(d.dps_rank,''), p.dps_rank) AS dps_rank,
@@ -151,7 +140,8 @@ router.post("/cad-auth/session-status", async (req, res) => {
               p.discord_id, p.avatar_hash,
               COALESCE(p.can_access_iab, false) AS can_access_iab,
               COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
-              COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy
+              COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
+              COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
        FROM cad_user_profiles p
        LEFT JOIN dps_users d ON d.profile_id = p.id
        WHERE p.id = $1 AND lower(p.email) = $2
@@ -168,6 +158,7 @@ router.post("/cad-auth/session-status", async (req, res) => {
         can_access_iab: Boolean(account.can_access_iab),
         can_access_system_logs: Boolean(account.can_access_system_logs),
         can_access_terms_privacy: Boolean(account.can_access_terms_privacy),
+        can_access_terminal_offline: Boolean(account.can_access_terminal_offline),
       },
     } : { active: false });
   } catch (err) {

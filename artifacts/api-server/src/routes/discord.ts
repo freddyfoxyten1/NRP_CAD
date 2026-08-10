@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import {
-  canSignInWhileCadOffline,
+  canSignInForCadMode,
   createCadAccountFromDiscord,
   getCommunityGuildJoinInfo,
   getRedirectUri,
@@ -189,11 +189,12 @@ router.post("/discord/oauth/login", async (req, res) => {
       req.log.info({ discordId: id, cadId: profileId }, "discord login: superadmin elevated");
     }
 
-    const allowed = await canSignInWhileCadOffline(profileId);
-    if (!allowed) {
+    const access = await canSignInForCadMode(profileId);
+    if (!access.allowed) {
       res.status(503).json({
-        error: "CAD is currently offline. Only administrators may sign in.",
+        error: access.error ?? "CAD is currently offline.",
         code: "cad_offline",
+        mode: access.mode,
       });
       return;
     }

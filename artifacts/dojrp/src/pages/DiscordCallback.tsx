@@ -91,6 +91,7 @@ const DiscordCallback = () => {
         const payload = await loginRes.json() as (CadSession & {
           error?: string;
           code?: string;
+          mode?: string;
           guild_name?: string;
           invite_code?: string | null;
           invite_url?: string | null;
@@ -112,7 +113,14 @@ const DiscordCallback = () => {
             return;
           }
 
-          setState({ kind: 'error', message: payload.error ?? 'Login failed.' });
+          const offlineMessage =
+            payload.code === 'cad_offline'
+              ? (payload.error
+                ?? (payload.mode === 'members_locked'
+                  ? 'CAD is locked for members. Only staff accounts may sign in.'
+                  : 'CAD is in lockdown. Only superadmins and authorised staff may sign in.'))
+              : (payload.error ?? 'Login failed.');
+          setState({ kind: 'error', message: offlineMessage });
           setTimeout(() => navigate('/', { replace: true }), 3500);
           return;
         }

@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import DojrpLogo from '@/components/shared/DojrpLogo';
 import DojrpShield from '@/components/shared/DojrpShield';
-import { useCadStatus } from '@/hooks/useCadStatus';
+import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import LegalDocModal, { type LegalDoc } from '@/components/overlays/LegalDocModal';
 
 interface LoginModalProps {
@@ -26,7 +26,7 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
   const [pending, setPending] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
   const [legalDoc, setLegalDoc] = useState<LegalDoc | null>(null);
-  const cadOnline = useCadStatus();
+  const { online: cadOnline, mode: cadMode } = useCadStatus();
 
   if (!isOpen) return null;
 
@@ -61,6 +61,13 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
     }
   };
 
+  const offlineWarning =
+    cadMode === 'members_locked'
+      ? 'Terminal is locked for members. Staff accounts can still sign in.'
+      : cadMode === 'lockdown'
+        ? 'Terminal is in lockdown. Only superadmins and authorised staff may sign in.'
+        : null;
+
   return (
         <div className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-[#03070c]/95 px-4 py-6 text-white sm:items-center sm:py-8">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_center,rgba(21,34,56,0.5)_0,rgba(3,7,12,0)_60%)]" />
@@ -84,7 +91,7 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
             <DojrpLogo />
           </p>
           <h2 className="mt-5 text-[32px] font-black leading-none tracking-[-0.045em] text-white">
-            Central Portal
+            DOJ CAD
           </h2>
           <p className="mt-3 text-[11px] font-black uppercase tracking-[0.22em] text-[#5b8fd9]">
             Roleplay CAD &amp; Roster
@@ -94,7 +101,7 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
           <div className={`mt-5 inline-flex items-center gap-2 rounded-full border px-3 py-1 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d] shadow-[0_0_6px_rgba(255,93,93,0.6)]' : 'bg-[#4384ff] shadow-[0_0_6px_rgba(67,132,255,0.6)]'}`} />
             <span className={`text-[9px] font-black uppercase tracking-[0.3em] ${cadOnline === false ? 'text-[#ff7070]' : 'text-[#4384ff]'}`}>
-              {cadOnline === false ? 'Terminal Offline' : 'Terminal Online'}
+              {cadOnline === null ? 'Terminal Online' : `Terminal ${cadModeLabel(cadMode)}`}
             </span>
           </div>
         </div>
@@ -107,9 +114,9 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
         )}
 
         {/* Offline warning */}
-        {cadOnline === false && (
+        {offlineWarning && (
           <div className="mt-6 rounded-lg border border-amber-500/20 bg-amber-500/8 px-4 py-3 text-center text-[13px] text-amber-300">
-            Terminal is offline. Only staff accounts can access the system.
+            {offlineWarning}
           </div>
         )}
 

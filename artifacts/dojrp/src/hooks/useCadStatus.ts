@@ -1,18 +1,37 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// hooks/useCadStatus.ts  —  CAD online/offline indicator
+// hooks/useCadStatus.ts  —  CAD online / members-locked / lockdown indicator
 //
-// Polls /api/settings/cad-status on an interval and returns whether the CAD
-// terminal is currently open/online.  The status badge in the nav bar uses
-// this hook to stay up to date.
+// Polls /api/settings/cad-status on an interval and returns the terminal mode.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 
+export type CadMode = 'online' | 'members_locked' | 'lockdown';
+
+export type CadStatus = {
+  /** true only when mode === 'online' */
+  online: boolean | null;
+  mode: CadMode | null;
+};
+
+export function cadModeLabel(mode: CadMode | null | undefined): string {
+  if (mode === 'members_locked') return 'Members Locked';
+  if (mode === 'lockdown') return 'Lockdown';
+  if (mode === 'online') return 'Online';
+  return 'Online';
+}
+
+export function cadModeShortLabel(mode: CadMode | null | undefined): string {
+  if (mode === 'members_locked') return 'Members Locked';
+  if (mode === 'lockdown') return 'Lockdown';
+  return 'Online';
+}
+
 /**
  * Polls /api/settings/cad-status every 15 seconds.
- * Returns null while loading, then true (online) or false (offline).
+ * `online` is null while loading.
  */
-export function useCadStatus(): boolean | null {
-  const [online, setOnline] = useState<boolean | null>(null);
+export function useCadStatus(): CadStatus {
+  const [status, setStatus] = useState<CadStatus>({ online: null, mode: null });
 
   useEffect(() => {
     let mounted = true;
@@ -23,8 +42,14 @@ export function useCadStatus(): boolean | null {
           headers: { accept: 'application/json' },
         });
         if (res.ok && mounted) {
-          const data = (await res.json()) as { online: boolean };
-          setOnline(data.online);
+          const data = (await res.json()) as { online?: boolean; mode?: string };
+          const mode =
+            data.mode === 'members_locked' || data.mode === 'lockdown' || data.mode === 'online'
+              ? data.mode
+              : data.online === false
+                ? 'lockdown'
+                : 'online';
+          setStatus({ mode, online: mode === 'online' });
         }
       } catch {
         // keep previous state on network error
@@ -39,5 +64,5 @@ export function useCadStatus(): boolean | null {
     };
   }, []);
 
-  return online;
+  return status;
 }
