@@ -250,9 +250,50 @@ curl -N https://cad.dojrblx.com/api/phone/events?username=test --max-time 5
 | View logs                 | `bm2 logs dojcad-api --lines 100`            |
 | Restart API               | `bm2 restart dojcad-api`                     |
 | Stop API                  | `bm2 stop dojcad-api`                        |
-| Deploy latest code        | `git pull && bun install && bun run build && bm2 restart dojcad-api` |
+| **Deploy latest code**    | `sudo bash deploy/deploy.sh`                 |
 | Rebuild only API          | `cd artifacts/api-server && bun run build`  |
 | Rebuild only frontend     | `cd artifacts/dojrp && bun run build`       |
+
+> **Important**: `/var/www/dojcad` must be the **git repo itself** (not a copy).
+> If you copied it from `/root/DOJCAD`, `git pull` in `/root/DOJCAD` won't
+> update it. Migrate to a single source of truth (see below).
+
+### Migrate to `/var/www/dojcad` as the single source of truth
+
+If `/var/www/dojcad` is currently a copy (not a git repo), fix it once:
+
+```bash
+# 1. Stop the API (it's running from /root/DOJCAD)
+bm2 stop dojcad-api
+
+# 2. Remove the copy
+sudo rm -rf /var/www/dojcad
+
+# 3. Clone the real repo into /var/www/dojcad
+sudo mkdir -p /var/www
+sudo git clone https://github.com/DOJ-Development/DOJCAD.git /var/www/dojcad
+sudo chown -R $USER:$USER /var/www/dojcad
+
+# 4. Copy your .env (secrets) from the old location
+cp /root/DOJCAD/.env /var/www/dojcad/.env
+
+# 5. Install + build
+cd /var/www/dojcad
+bun install
+bun run build
+
+# 6. Start the API from the new location
+bm2 start ecosystem.config.js
+bm2 save
+
+# 7. (Optional) remove the old /root/DOJCAD copy
+# rm -rf /root/DOJCAD
+```
+
+After this, `/var/www/dojcad` is the single repo. Deploy updates with:
+```bash
+sudo bash /var/www/dojcad/deploy/deploy.sh
+```
 
 ---
 
