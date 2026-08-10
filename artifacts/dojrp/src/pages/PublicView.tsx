@@ -269,12 +269,15 @@ const PublicView = () => {
   const [lightbox,      setLightbox]      = useState<GalleryImage | null>(null);
   const galleryTrackRef = useRef<HTMLDivElement | null>(null);
   const galleryFirstCopyRef = useRef<HTMLDivElement | null>(null);
+  const galleryScrollerRef = useRef<HTMLDivElement | null>(null);
   const galleryPausedRef = useRef(false);
   const [galleryTrackEl, setGalleryTrackEl] = useState<HTMLDivElement | null>(null);
+  const [galleryCopies, setGalleryCopies] = useState(2);
   const setGalleryTrackNode = useCallback((node: HTMLDivElement | null) => {
     galleryTrackRef.current = node;
     setGalleryTrackEl(node);
   }, []);
+  const tabScrollRef = useRef<HTMLDivElement | null>(null);
   const [statsLoading,  setStatsLoading]  = useState(true);
   const [events,        setEvents]        = useState<DpsEvent[]>([]);
   const [eventsLoading, setEventsLoading] = useState(false);
@@ -313,26 +316,51 @@ const PublicView = () => {
     return () => clearInterval(id);
   }, []);
 
-  // Home Gallery: slow continuous left auto-scroll (starts when track mounts)
+  // Enough duplicated sets so the strip never shows empty space before looping
   useEffect(() => {
+    if (tab !== "home" || gallery.length === 0) return;
+    const scroller = galleryScrollerRef.current;
+    const firstCopy = galleryFirstCopyRef.current;
+    if (!scroller || !firstCopy) return;
+
+    const updateCopies = () => {
+      const setWidth = firstCopy.offsetWidth;
+      if (setWidth <= 0) return;
+      // Fill viewport at least twice, then +1 set for a seamless wrap
+      const needed = Math.max(2, Math.ceil((scroller.clientWidth * 2) / setWidth) + 1);
+      setGalleryCopies(prev => (prev === needed ? prev : needed));
+    };
+
+    updateCopies();
+    const ro = new ResizeObserver(updateCopies);
+    ro.observe(scroller);
+    ro.observe(firstCopy);
+    return () => ro.disconnect();
+  }, [tab, gallery.length, galleryTrackEl]);
+
+  // Home Gallery ONLY: endless left auto-scroll — when a full set ends, first image follows again
+  useEffect(() => {
+    if (tab !== "home") return;
     const track = galleryTrackEl;
     const firstCopy = galleryFirstCopyRef.current;
     if (!track || !firstCopy || gallery.length === 0) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     let raf = 0;
     let offset = 0;
     let last = performance.now();
-    const speedPxPerSec = 28;
+    const speedPxPerSec = 32;
+    let running = true;
 
     const tick = (now: number) => {
+      if (!running) return;
       const dt = Math.min(now - last, 64);
       last = now;
       if (!galleryPausedRef.current && !document.hidden) {
         const loopAt = firstCopy.offsetWidth;
         if (loopAt > 0) {
           offset += (speedPxPerSec * dt) / 1000;
-          if (offset >= loopAt) offset -= loopAt;
+          // Jump back exactly one set — next copy already starts with image 1
+          while (offset >= loopAt) offset -= loopAt;
           track.style.transform = `translate3d(${-offset}px, 0, 0)`;
         }
       }
@@ -341,10 +369,29 @@ const PublicView = () => {
 
     raf = requestAnimationFrame(tick);
     return () => {
+      running = false;
       cancelAnimationFrame(raf);
       track.style.transform = "";
     };
-  }, [galleryTrackEl, gallery.length]);
+  }, [tab, galleryTrackEl, gallery.length, galleryCopies]);
+
+  // Tab bar: map mouse wheel to horizontal scroll so Store / Press stay reachable
+  useEffect(() => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta === 0) return;
+      const max = el.scrollWidth - el.clientWidth;
+      const next = Math.max(0, Math.min(max, el.scrollLeft + delta));
+      if (next === el.scrollLeft) return;
+      e.preventDefault();
+      el.scrollLeft = next;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   useEffect(() => {
     void fetchJsonArray<Announcement>("/api/announcements").then(setAnnouncements);
@@ -539,39 +586,44 @@ const PublicView = () => {
       </section>
 
       {/* Tab bar */}
-      <div className="border-b border-[#0f1b28] bg-[#02060b]">
-        <div className="mx-auto flex max-w-6xl overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden px-4 sm:px-8">
-          {([
-            { id: "home",          label: "Home",          shortLabel: "Home",    icon: Shield },
-            { id: "departments",   label: "Departments",   shortLabel: "Depts",   icon: Building2 },
-            { id: "staff",         label: "Staff Team",    shortLabel: "Staff",   icon: Users },
-            { id: "events",        label: "Public Events", shortLabel: "Events",  icon: CalendarDays },
-            { id: "announcements", label: "Announcements", shortLabel: "News",    icon: Megaphone },
-            { id: "gallery",       label: "Gallery",       shortLabel: "Gallery", icon: ImageIcon },
-            { id: "store",         label: "Server Store",  shortLabel: "Store",   icon: ShoppingBag },
-            { id: "press",         label: "Press & News",  shortLabel: "Press",   icon: Newspaper },
-          ] as { id: Tab; label: string; shortLabel: string; icon: React.ElementType }[]).map(t => (
-            <button
-              key={t.id}
-              type="button"
+      <div className="sticky top-[52px] z-20 border-b border-[#0f1b28] bg-[#02060b]/95 backdrop-blur-md sm:top-[56px]">
+        <div
+          ref={tabScrollRef}
+          className="tab-button-scroller overflow-x-auto overscroll-x-contain"
+        >
+          <div className="mx-auto flex w-max min-w-full max-w-6xl px-4 sm:px-8">
+            {([
+              { id: "home",          label: "Home",          shortLabel: "Home",    icon: Shield },
+              { id: "departments",   label: "Departments",   shortLabel: "Depts",   icon: Building2 },
+              { id: "staff",         label: "Staff Team",    shortLabel: "Staff",   icon: Users },
+              { id: "events",        label: "Public Events", shortLabel: "Events",  icon: CalendarDays },
+              { id: "announcements", label: "Announcements", shortLabel: "News",    icon: Megaphone },
+              { id: "gallery",       label: "Gallery",       shortLabel: "Gallery", icon: ImageIcon },
+              { id: "store",         label: "Server Store",  shortLabel: "Store",   icon: ShoppingBag },
+              { id: "press",         label: "Press & News",  shortLabel: "Press",   icon: Newspaper },
+            ] as { id: Tab; label: string; shortLabel: string; icon: React.ElementType }[]).map(t => (
+              <button
+                key={t.id}
+                type="button"
               onClick={() => setTab(t.id)}
-              className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-3 text-[10px] font-black uppercase tracking-[0.14em] transition-colors sm:gap-2 sm:px-4 sm:py-3.5 sm:text-[11px] sm:tracking-[0.18em] ${
-                tab === t.id
-                  ? "border-[#4384ff] text-white"
-                  : "border-transparent text-[#526179] hover:text-[#8392aa]"
-              }`}
-            >
-              <t.icon className="h-3.5 w-3.5 shrink-0" />
-              <span className="sm:hidden">{t.shortLabel}</span>
-              <span className="hidden sm:inline">{t.label}</span>
-              {t.id === "announcements" && announcements.length > 0 && (
-                <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{announcements.length}</span>
-              )}
-              {t.id === "gallery" && gallery.length > 0 && (
-                <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{gallery.length}</span>
-              )}
-            </button>
-          ))}
+                className={`flex shrink-0 items-center gap-1.5 border-b-2 px-2.5 py-3 text-[10px] font-black uppercase tracking-[0.12em] transition-colors sm:gap-2 sm:px-3.5 sm:py-3.5 sm:text-[11px] sm:tracking-[0.16em] ${
+                  tab === t.id
+                    ? "border-[#4384ff] text-white"
+                    : "border-transparent text-[#526179] hover:text-[#8392aa]"
+                }`}
+              >
+                <t.icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="lg:hidden">{t.shortLabel}</span>
+                <span className="hidden lg:inline">{t.label}</span>
+                {t.id === "announcements" && announcements.length > 0 && (
+                  <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{announcements.length}</span>
+                )}
+                {t.id === "gallery" && gallery.length > 0 && (
+                  <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] text-[#526179]">{gallery.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -678,28 +730,27 @@ const PublicView = () => {
                 </div>
               ) : (
                 <div
+                  ref={galleryScrollerRef}
                   className="home-gallery-scroller -mx-1 overflow-hidden px-1 pb-2"
                   onMouseEnter={() => { galleryPausedRef.current = true; }}
                   onMouseLeave={() => { galleryPausedRef.current = false; }}
-                  onFocusCapture={() => { galleryPausedRef.current = true; }}
-                  onBlurCapture={() => { galleryPausedRef.current = false; }}
                 >
                   <div
                     ref={setGalleryTrackNode}
                     className="flex w-max will-change-transform"
                   >
-                    {[0, 1].map(copy => (
+                    {Array.from({ length: galleryCopies }, (_, copy) => (
                       <div
                         key={copy}
                         ref={copy === 0 ? galleryFirstCopyRef : undefined}
                         className="flex gap-3 pr-3"
-                        aria-hidden={copy === 1 ? true : undefined}
+                        aria-hidden={copy > 0 ? true : undefined}
                       >
                         {gallery.map(img => (
                           <button
                             key={`${copy}-${img.id}`}
                             type="button"
-                            tabIndex={copy === 1 ? -1 : undefined}
+                            tabIndex={copy > 0 ? -1 : undefined}
                             onClick={() => setLightbox(img)}
                             className="group relative aspect-video w-[min(78vw,280px)] shrink-0 overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16] text-left transition-all hover:border-[#2f70ff]/50 hover:shadow-[0_0_30px_rgba(47,112,255,0.10)] sm:w-[300px]"
                           >
