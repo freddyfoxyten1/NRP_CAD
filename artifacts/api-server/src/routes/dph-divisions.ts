@@ -8,6 +8,7 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
+import { wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import {
   DPH_DEFAULT_CALLSIGN,
   loadDphDivisionAssignments,
@@ -1239,7 +1240,8 @@ export async function syncDphDivisionDiscordRoles(
 // ── GET /dph/division-discord-roles — Division guild role list ────────────────
 router.get("/dph/division-discord-roles", async (req, res) => {
   try {
-    res.json(await getDphDivisionGuildRoles());
+    const refresh = wantsDiscordRolesRefresh(req.query as Record<string, unknown>);
+    res.json(await getDphDivisionGuildRoles(refresh));
   } catch (err) {
     req.log?.error?.({ err }, "dph/division-discord-roles GET error");
     // Soft-fail so the Division Panel still loads when the bot isn't in the guild yet

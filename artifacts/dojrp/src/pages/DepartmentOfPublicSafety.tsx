@@ -2013,7 +2013,7 @@ const DepartmentOfPublicSafety = () => {
       // Sync linked Discord roles from the DPS guild into the roster
       void handleSyncDiscordRoles({ silent: true });
       // Load DPS guild roles for the Discord-role dropdown in the rank edit modal
-      fetch('/api/roster/discord-roles', { headers: { accept: 'application/json' } })
+      fetch('/api/roster/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
         .then(r => r.ok ? r.json() : [])
         .then((rows: DpsDiscordRole[]) => setDpsGuildRoles(rows))
         .catch(() => { /* non-fatal — dropdown just stays empty */ });
@@ -2050,6 +2050,14 @@ const DepartmentOfPublicSafety = () => {
     if (panelSection === 'information') { fetchIndexInfo(); fetchPageInfo(); }
     if (panelSection !== 'information') setInfoSubSection(null);
   }, [panelSection]);
+
+  useEffect(() => {
+    if (editRankId === null && addRankGroupId == null) return;
+    fetch('/api/roster/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: DpsDiscordRole[]) => setDpsGuildRoles(rows))
+      .catch(() => {});
+  }, [editRankId, addRankGroupId]);
 
   // ── Resources fetch ───────────────────────────────────────────────────────────
   const fetchResources = () => {

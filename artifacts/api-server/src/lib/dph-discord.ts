@@ -7,6 +7,7 @@
 // single member cache and a single Discord pagination per sync cycle.
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from "@workspace/db";
+import { getDiscordGuildRoles } from "./discord-guild-roles-cache.js";
 
 /** DPH Discord server — role linking & membership checks. */
 export const DPH_GUILD_ID = process.env.DPH_DISCORD_GUILD_ID ?? "1519857439220957204";
@@ -25,11 +26,7 @@ export type DphGuildMember = {
 
 export type DphMemberCacheEntry = { id: string; username: string; nick: string | null };
 
-const ROLES_TTL_MS = 30 * 60 * 1000;
 const MEMBERS_TTL_MS = 5 * 60 * 1000;
-
-const rolesCache: { roles: DiscordRole[] | null; fetchedAt: number } = { roles: null, fetchedAt: 0 };
-const divisionRolesCache: { roles: DiscordRole[] | null; fetchedAt: number } = { roles: null, fetchedAt: 0 };
 const membersCache: { members: DphMemberCacheEntry[]; fetchedAt: number } = { members: [], fetchedAt: 0 };
 let membersFetchRunning: Promise<DphMemberCacheEntry[]> | null = null;
 
@@ -44,28 +41,13 @@ export async function dphDiscordFetch(url: string): Promise<globalThis.Response>
   return r;
 }
 
-async function fetchGuildRoles(guildId: string, label: string): Promise<DiscordRole[]> {
-  const r = await dphDiscordFetch(`https://discord.com/api/v10/guilds/${guildId}/roles`);
-  if (!r.ok) throw new Error(`${label} Discord roles fetch failed: ${r.status}`);
-  const all = (await r.json()) as DiscordRole[];
-  return all.filter(x => x.name !== "@everyone").sort((a, b) => b.position - a.position);
+export async function getDphGuildRoles(refresh = false): Promise<DiscordRole[]> {
+  return getDiscordGuildRoles(DPH_GUILD_ID, { refresh });
 }
 
-export async function getDphGuildRoles(): Promise<DiscordRole[]> {
-  if (rolesCache.roles && Date.now() - rolesCache.fetchedAt < ROLES_TTL_MS) return rolesCache.roles;
-  rolesCache.roles = await fetchGuildRoles(DPH_GUILD_ID, "DPH");
-  rolesCache.fetchedAt = Date.now();
-  return rolesCache.roles;
-}
-
-export async function getDphDivisionGuildRoles(): Promise<DiscordRole[]> {
-  if (DPH_DIVISION_GUILD_ID === DPH_GUILD_ID) return getDphGuildRoles();
-  if (divisionRolesCache.roles && Date.now() - divisionRolesCache.fetchedAt < ROLES_TTL_MS) {
-    return divisionRolesCache.roles;
-  }
-  divisionRolesCache.roles = await fetchGuildRoles(DPH_DIVISION_GUILD_ID, "DPH Division");
-  divisionRolesCache.fetchedAt = Date.now();
-  return divisionRolesCache.roles;
+export async function getDphDivisionGuildRoles(refresh = false): Promise<DiscordRole[]> {
+  if (DPH_DIVISION_GUILD_ID === DPH_GUILD_ID) return getDphGuildRoles(refresh);
+  return getDiscordGuildRoles(DPH_DIVISION_GUILD_ID, { refresh });
 }
 
 /** Paginate the DPH guild and refresh the in-memory member cache. */

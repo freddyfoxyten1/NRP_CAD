@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
+import { wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import {
   type DphGuildMember,
   DPH_DIVISION_GUILD_ID,
@@ -434,14 +435,18 @@ async function syncDphDiscordRoles(
       } catch (e) { errors.push(`discord_id ${m.user.id}: ${String(e)}`); }
     }
 
-    const linkedRes = await pool.query<{
-      profile_id: number; discord_id: string | null; discord_username: string | null; dph_rank: string;
-    }>(
-      `SELECT u.profile_id, p.discord_id, p.discord_username, u.dph_rank
-       FROM dph_users u
-       JOIN cad_user_profiles p ON p.id = u.profile_id
-       WHERE u.dph_rank IN (SELECT name FROM dph_ranks WHERE discord_role_id IS NOT NULL AND discord_role_id != '')`
-    );
+    const linkedRankNames = ranksRes.rows.map(r => r.name);
+    const linkedRes = linkedRankNames.length === 0
+      ? { rows: [] as Array<{ profile_id: number; discord_id: string | null; discord_username: string | null; dph_rank: string }> }
+      : await pool.query<{
+          profile_id: number; discord_id: string | null; discord_username: string | null; dph_rank: string;
+        }>(
+          `SELECT u.profile_id, p.discord_id, p.discord_username, u.dph_rank
+           FROM dph_users u
+           JOIN cad_user_profiles p ON p.id = u.profile_id
+           WHERE u.dph_rank = ANY($1::text[])`,
+          [linkedRankNames],
+        );
 
     const activeByUsername = new Set<string>(
       allMembers
@@ -892,11 +897,12 @@ router.delete("/dph/:id", async (req, res) => {
 });
 
 // ── GET /dph/discord-roles — DPH guild role list for dropdowns ────────────────
-router.get("/dph/discord-roles", async (_req, res) => {
+router.get("/dph/discord-roles", async (req, res) => {
   try {
-    res.json(await getDphGuildRoles());
+    const refresh = wantsDiscordRolesRefresh(req.query as Record<string, unknown>);
+    res.json(await getDphGuildRoles(refresh));
   } catch (err) {
-    _req.log?.error?.({ err }, "dph/discord-roles GET error");
+    req.log?.error?.({ err }, "dph/discord-roles GET error");
     res.status(500).json({ error: "Failed to fetch DPH Discord roles." });
   }
 });
