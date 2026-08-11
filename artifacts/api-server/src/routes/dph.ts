@@ -377,8 +377,10 @@ async function syncDphDiscordRoles(
     const groupNameById = new Map(groupsRes.rows.map(g => [g.id, g.name]));
     const rankMap = new Map<string, { rankName: string; groupName: string | null; sortOrder: number }>();
     for (const rank of ranksRes.rows) {
+      const roleId = rank.discord_role_id?.trim();
+      if (!roleId) continue;
       const groupName = rank.group_id != null ? (groupNameById.get(rank.group_id) ?? null) : null;
-      rankMap.set(rank.discord_role_id, { rankName: rank.name, groupName, sortOrder: rank.sort_order });
+      rankMap.set(roleId, { rankName: rank.name, groupName, sortOrder: rank.sort_order });
     }
     const linkedRoleIds = [...rankMap.keys()];
 
@@ -397,13 +399,21 @@ async function syncDphDiscordRoles(
       const { rankName, groupName } = rankMap.get(rid)!;
       try {
         const profileId = await ensureCadProfileForDphDiscordMember(m);
-        const existing = await pool.query<{ dph_rank: string | null }>(
-          `SELECT dph_rank FROM dph_users WHERE profile_id = $1 LIMIT 1`,
+        const displayName = m.nick ?? m.user.username;
+        const existing = await pool.query<{ dph_rank: string | null; dph_role: string | null; username: string | null }>(
+          `SELECT dph_rank, dph_role, username FROM dph_users WHERE profile_id = $1 LIMIT 1`,
           [profileId],
         );
-        if (existing.rows.length > 0 && existing.rows[0].dph_rank === rankName) { skipped++; continue; }
+        if (
+          existing.rows.length > 0
+          && existing.rows[0].dph_rank === rankName
+          && (existing.rows[0].dph_role ?? null) === (groupName ?? null)
+          && existing.rows[0].username === displayName
+        ) {
+          skipped++;
+          continue;
+        }
 
-        const displayName = m.nick ?? m.user.username;
         const newCallsign = await autoAssignDphCallsign(rankName, profileId);
         if (newCallsign) {
           await pool.query(
@@ -412,7 +422,7 @@ async function syncDphDiscordRoles(
              ON CONFLICT (profile_id) DO UPDATE SET
                username   = EXCLUDED.username,
                dph_rank   = EXCLUDED.dph_rank,
-               dph_role   = COALESCE(EXCLUDED.dph_role, dph_users.dph_role),
+               dph_role   = EXCLUDED.dph_role,
                callsign   = EXCLUDED.callsign,
                status     = COALESCE(dph_users.status, 'Active'),
                updated_at = NOW()`,
@@ -425,7 +435,7 @@ async function syncDphDiscordRoles(
              ON CONFLICT (profile_id) DO UPDATE SET
                username   = EXCLUDED.username,
                dph_rank   = EXCLUDED.dph_rank,
-               dph_role   = COALESCE(EXCLUDED.dph_role, dph_users.dph_role),
+               dph_role   = EXCLUDED.dph_role,
                status     = COALESCE(dph_users.status, 'Active'),
                updated_at = NOW()`,
             [profileId, displayName, rankName, groupName],
@@ -461,6 +471,7 @@ async function syncDphDiscordRoles(
           activeByUsername.has(row.discord_username.toLowerCase()));
       if (!stillHasRole) {
         try {
+          await pool.query(`DELETE FROM dph_user_divisions WHERE profile_id = $1`, [row.profile_id]);
           await pool.query(`DELETE FROM dph_users WHERE profile_id = $1`, [row.profile_id]);
           removed++;
         } catch (e) { errors.push(`remove profile_id ${row.profile_id}: ${String(e)}`); }
@@ -912,7 +923,9 @@ router.post("/dph/sync-discord-roles", async (_req, res) => {
   try {
     const members = await fetchDphGuildMembers();
     await refreshCadAvatarsFromGuildMembers(members);
-    res.json(await syncDphDiscordRoles(members));
+    const dph = await syncDphDiscordRoles(members);
+    const divisions = await syncDphDivisionDiscordRoles(members);
+    res.json({ ...dph, divisions });
   } catch (err) {
     _req.log?.error?.({ err }, "dph/sync-discord-roles error");
     res.status(500).json({ error: "Sync failed." });
