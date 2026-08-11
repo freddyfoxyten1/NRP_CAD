@@ -1281,7 +1281,7 @@ function DivisionRankEditModal({
       });
       if (!res.ok) throw new Error('Failed to update division rank.');
       if (form.callsign_type === 'dynamic') void autoAssignAll();
-      toast.success('Division rank updated.');
+      toast.success(form.discord_role_id.trim() ? 'Division rank saved — Discord sync triggered.' : 'Division rank updated.');
       onSaved();
       onClose();
     } catch (err) {

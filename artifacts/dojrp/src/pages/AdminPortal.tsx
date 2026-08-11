@@ -622,6 +622,9 @@ const SrRankEditModal = ({ rank, discordRoles, onClose, onSaved }: {
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) { toast.error(data.error ?? 'Failed to save rank.'); return; }
+      if (discordRoleId !== (rank.discord_role_id ?? '')) {
+        toast.success(discordRoleId ? 'Rank saved — Discord sync triggered.' : 'Rank saved — Discord link cleared.');
+      }
       onSaved(); onClose();
     } finally { setSaving(false); }
   };
@@ -2363,12 +2366,14 @@ const AdminPortal = () => {
     setAssigningDiscordRoles(true);
     try {
       const res = await fetch('/api/staff/assign-discord-roles', { method: 'POST' });
-      const data = await res.json() as { assigned?: number; skipped?: number; errors?: string[] };
+      const data = await res.json() as { assigned?: number; skipped?: number; removed?: number; errors?: string[] };
       if (!res.ok) { toast.error(data.errors?.[0] ?? 'Role assignment failed.'); return; }
-      if ((data.assigned ?? 0) > 0) {
-        toast.success(`Assigned Discord roles to ${data.assigned} member(s) in the staff server.`);
+      const assigned = data.assigned ?? 0;
+      const removed = data.removed ?? 0;
+      if (assigned > 0 || removed > 0) {
+        toast.success(`Discord roles updated — assigned ${assigned}, removed ${removed} stale role(s).`);
       } else {
-        toast.success('Scan complete  -  all members already have their roles.');
+        toast.success('Scan complete — all members already have the correct roles.');
       }
     } catch { toast.error('Role assignment failed.'); }
     finally { setAssigningDiscordRoles(false); }

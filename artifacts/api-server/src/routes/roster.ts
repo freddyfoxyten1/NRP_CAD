@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
+import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 
 const router = Router();
 
@@ -374,6 +375,28 @@ async function fetchDpsGuildMembers(): Promise<DpsGuildMember[]> {
   return allMembers;
 }
 
+/** Paginate the division guild when it differs from the main DPS guild. */
+async function fetchDivisionGuildMembers(): Promise<DpsGuildMember[]> {
+  if (DIVISION_GUILD_ID === DPS_GUILD_ID) return fetchDpsGuildMembers();
+
+  const tok = process.env.DISCORD_BOT_TOKEN;
+  if (!tok) throw new Error("No DISCORD_BOT_TOKEN configured");
+
+  let allMembers: DpsGuildMember[] = [];
+  let after = "0";
+  for (;;) {
+    const url = `https://discord.com/api/v10/guilds/${DIVISION_GUILD_ID}/members?limit=1000${after !== "0" ? `&after=${after}` : ""}`;
+    const r = await dpsDiscordFetch(url);
+    if (!r.ok) throw new Error(`Division members fetch failed: ${r.status}`);
+    const batch = (await r.json()) as DpsGuildMember[];
+    if (batch.length === 0) break;
+    allMembers = allMembers.concat(batch);
+    if (batch.length < 1000) break;
+    after = batch[batch.length - 1].user.id;
+  }
+  return allMembers;
+}
+
 /** Persist Discord avatars onto matching CAD profiles (by discord_id). Only writes when changed. */
 async function refreshCadAvatarsFromGuildMembers(
   members: Array<{ user: { id: string; username: string; avatar?: string | null } }>,
@@ -641,7 +664,9 @@ async function syncDivisionDiscordRoles(
   if (!tok) return { assigned: 0, skipped: 0, removed: 0, errors: ["No DISCORD_BOT_TOKEN configured"] };
 
   try {
-    const allMembers = preloadedMembers ?? await fetchDpsGuildMembers();
+    const allMembers = (
+      preloadedMembers && DIVISION_GUILD_ID === DPS_GUILD_ID
+    ) ? preloadedMembers : await fetchDivisionGuildMembers();
 
     const membershipDivs = await pool.query<{ id: number; discord_role_id: string }>(
       `SELECT id, discord_role_id FROM dps_divisions
@@ -1116,8 +1141,8 @@ async function syncDivisionDiscordRoles(
 // each cycle paginates the full Discord guild and writes to SQLite synchronously,
 // which otherwise starves every API request on the shared event loop.
 const DPS_SYNC_INTERVAL_MS = Math.max(
-  60_000,
-  Number(process.env.DPS_SYNC_INTERVAL_MS) || 5 * 60_000,
+  10_000,
+  Number(process.env.DPS_SYNC_INTERVAL_MS) || 60_000,
 );
 let _dpsSyncRunning = false;
 async function guardedDpsSync() {
@@ -1135,6 +1160,23 @@ setTimeout(() => {
   void guardedDpsSync();
   setInterval(() => void guardedDpsSync(), DPS_SYNC_INTERVAL_MS);
 }, 45_000);
+
+registerDiscordGuildSync(DPS_GUILD_ID, "dps-personnel", async () => {
+  const members = await fetchDpsGuildMembers();
+  await refreshCadAvatarsFromGuildMembers(members);
+  await syncDpsDiscordRoles(members);
+});
+registerDiscordGuildSync(DPS_GUILD_ID, "dps-division", async () => {
+  const members = await fetchDpsGuildMembers();
+  await syncDivisionDiscordRoles(
+    DIVISION_GUILD_ID === DPS_GUILD_ID ? members : undefined,
+  );
+});
+if (DIVISION_GUILD_ID !== DPS_GUILD_ID) {
+  registerDiscordGuildSync(DIVISION_GUILD_ID, "dps-division-guild", async () => {
+    await syncDivisionDiscordRoles();
+  });
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const rankOrderSubquery = `
@@ -1832,6 +1874,7 @@ router.post("/roster/ranks", async (req, res) => {
        callsign_type?.trim() || null, callsign_static?.trim() || null, csMin, csMax]
     );
     res.status(201).json(result.rows[0]);
+    if (discord_role_id?.trim()) void syncDpsDiscordRoles().catch(console.error);
   } catch (err: unknown) {
     req.log.error({ err }, "dps ranks POST error");
     if (isUniqueViolation(err)) { res.status(409).json({ error: "A rank with that name already exists." }); return; }
@@ -1928,16 +1971,34 @@ router.patch("/roster/ranks/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
 
-  const { name, direction, color_hex, callsign_prefix, insignia_url, group_id } =
-    req.body as { name?: string; direction?: "up" | "down"; color_hex?: string; callsign_prefix?: string; insignia_url?: string; group_id?: number | null };
+  const { name, direction, color_hex, callsign_prefix, insignia_url, group_id, discord_role_id,
+          callsign_type, callsign_static, callsign_min, callsign_max } =
+    req.body as {
+      name?: string; direction?: "up" | "down"; color_hex?: string; callsign_prefix?: string;
+      insignia_url?: string; group_id?: number | null; discord_role_id?: string | null;
+      callsign_type?: string | null; callsign_static?: string | null;
+      callsign_min?: number | null; callsign_max?: number | null;
+    };
+  const hasDiscordRole = Object.prototype.hasOwnProperty.call(req.body, "discord_role_id");
+  const hasCallsignConfig =
+    callsign_type !== undefined || callsign_static !== undefined
+    || callsign_min !== undefined || callsign_max !== undefined || callsign_prefix !== undefined;
+  const csMin = callsign_min !== undefined
+    ? (callsign_min === null ? null : parseInt(String(callsign_min)) || null)
+    : null;
+  const csMax = callsign_max !== undefined
+    ? (callsign_max === null ? null : parseInt(String(callsign_max)) || null)
+    : null;
 
   try {
     // Group-only move (cross-group drag-and-drop)
     if (group_id !== undefined && name === undefined && direction === undefined
-        && color_hex === undefined && callsign_prefix === undefined && insignia_url === undefined) {
+        && color_hex === undefined && callsign_prefix === undefined && insignia_url === undefined
+        && !hasDiscordRole && !hasCallsignConfig) {
       const result = await pool.query(
         `UPDATE dps_ranks SET group_id = $2 WHERE id = $1
-         RETURNING id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url`,
+         RETURNING id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url, discord_role_id,
+                   callsign_type, callsign_static, callsign_min, callsign_max`,
         [id, group_id ?? null]
       );
       if (result.rowCount === 0) { res.status(404).json({ error: "Rank not found." }); return; }
@@ -1945,56 +2006,68 @@ router.patch("/roster/ranks/:id", async (req, res) => {
       return;
     }
 
-    // Full metadata update (name + optional fields)
     if (name !== undefined && direction === undefined) {
       if (!name.trim()) { res.status(400).json({ error: "Name cannot be empty." }); return; }
-      const { discord_role_id, callsign_type, callsign_static, callsign_min, callsign_max } =
-        req.body as { discord_role_id?: string | null; callsign_type?: string | null;
-                      callsign_static?: string | null; callsign_min?: number | null; callsign_max?: number | null };
-      const drId = discord_role_id !== undefined ? (typeof discord_role_id === 'string' ? discord_role_id.trim() || null : null) : null;
-      const csMin = callsign_min !== undefined ? (callsign_min === null ? null : parseInt(String(callsign_min)) || null) : null;
-      const csMax = callsign_max !== undefined ? (callsign_max === null ? null : parseInt(String(callsign_max)) || null) : null;
       const result = await pool.query(
         `UPDATE dps_ranks SET
            name             = $2,
            color_hex        = $3,
            callsign_prefix  = $4,
            insignia_url     = $5,
-           discord_role_id  = $6,
-           callsign_type    = $7,
-           callsign_static  = $8,
-           callsign_min     = $9,
-           callsign_max     = $10
+           discord_role_id  = CASE WHEN $6::boolean THEN $7 ELSE discord_role_id END,
+           callsign_type    = CASE WHEN $8::boolean THEN $9  ELSE callsign_type END,
+           callsign_static  = CASE WHEN $10::boolean THEN $11 ELSE callsign_static END,
+           callsign_min     = CASE WHEN $12::boolean THEN $13 ELSE callsign_min END,
+           callsign_max     = CASE WHEN $14::boolean THEN $15 ELSE callsign_max END
          WHERE id = $1
          RETURNING id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url, discord_role_id,
                    callsign_type, callsign_static, callsign_min, callsign_max`,
-        [id, name.trim(), color_hex?.trim() || null, callsign_prefix?.trim() || null, insignia_url?.trim() || null,
-         drId, callsign_type?.trim() || null, callsign_static?.trim() || null, csMin, csMax]
+        [
+          id, name.trim(), color_hex?.trim() || null, callsign_prefix?.trim() || null,
+          insignia_url?.trim() || null, hasDiscordRole,
+          hasDiscordRole ? (typeof discord_role_id === "string" ? discord_role_id.trim() || null : null) : null,
+          callsign_type !== undefined, callsign_type?.trim() || null,
+          callsign_static !== undefined, callsign_static?.trim() || null,
+          callsign_min !== undefined, csMin,
+          callsign_max !== undefined, csMax,
+        ]
       );
       if (result.rowCount === 0) { res.status(404).json({ error: "Rank not found." }); return; }
-      // Fire-and-forget: re-sync existing officers' callsigns when any callsign
-      // setting was included in the request (type, prefix, static value, or range).
-      if (callsign_type !== undefined || callsign_static !== undefined ||
-          callsign_min !== undefined || callsign_max !== undefined ||
-          callsign_prefix !== undefined) {
-        void syncDpsCallsignsForRank(id);
-      }
+      if (hasDiscordRole) void syncDpsDiscordRoles().catch(console.error);
+      if (hasCallsignConfig) void syncDpsCallsignsForRank(id);
       res.json(result.rows[0]);
       return;
     }
 
     // Metadata-only update (no name change)
-    if (direction === undefined && (color_hex !== undefined || callsign_prefix !== undefined || insignia_url !== undefined)) {
+    if (direction === undefined && (color_hex !== undefined || callsign_prefix !== undefined
+        || insignia_url !== undefined || hasDiscordRole || hasCallsignConfig)) {
       const result = await pool.query(
         `UPDATE dps_ranks SET
            color_hex       = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE color_hex END,
            callsign_prefix = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE callsign_prefix END,
-           insignia_url    = CASE WHEN $4::text IS NOT NULL THEN $4 ELSE insignia_url END
+           insignia_url    = CASE WHEN $4::text IS NOT NULL THEN $4 ELSE insignia_url END,
+           discord_role_id = CASE WHEN $5::boolean THEN $6 ELSE discord_role_id END,
+           callsign_type   = CASE WHEN $7::boolean THEN $8  ELSE callsign_type END,
+           callsign_static = CASE WHEN $9::boolean THEN $10 ELSE callsign_static END,
+           callsign_min    = CASE WHEN $11::boolean THEN $12 ELSE callsign_min END,
+           callsign_max    = CASE WHEN $13::boolean THEN $14 ELSE callsign_max END
          WHERE id = $1
-         RETURNING id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url`,
-        [id, color_hex ?? null, callsign_prefix?.trim() ?? null, insignia_url?.trim() ?? null]
+         RETURNING id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url, discord_role_id,
+                   callsign_type, callsign_static, callsign_min, callsign_max`,
+        [
+          id, color_hex ?? null, callsign_prefix?.trim() ?? null, insignia_url?.trim() ?? null,
+          hasDiscordRole,
+          hasDiscordRole ? (typeof discord_role_id === "string" ? discord_role_id.trim() || null : null) : null,
+          callsign_type !== undefined, callsign_type?.trim() || null,
+          callsign_static !== undefined, callsign_static?.trim() || null,
+          callsign_min !== undefined, csMin,
+          callsign_max !== undefined, csMax,
+        ]
       );
       if (result.rowCount === 0) { res.status(404).json({ error: "Rank not found." }); return; }
+      if (hasDiscordRole) void syncDpsDiscordRoles().catch(console.error);
+      if (hasCallsignConfig) void syncDpsCallsignsForRank(id);
       res.json(result.rows[0]);
       return;
     }
@@ -2429,6 +2502,7 @@ router.post("/roster/divisions", async (req, res) => {
        FROM dps_divisions WHERE lower(name) = lower($1) ORDER BY id DESC LIMIT 1`,
       [name.trim()]
     );
+    if (discord_role_id?.trim()) void syncDivisionDiscordRoles().catch(console.error);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     req.log.error({ err }, "divisions POST error");
@@ -2505,6 +2579,7 @@ router.patch("/roster/divisions/:id", async (req, res) => {
       `SELECT id, name, sort_order, discord_role_id, unit_key FROM dps_divisions WHERE id = $1`,
       [id]
     );
+    if (discord_role_id !== undefined) void syncDivisionDiscordRoles().catch(console.error);
     res.json(result.rows[0]);
   } catch (err) {
     req.log.error({ err }, "divisions PATCH error");
@@ -3062,6 +3137,7 @@ router.post("/roster/division-ranks", async (req, res) => {
        ORDER BY id DESC LIMIT 1`,
       [name.trim(), division_id ?? null]
     );
+    if (discord_role_id?.trim()) void syncDivisionDiscordRoles().catch(console.error);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     req.log.error({ err }, "division-ranks POST error");
@@ -3167,6 +3243,7 @@ router.patch("/roster/division-ranks/:id", async (req, res) => {
       ) {
         void syncDivisionRankCallsigns(id);
       }
+      if (discord_role_id !== undefined) void syncDivisionDiscordRoles().catch(console.error);
     }
 
     if (move === "up" || move === "down") {

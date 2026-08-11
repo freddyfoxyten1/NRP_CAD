@@ -903,6 +903,7 @@ const RankEditModal = ({
       }
       // Auto-fill dynamic callsigns after saving (fires in background)
       if (form.callsign_type === 'dynamic') void autoAssignAll();
+      toast.success(form.discord_role_id.trim() ? 'Rank saved — Discord sync triggered.' : 'Rank saved.');
       onSaved();
       onClose();
     } catch (err) {
@@ -2565,7 +2566,7 @@ const DepartmentOfPublicHealth = () => {
       setNewRankDiscordRoleId('');
       setAddRankGroupId(null);
       fetchRanks();
-      toast.success('Rank added.');
+      toast.success(newRankDiscordRoleId.trim() ? 'Rank added — Discord sync triggered.' : 'Rank added.');
     } finally { setAddingRank(false); }
   };
 
