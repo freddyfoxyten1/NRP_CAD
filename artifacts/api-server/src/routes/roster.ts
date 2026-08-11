@@ -507,8 +507,10 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
     const groupNameById = new Map(groupsRes.rows.map(g => [g.id, g.name]));
     const rankMap = new Map<string, { rankName: string; groupName: string | null; sortOrder: number }>();
     for (const rank of ranksRes.rows) {
+      const roleId = rank.discord_role_id?.trim();
+      if (!roleId) continue;
       const groupName = rank.group_id != null ? (groupNameById.get(rank.group_id) ?? null) : null;
-      rankMap.set(rank.discord_role_id, { rankName: rank.name, groupName, sortOrder: rank.sort_order });
+      rankMap.set(roleId, { rankName: rank.name, groupName, sortOrder: rank.sort_order });
     }
     const linkedRoleIds = [...rankMap.keys()];
 
@@ -532,15 +534,22 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
       try {
         const profileId = await ensureCadProfileForDiscordMember(m);
 
-        // Check whether dps_users already has this rank — skip if unchanged
-        const existing = await pool.query<{ dps_rank: string | null }>(
-          `SELECT dps_rank FROM dps_users WHERE profile_id = $1 LIMIT 1`,
+        const displayName = m.nick ?? m.user.username;
+        const existing = await pool.query<{ dps_rank: string | null; dps_role: string | null; username: string | null }>(
+          `SELECT dps_rank, dps_role, username FROM dps_users WHERE profile_id = $1 LIMIT 1`,
           [profileId]
         );
-        if (existing.rows.length > 0 && existing.rows[0].dps_rank === rankName) { skipped++; continue; }
+        if (
+          existing.rows.length > 0
+          && existing.rows[0].dps_rank === rankName
+          && (existing.rows[0].dps_role ?? null) === (groupName ?? null)
+          && existing.rows[0].username === displayName
+        ) {
+          skipped++;
+          continue;
+        }
 
         // Upsert the dps_users row with the new rank/role + auto-assign callsign
-        const displayName = m.nick ?? m.user.username;
         const newCallsign = await autoAssignCallsign(rankName, profileId);
         if (newCallsign) {
           await pool.query(
@@ -549,7 +558,7 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
              ON CONFLICT (profile_id) DO UPDATE SET
                username   = EXCLUDED.username,
                dps_rank   = EXCLUDED.dps_rank,
-               dps_role   = COALESCE(EXCLUDED.dps_role, dps_users.dps_role),
+               dps_role   = EXCLUDED.dps_role,
                callsign   = EXCLUDED.callsign,
                status     = COALESCE(dps_users.status, 'Active'),
                updated_at = NOW()`,
@@ -562,7 +571,7 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
              ON CONFLICT (profile_id) DO UPDATE SET
                username   = EXCLUDED.username,
                dps_rank   = EXCLUDED.dps_rank,
-               dps_role   = COALESCE(EXCLUDED.dps_role, dps_users.dps_role),
+               dps_role   = EXCLUDED.dps_role,
                status     = COALESCE(dps_users.status, 'Active'),
                updated_at = NOW()`,
             [profileId, displayName, rankName, groupName]
@@ -571,7 +580,7 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
         // Also mirror onto cad_user_profiles for convenience
         await pool.query(
           `UPDATE cad_user_profiles
-           SET dps_rank = $2, dps_role = COALESCE($3, dps_role)${newCallsign ? ', callsign = $4' : ''}
+           SET dps_rank = $2, dps_role = $3${newCallsign ? ', callsign = $4' : ''}
            WHERE id = $1`,
           newCallsign ? [profileId, rankName, groupName, newCallsign] : [profileId, rankName, groupName]
         );
@@ -609,6 +618,7 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
 
       if (!stillHasRole) {
         try {
+          await pool.query(`DELETE FROM dps_user_divisions WHERE profile_id = $1`, [row.profile_id]);
           await pool.query(`DELETE FROM dps_users WHERE profile_id = $1`, [row.profile_id]);
           await pool.query(
             `UPDATE cad_user_profiles SET dps_rank = NULL, dps_role = NULL, callsign = NULL WHERE id = $1`,
