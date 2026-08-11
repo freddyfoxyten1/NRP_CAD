@@ -3,11 +3,14 @@ import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
 import {
   type DphGuildMember,
+  DPH_DIVISION_GUILD_ID,
+  DPH_GUILD_ID,
   ensureCadProfileForDphDiscordMember,
   fetchDphGuildMembers,
   getDphGuildRoles,
   refreshCadAvatarsFromGuildMembers,
 } from "../lib/dph-discord.js";
+import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 import {
   DPH_DEFAULT_CALLSIGN,
   loadDphDivisionAssignments,
@@ -469,7 +472,10 @@ async function syncDphDiscordRoles(
   }
 }
 
-const DPH_SYNC_INTERVAL_MS = 10 * 60 * 1000;
+const DPH_SYNC_INTERVAL_MS = Math.max(
+  10_000,
+  Number(process.env.DPH_SYNC_INTERVAL_MS) || 60_000,
+);
 let _dphSyncRunning = false;
 async function guardedDphSync() {
   if (_dphSyncRunning) return;
@@ -487,6 +493,23 @@ async function guardedDphSync() {
 }
 setTimeout(() => void guardedDphSync(), 20_000);
 setInterval(() => void guardedDphSync(), DPH_SYNC_INTERVAL_MS);
+
+registerDiscordGuildSync(DPH_GUILD_ID, "dph-personnel", async () => {
+  const members = await fetchDphGuildMembers();
+  await refreshCadAvatarsFromGuildMembers(members);
+  await syncDphDiscordRoles(members);
+});
+registerDiscordGuildSync(DPH_GUILD_ID, "dph-division", async () => {
+  const members = await fetchDphGuildMembers();
+  await syncDphDivisionDiscordRoles(
+    DPH_DIVISION_GUILD_ID === DPH_GUILD_ID ? members : undefined,
+  );
+});
+if (DPH_DIVISION_GUILD_ID !== DPH_GUILD_ID) {
+  registerDiscordGuildSync(DPH_DIVISION_GUILD_ID, "dph-division-guild", async () => {
+    await syncDphDivisionDiscordRoles();
+  });
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const RANK_COLS = `id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url, discord_role_id,

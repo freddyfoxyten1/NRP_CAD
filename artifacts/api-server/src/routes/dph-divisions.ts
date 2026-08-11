@@ -15,7 +15,10 @@ import {
 } from "../lib/dph-divisions.js";
 import {
   type DphGuildMember,
+  DPH_DIVISION_GUILD_ID,
+  DPH_GUILD_ID,
   ensureDphMembersCache,
+  fetchDphDivisionGuildMembers,
   fetchDphGuildMembers,
   ensureCadProfileForDphDiscordMember,
   getDphDivisionGuildRoles,
@@ -65,6 +68,7 @@ router.post("/dph/divisions", async (req, res) => {
     const actor = (req.body as Record<string, unknown>).actor as string
       || (req.headers["x-actor"] as string) || "Admin";
     await writeLog("dph_personnel", actor, "Created division", name.trim());
+    if (discord_role_id?.trim()) void syncDphDivisionDiscordRoles().catch(console.error);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     req.log.error({ err }, "dph divisions POST error");
@@ -136,6 +140,7 @@ router.patch("/dph/divisions/:id", async (req, res) => {
       `SELECT ${DIVISION_SELECT} FROM dph_divisions WHERE id = $1`, [id]
     );
     if (!result.rows.length) { res.status(404).json({ error: "Division not found." }); return; }
+    if (discord_role_id !== undefined) void syncDphDivisionDiscordRoles().catch(console.error);
     res.json(result.rows[0]);
   } catch (err) {
     req.log.error({ err }, "dph divisions PATCH error");
@@ -650,6 +655,7 @@ router.post("/dph/division-ranks", async (req, res) => {
        ORDER BY id DESC LIMIT 1`,
       [name.trim(), division_id ?? null]
     );
+    if (discord_role_id?.trim()) void syncDphDivisionDiscordRoles().catch(console.error);
     res.status(201).json(result.rows[0]);
   } catch (err) {
     req.log.error({ err }, "dph division-ranks POST error");
@@ -756,6 +762,7 @@ router.patch("/dph/division-ranks/:id", async (req, res) => {
       ) {
         void syncDivisionRankCallsigns(id);
       }
+      if (discord_role_id !== undefined) void syncDphDivisionDiscordRoles().catch(console.error);
     }
 
     if (move === "up" || move === "down") {
@@ -1009,7 +1016,9 @@ export async function syncDphDivisionDiscordRoles(
   if (!tok) return { assigned: 0, skipped: 0, removed: 0, errors: ["No DISCORD_BOT_TOKEN configured"] };
 
   try {
-    const allMembers = preloadedMembers ?? await fetchDphGuildMembers();
+    const allMembers = (
+      preloadedMembers && DPH_DIVISION_GUILD_ID === DPH_GUILD_ID
+    ) ? preloadedMembers : await fetchDphDivisionGuildMembers();
 
     const membershipDivs = await pool.query<{ id: number; discord_role_id: string }>(
       `SELECT id, discord_role_id FROM dph_divisions

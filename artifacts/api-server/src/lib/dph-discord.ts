@@ -95,6 +95,28 @@ export async function fetchDphGuildMembers(): Promise<DphGuildMember[]> {
   return allMembers;
 }
 
+/** Paginate the DPH division guild when it differs from the main DPH guild. */
+export async function fetchDphDivisionGuildMembers(): Promise<DphGuildMember[]> {
+  if (DPH_DIVISION_GUILD_ID === DPH_GUILD_ID) return fetchDphGuildMembers();
+
+  const tok = process.env.DISCORD_BOT_TOKEN;
+  if (!tok) throw new Error("No DISCORD_BOT_TOKEN configured");
+
+  let allMembers: DphGuildMember[] = [];
+  let after = "0";
+  for (;;) {
+    const url = `https://discord.com/api/v10/guilds/${DPH_DIVISION_GUILD_ID}/members?limit=1000${after !== "0" ? `&after=${after}` : ""}`;
+    const r = await dphDiscordFetch(url);
+    if (!r.ok) throw new Error(`DPH division members fetch failed: ${r.status}`);
+    const batch = (await r.json()) as DphGuildMember[];
+    if (batch.length === 0) break;
+    allMembers = allMembers.concat(batch);
+    if (batch.length < 1000) break;
+    after = batch[batch.length - 1].user.id;
+  }
+  return allMembers;
+}
+
 /** Ensure the DPH guild member cache is warm (used by the member-search typeahead). */
 export async function ensureDphMembersCache(force = false): Promise<DphMemberCacheEntry[]> {
   const fresh =

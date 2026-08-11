@@ -5,6 +5,7 @@
 import "./bootstrap-env";
 import { initDataStores, shutdownDataStores, isMongoStore, pingMongo, pingRedis } from "@workspace/db";
 import app from "./app";
+import { startDiscordGateway, stopDiscordGateway } from "./lib/discord-realtime-sync";
 import { logger } from "./lib/logger";
 
 const rawPort = process.env.API_PORT ?? process.env.PORT ?? "8080";
@@ -53,11 +54,13 @@ async function start() {
     }
 
     logger.info({ port }, "Server listening");
+    startDiscordGateway();
   });
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    stopDiscordGateway();
     void shutdownDataStores().finally(() => process.exit(0));
   });
 }

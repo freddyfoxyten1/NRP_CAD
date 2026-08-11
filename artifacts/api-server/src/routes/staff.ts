@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 import { isSuperAdminDiscordId } from "../lib/superadmin";
+import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 
 const router = Router();
 
@@ -50,13 +51,14 @@ type StaffMemberCacheEntry = { id: string; username: string; nick: string | null
 const staffMembersCache: { members: StaffMemberCacheEntry[]; fetchedAt: number } =
   { members: [], fetchedAt: 0 };
 
-async function staffDiscordFetch(url: string): Promise<globalThis.Response> {
+async function staffDiscordFetch(url: string, init: RequestInit = {}): Promise<globalThis.Response> {
   const tok = process.env.DISCORD_BOT_TOKEN ?? "";
-  let r = await fetch(url, { headers: { Authorization: `Bot ${tok}` } });
+  const headers = { Authorization: `Bot ${tok}`, ...(init.headers as Record<string, string> | undefined) };
+  let r = await fetch(url, { ...init, headers });
   if (r.status === 429) {
     const body = await r.json().catch(() => ({})) as { retry_after?: number };
     await new Promise(res => setTimeout(res, Math.min((body.retry_after ?? 1) * 1000 + 200, 10_000)));
-    r = await fetch(url, { headers: { Authorization: `Bot ${tok}` } });
+    r = await fetch(url, { ...init, headers });
   }
   return r;
 }
@@ -414,11 +416,11 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
 })();
 
 // ── Background sync: assign/remove ranks based on linked Discord roles ─────────
-// Guard prevents overlapping runs. Interval is minutes (not seconds): each cycle
-// paginates the guild and writes to SQLite on the API event loop.
+// Guard prevents overlapping runs. Gateway handles realtime updates; this interval
+// is a fallback when the Gateway is disconnected (default 60s, min 10s).
 const STAFF_SYNC_INTERVAL_MS = Math.max(
-  60_000,
-  Number(process.env.STAFF_SYNC_INTERVAL_MS) || 5 * 60_000,
+  10_000,
+  Number(process.env.STAFF_SYNC_INTERVAL_MS) || 60_000,
 );
 let _staffSyncRunning = false;
 async function guardedStaffSync() {
@@ -431,6 +433,8 @@ setTimeout(() => {
   void guardedStaffSync();
   setInterval(() => void guardedStaffSync(), STAFF_SYNC_INTERVAL_MS);
 }, 30_000);
+
+registerDiscordGuildSync(STAFF_GUILD_ID, "staff", () => syncStaffDiscordRoles());
 
 // ── Search users (typeahead) — staff guild only (legacy alias of member-search)
 router.get("/staff/users/search", async (req, res) => {
@@ -1031,32 +1035,36 @@ router.post("/staff/assign-discord-roles", async (_req, res) => {
        WHERE staff_rank IS NOT NULL AND discord_id IS NOT NULL AND discord_id != ''`
     );
 
-    let assigned = 0; let skipped = 0; const errors: string[] = [];
+    const allLinkedRoleIds = ranksRes.rows.map(r => r.discord_role_id);
+    let assigned = 0; let skipped = 0; let removed = 0; const errors: string[] = [];
 
     for (const profile of profilesRes.rows) {
-      const roleId = rankToRole.get(profile.staff_rank.toLowerCase());
-      if (!roleId) { skipped++; continue; }
+      const targetRoleId = rankToRole.get(profile.staff_rank.toLowerCase());
 
-      // PUT /guilds/{guild}/members/{user}/roles/{role} — adds the role; 204 = success
-      const url = `https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/members/${profile.discord_id}/roles/${roleId}`;
-      let r = await fetch(url, { method: "PUT", headers: { Authorization: `Bot ${tok}` } });
-      if (r.status === 429) {
-        const body = await r.json().catch(() => ({})) as { retry_after?: number };
-        await new Promise(res => setTimeout(res, Math.min((body.retry_after ?? 1) * 1000 + 200, 10_000)));
-        r = await fetch(url, { method: "PUT", headers: { Authorization: `Bot ${tok}` } });
+      // Remove stale linked rank roles so promotions/demotion in CAD stay in sync.
+      for (const roleId of allLinkedRoleIds) {
+        if (targetRoleId && roleId === targetRoleId) continue;
+        const delUrl = `https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/members/${profile.discord_id}/roles/${roleId}`;
+        const dr = await staffDiscordFetch(delUrl, { method: "DELETE" });
+        if (dr.status === 204 || dr.ok) removed++;
+        else if (dr.status !== 404) errors.push(`remove ${profile.discord_id}/${roleId}: HTTP ${dr.status}`);
       }
+
+      if (!targetRoleId) { skipped++; continue; }
+
+      const putUrl = `https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/members/${profile.discord_id}/roles/${targetRoleId}`;
+      const r = await staffDiscordFetch(putUrl, { method: "PUT" });
       if (r.status === 204 || r.ok) {
         assigned++;
       } else if (r.status === 404) {
-        // Member not in the staff guild — skip silently
         skipped++;
       } else {
         errors.push(`discord_id ${profile.discord_id}: HTTP ${r.status}`);
       }
     }
 
-    console.info(`[staff-assign-roles] assigned=${assigned} skipped=${skipped} errors=${errors.length}`);
-    res.json({ assigned, skipped, errors });
+    console.info(`[staff-assign-roles] assigned=${assigned} skipped=${skipped} removed=${removed} errors=${errors.length}`);
+    res.json({ assigned, skipped, removed, errors });
   } catch (e) {
     console.error("[staff-assign-roles] Error:", e);
     res.status(500).json({ error: String(e) });
