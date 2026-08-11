@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { pool } from "@workspace/db";
+import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 import { isSuperAdminDiscordId } from "../lib/superadmin";
 
@@ -1179,8 +1179,8 @@ router.post("/staff/ranks", async (req, res) => {
     if (discord_role_id) void syncStaffDiscordRoles().catch(console.error);
     res.status(201).json(r.rows[0]);
   } catch (err: unknown) {
-    const pg = err as { code?: string };
-    if (pg.code === "23505") { res.status(409).json({ error: "A rank with that name already exists." }); return; }
+    req.log.error({ err }, "staff ranks POST error");
+    if (isUniqueViolation(err)) { res.status(409).json({ error: "A rank with that name already exists." }); return; }
     res.status(500).json({ error: "Unable to add rank." });
   }
 });

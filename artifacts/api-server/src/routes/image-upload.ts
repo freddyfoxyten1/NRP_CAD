@@ -70,22 +70,28 @@ function resolveMime(file: Express.Multer.File): string | null {
   return sniffImageMime(file.buffer);
 }
 
-if (!isMongoStore()) {
-  (async () => {
-    try {
-      await pool.query(`
+let ensureImagesTable: Promise<void> | null = null;
+
+function getEnsureImagesTable(): Promise<void> {
+  if (isMongoStore()) return Promise.resolve();
+  if (!ensureImagesTable) {
+    ensureImagesTable = pool.query(`
       CREATE TABLE IF NOT EXISTS dps_images (
         id         SERIAL PRIMARY KEY,
         mime_type  TEXT NOT NULL,
         data       BYTEA NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
-    `);
-    } catch (e) {
+    `).then(() => undefined).catch((e) => {
+      ensureImagesTable = null;
       console.error("dps_images migration failed:", e);
-    }
-  })();
+      throw e;
+    });
+  }
+  return ensureImagesTable;
 }
+
+void getEnsureImagesTable();
 
 router.post("/images/upload", (req, res) => {
   upload.single("file")(req, res, async (multerErr: unknown) => {
@@ -118,6 +124,8 @@ router.post("/images/upload", (req, res) => {
         res.status(201).json(saved);
         return;
       }
+
+      await getEnsureImagesTable();
 
       const { rows } = await pool.query(
         `INSERT INTO dps_images (mime_type, data) VALUES ($1, $2) RETURNING id`,

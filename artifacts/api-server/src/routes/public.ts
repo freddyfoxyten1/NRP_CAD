@@ -192,9 +192,13 @@ router.post("/public/gallery", requireAdmin, async (req, res) => {
       res.status(201).json({ id: doc.id });
       return;
     }
+    const mx = await pool.query<{ m: number | null }>(
+      `SELECT MAX(sort_order) AS m FROM public_gallery WHERE deleted_at IS NULL`
+    );
+    const nextOrder = (mx.rows[0]?.m ?? 0) + 1;
     const r = await pool.query<{ id: number }>(
-      `INSERT INTO public_gallery (title, caption, image_url) VALUES ($1,$2,$3) RETURNING id`,
-      [title.trim(), caption.trim(), image_url.trim()]
+      `INSERT INTO public_gallery (title, caption, image_url, sort_order) VALUES ($1,$2,$3,$4) RETURNING id`,
+      [title.trim(), caption.trim(), image_url.trim(), nextOrder]
     );
     void writeLog("gallery", actorFrom(req), "Added gallery image", title.trim() || `ID ${r.rows[0].id}`);
     res.status(201).json({ id: r.rows[0].id });
@@ -296,9 +300,36 @@ router.delete("/public/gallery/:id", requireAdmin, async (req, res) => {
   await ensureTables;
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
-  await pool.query(`UPDATE public_gallery SET deleted_at = NOW() WHERE id = $1`, [id]);
-  void writeLog("gallery", actorFrom(req), "Deleted gallery image", `ID ${id}`);
-  res.json({ ok: true });
+  try {
+    if (isMongoStore()) {
+      const existing = await contentRepo.findByNumericId("gallery", id);
+      if (!existing) { res.status(404).json({ error: "Gallery image not found." }); return; }
+      await contentRepo.deleteGallery(id);
+      void writeLog(
+        "gallery",
+        actorFrom(req),
+        "Deleted gallery image",
+        String((existing as { title?: string }).title ?? `ID ${id}`),
+      );
+      res.json({ ok: true });
+      return;
+    }
+    const deleted = await pool.query<{ title: string }>(
+      `UPDATE public_gallery SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING title`,
+      [id]
+    );
+    if ((deleted.rowCount ?? 0) === 0) { res.status(404).json({ error: "Gallery image not found." }); return; }
+    void writeLog(
+      "gallery",
+      actorFrom(req),
+      "Deleted gallery image",
+      deleted.rows[0]?.title || `ID ${id}`,
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    req.log.error({ err }, "public/gallery DELETE error");
+    res.status(500).json({ error: "Unable to delete image." });
+  }
 });
 
 // ── GET /public/press ─────────────────────────────────────────────────────────
