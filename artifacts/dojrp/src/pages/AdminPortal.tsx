@@ -1007,18 +1007,29 @@ const AdminPortal = () => {
   }, [activeTab]);
 
   // Load staff roster + Discord roles when that tab becomes active
-  useEffect(() => {
-    if (activeTab !== 'staff-roster') return;
-    fetchStaffRoster();
-    void handleSyncDiscordRoles({ silent: true });
+  const loadStaffGuildRoles = (refresh = false) => {
     setStaffGuildRolesLoading(true);
-    fetch('/api/staff/discord-roles')
+    fetch(`/api/staff/discord-roles${refresh ? '?refresh=1' : ''}`)
       .then(r => r.ok ? r.json() as Promise<DiscordRoleOption[]> : [])
       .then(setStaffGuildRoles)
       .catch(() => setStaffGuildRoles([]))
       .finally(() => setStaffGuildRolesLoading(false));
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'staff-roster') return;
+    fetchStaffRoster();
+    void handleSyncDiscordRoles({ silent: true });
+    loadStaffGuildRoles(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'staff-roster') return;
+    if (!srEditRank && addStaffRankGroupId == null) return;
+    loadStaffGuildRoles(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [srEditRank, addStaffRankGroupId, activeTab]);
 
   const handleSaveStoreUrl = async () => {
     const next = storeUrlDraft.trim();

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
+import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 
 const router = Router();
@@ -255,12 +256,6 @@ async function migrateLegacyDivisionAssignments(): Promise<void> {
   }
 }
 
-const dpsRolesCache: { roles: Array<{ id: string; name: string; position: number }> | null; fetchedAt: number } =
-  { roles: null, fetchedAt: 0 };
-const divisionRolesCache: { roles: Array<{ id: string; name: string; position: number }> | null; fetchedAt: number } =
-  { roles: null, fetchedAt: 0 };
-const DPS_ROLES_TTL = 30 * 60 * 1000; // 30 min
-
 // Cache of all DPS guild members — populated by the background sync so the
 // member-search endpoint never needs to re-paginate for a search query.
 type DpsMemberCacheEntry = { id: string; username: string; nick: string | null };
@@ -278,32 +273,13 @@ async function dpsDiscordFetch(url: string): Promise<globalThis.Response> {
   return r;
 }
 
-async function getDpsGuildRoles(): Promise<Array<{ id: string; name: string; position: number }>> {
-  if (dpsRolesCache.roles && Date.now() - dpsRolesCache.fetchedAt < DPS_ROLES_TTL) {
-    return dpsRolesCache.roles;
-  }
-  const r = await dpsDiscordFetch(`https://discord.com/api/v10/guilds/${DPS_GUILD_ID}/roles`);
-  if (!r.ok) throw new Error(`DPS Discord roles fetch failed: ${r.status}`);
-  const all = (await r.json()) as Array<{ id: string; name: string; position: number }>;
-  dpsRolesCache.roles = all.filter(x => x.name !== "@everyone").sort((a, b) => b.position - a.position);
-  dpsRolesCache.fetchedAt = Date.now();
-  return dpsRolesCache.roles;
+async function getDpsGuildRoles(refresh = false): Promise<Array<{ id: string; name: string; position: number }>> {
+  return getDiscordGuildRoles(DPS_GUILD_ID, { refresh });
 }
 
-async function getDivisionGuildRoles(): Promise<Array<{ id: string; name: string; position: number }>> {
-  // Same server as DPS ranks — reuse that role list / cache when IDs match
-  if (DIVISION_GUILD_ID === DPS_GUILD_ID) {
-    return getDpsGuildRoles();
-  }
-  if (divisionRolesCache.roles && Date.now() - divisionRolesCache.fetchedAt < DPS_ROLES_TTL) {
-    return divisionRolesCache.roles;
-  }
-  const r = await dpsDiscordFetch(`https://discord.com/api/v10/guilds/${DIVISION_GUILD_ID}/roles`);
-  if (!r.ok) throw new Error(`Division Discord roles fetch failed: ${r.status}`);
-  const all = (await r.json()) as Array<{ id: string; name: string; position: number }>;
-  divisionRolesCache.roles = all.filter(x => x.name !== "@everyone").sort((a, b) => b.position - a.position);
-  divisionRolesCache.fetchedAt = Date.now();
-  return divisionRolesCache.roles;
+async function getDivisionGuildRoles(refresh = false): Promise<Array<{ id: string; name: string; position: number }>> {
+  if (DIVISION_GUILD_ID === DPS_GUILD_ID) return getDpsGuildRoles(refresh);
+  return getDiscordGuildRoles(DIVISION_GUILD_ID, { refresh });
 }
 
 // Auto-assign a callsign to a member based on their rank's callsign configuration.
@@ -521,7 +497,7 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
 
     // 2. Get all DPS ranks linked to a Discord role
     const ranksRes = await pool.query<{ name: string; discord_role_id: string; group_id: number | null; sort_order: number }>(
-      `SELECT name, discord_role_id, group_id, sort_order FROM dps_ranks WHERE discord_role_id IS NOT NULL`
+      `SELECT name, discord_role_id, group_id, sort_order FROM dps_ranks WHERE discord_role_id IS NOT NULL AND discord_role_id != ''`
     );
     if (ranksRes.rows.length === 0) return { assigned: 0, skipped: 0, removed: 0, errors: [] };
 
@@ -605,14 +581,18 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
 
     // 4. Remove ranks from members whose linked Discord role was taken away
     // Find all dps_users rows whose rank is tied to a Discord role
-    const linkedRes = await pool.query<{
-      profile_id: number; discord_id: string | null; discord_username: string | null; dps_rank: string;
-    }>(
-      `SELECT u.profile_id, p.discord_id, p.discord_username, u.dps_rank
-       FROM dps_users u
-       JOIN cad_user_profiles p ON p.id = u.profile_id
-       WHERE u.dps_rank IN (SELECT name FROM dps_ranks WHERE discord_role_id IS NOT NULL)`
-    );
+    const linkedRankNames = ranksRes.rows.map(r => r.name);
+    const linkedRes = linkedRankNames.length === 0
+      ? { rows: [] as Array<{ profile_id: number; discord_id: string | null; discord_username: string | null; dps_rank: string }> }
+      : await pool.query<{
+          profile_id: number; discord_id: string | null; discord_username: string | null; dps_rank: string;
+        }>(
+          `SELECT u.profile_id, p.discord_id, p.discord_username, u.dps_rank
+           FROM dps_users u
+           JOIN cad_user_profiles p ON p.id = u.profile_id
+           WHERE u.dps_rank = ANY($1::text[])`,
+          [linkedRankNames],
+        );
 
     // Build a quick lookup: discordUsername → is active (for username-matched profiles)
     const activeByUsername = new Set<string>(
@@ -1722,20 +1702,23 @@ router.delete("/roster/:id", async (req, res) => {
 });
 
 // ── GET /roster/discord-roles — DPS guild role list for dropdowns ─────────────
-router.get("/roster/discord-roles", async (_req, res) => {
+router.get("/roster/discord-roles", async (req, res) => {
   try {
-    res.json(await getDpsGuildRoles());
+    const refresh = wantsDiscordRolesRefresh(req.query as Record<string, unknown>);
+    res.json(await getDpsGuildRoles(refresh));
   } catch (err) {
+    req.log?.error?.({ err }, "roster/discord-roles GET error");
     res.status(500).json({ error: "Failed to fetch DPS Discord roles." });
   }
 });
 
 // ── GET /roster/division-discord-roles — Division guild role list ─────────────
-router.get("/roster/division-discord-roles", async (_req, res) => {
+router.get("/roster/division-discord-roles", async (req, res) => {
   try {
-    res.json(await getDivisionGuildRoles());
+    const refresh = wantsDiscordRolesRefresh(req.query as Record<string, unknown>);
+    res.json(await getDivisionGuildRoles(refresh));
   } catch (err) {
-    _req.log?.error?.({ err }, "division-discord-roles GET error");
+    req.log?.error?.({ err }, "division-discord-roles GET error");
     // Soft-fail so the Division Panel still loads when the bot isn't in the guild yet
     res.json([]);
   }

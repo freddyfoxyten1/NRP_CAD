@@ -1864,7 +1864,7 @@ export function DivisionPanelSection({
     Promise.all([
       fetch(`${apiBase}/divisions`, { headers: { accept: 'application/json' } }).then(r => r.json()),
       fetch(`${apiBase}/division-ranks`, { headers: { accept: 'application/json' } }).then(r => r.json()),
-      fetch(`${apiBase}/division-discord-roles`, { headers: { accept: 'application/json' } })
+      fetch(`${apiBase}/division-discord-roles?refresh=1`, { headers: { accept: 'application/json' } })
         .then(r => (r.ok ? r.json() : []))
         .catch(() => []),
     ])
@@ -1878,6 +1878,14 @@ export function DivisionPanelSection({
   };
 
   useEffect(() => { refresh({ silent: false }); }, []);
+
+  useEffect(() => {
+    if (!addRankOpen && !editRank && !addDivisionOpen && editingDivisionId == null) return;
+    fetch(`${apiBase}/division-discord-roles?refresh=1`, { headers: { accept: 'application/json' } })
+      .then(r => (r.ok ? r.json() : []))
+      .then(roles => setDiscordRoles(Array.isArray(roles) ? roles : []))
+      .catch(() => {});
+  }, [addRankOpen, editRank, addDivisionOpen, editingDivisionId, apiBase]);
 
   const selectedDivision = selectedDivisionId != null
     ? divisions.find(d => d.id === selectedDivisionId) ?? null

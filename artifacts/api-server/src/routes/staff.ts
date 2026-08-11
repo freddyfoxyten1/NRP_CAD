@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 import { isSuperAdminDiscordId } from "../lib/superadmin";
+import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 
 const router = Router();
@@ -41,10 +42,6 @@ async function denyUnlessSuperAdminForLocked(
 // Guild whose roles drive automatic rank assignment.
 const STAFF_GUILD_ID = process.env.STAFF_DISCORD_GUILD_ID ?? "1411760639428399194";
 
-const staffRolesCache: { roles: Array<{ id: string; name: string; position: number }> | null; fetchedAt: number } =
-  { roles: null, fetchedAt: 0 };
-const STAFF_ROLES_TTL = 30 * 60 * 1000; // 30 min
-
 // Cache of all guild members — populated by the background sync so the
 // member-search endpoint never needs to re-paginate for a search query.
 type StaffMemberCacheEntry = { id: string; username: string; nick: string | null };
@@ -63,16 +60,8 @@ async function staffDiscordFetch(url: string, init: RequestInit = {}): Promise<g
   return r;
 }
 
-async function getStaffGuildRoles(): Promise<Array<{ id: string; name: string; position: number }>> {
-  if (staffRolesCache.roles && Date.now() - staffRolesCache.fetchedAt < STAFF_ROLES_TTL) {
-    return staffRolesCache.roles;
-  }
-  const r = await staffDiscordFetch(`https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/roles`);
-  if (!r.ok) throw new Error(`Discord roles fetch failed: ${r.status}`);
-  const all = (await r.json()) as Array<{ id: string; name: string; position: number }>;
-  staffRolesCache.roles = all.filter(x => x.name !== "@everyone").sort((a, b) => b.position - a.position);
-  staffRolesCache.fetchedAt = Date.now();
-  return staffRolesCache.roles;
+async function getStaffGuildRoles(refresh = false): Promise<Array<{ id: string; name: string; position: number }>> {
+  return getDiscordGuildRoles(STAFF_GUILD_ID, { refresh });
 }
 
 const STAFF_MEMBERS_TTL_MS = 5 * 60 * 1000; // 5 min — used by Add Staff Member typeahead
@@ -226,7 +215,7 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
     // 1. Get all ranks linked to a Discord role (include sort_order so we can
     //    pick the highest-ranked role when a member holds more than one)
     const ranksRes = await pool.query<{ name: string; discord_role_id: string; group_id: number | null; sort_order: number }>(
-      `SELECT name, discord_role_id, group_id, sort_order FROM staff_ranks WHERE discord_role_id IS NOT NULL`
+      `SELECT name, discord_role_id, group_id, sort_order FROM staff_ranks WHERE discord_role_id IS NOT NULL AND discord_role_id != ''`
     );
 
     const groupsRes = await pool.query<{ id: number; name: string }>(
@@ -1136,11 +1125,13 @@ router.get("/staff/member-search", async (req, res) => {
 });
 
 // ── GET /staff/discord-roles ──────────────────────────────────────────────────
-router.get("/staff/discord-roles", async (_req, res) => {
+router.get("/staff/discord-roles", async (req, res) => {
   if (!process.env.DISCORD_BOT_TOKEN) { res.json([]); return; }
   try {
-    res.json(await getStaffGuildRoles());
+    const refresh = wantsDiscordRolesRefresh(req.query as Record<string, unknown>);
+    res.json(await getStaffGuildRoles(refresh));
   } catch (err) {
+    req.log?.error?.({ err }, "staff/discord-roles GET error");
     res.status(500).json({ error: "Unable to load Discord roles." });
   }
 });

@@ -6,6 +6,7 @@
 // edits coalesce without waiting for the background poll interval.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { invalidateDiscordGuildRolesCache } from "./discord-guild-roles-cache";
 import { logger } from "./logger";
 
 type SyncJob = { key: string; run: () => Promise<void> };
@@ -104,10 +105,15 @@ function handleDispatch(event: string, data: Record<string, unknown>, seq: numbe
     return;
   }
 
-  if (event === "GUILD_ROLE_UPDATE" || event === "GUILD_ROLE_DELETE") {
-    // Role definition changed — refresh all rosters tied to this guild.
+  if (
+    event === "GUILD_ROLE_CREATE"
+    || event === "GUILD_ROLE_UPDATE"
+    || event === "GUILD_ROLE_DELETE"
+  ) {
     const guildId = String(data.guild_id ?? "");
-    if (guildId) onGuildMemberRolesChanged(guildId);
+    if (!guildId) return;
+    invalidateDiscordGuildRolesCache(guildId);
+    onGuildMemberRolesChanged(guildId);
   }
 }
 
