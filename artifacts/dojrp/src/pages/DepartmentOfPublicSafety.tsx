@@ -1,5 +1,10 @@
-import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  nestedPortalSectionPath,
+  parseNestedPortalSection,
+  usePortalSection,
+} from '@/hooks/usePortalSection';
 import {
   AlertCircle, BookOpen, CalendarDays, Car, ChevronDown, ChevronRight, ChevronUp,
   Clock, FileText, Globe, GripVertical, Info, LayoutDashboard, Layers, Lock, LogOut, MapPin, Package,
@@ -33,6 +38,18 @@ import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/c
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Tab = 'personnel-roster' | 'division-roster' | 'divisions-information' | 'vehicle-roster' | 'equipment-roster' | 'event-calendar' | 'information' | 'resources' | 'department-panel';
+
+const DPS_SECTIONS = [
+  'personnel-roster',
+  'division-roster',
+  'divisions-information',
+  'vehicle-roster',
+  'equipment-roster',
+  'event-calendar',
+  'information',
+  'resources',
+  'department-panel',
+] as const satisfies readonly Tab[];
 
 type DpsRank = {
   id: number; name: string; sort_order: number; group_id: number | null;
@@ -1473,11 +1490,25 @@ const DepartmentOfPublicSafety = () => {
   const [isLoading,    setIsLoading]    = useState(true);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [sidebarOpen,  setSidebarOpen]  = useState(true);
-  const [activeTab,    setActiveTab]    = useState<Tab>(() => {
-    const p = new URLSearchParams(window.location.search).get('tab');
-    const valid: Tab[] = ['personnel-roster','division-roster','divisions-information','vehicle-roster','equipment-roster','event-calendar','information','resources','department-panel'];
-    return (valid.includes(p as Tab) ? p : 'personnel-roster') as Tab;
+  type PanelSection = 'personnel' | 'division' | 'vehicle' | 'equipment' | 'resources' | 'calendar' | 'information';
+  const PANEL_SECTIONS = new Set<string>([
+    'personnel', 'division', 'vehicle', 'equipment', 'resources', 'calendar', 'information',
+  ]);
+  const [activeTab, setActiveTab, rawSection] = usePortalSection<Tab>({
+    base: 'dps',
+    valid: DPS_SECTIONS,
+    defaultSection: 'personnel-roster',
+    resolveParent: (raw) =>
+      (raw === 'department-panel' || raw.startsWith('department-panel-') ? 'department-panel' : null),
   });
+  const panelSection = useMemo((): PanelSection | null => {
+    const parsed = parseNestedPortalSection(rawSection, 'department-panel');
+    if (!parsed.isParent || !parsed.nested || !PANEL_SECTIONS.has(parsed.nested)) return null;
+    return parsed.nested as PanelSection;
+  }, [rawSection]);
+  const setPanelSection = useCallback((next: PanelSection | null) => {
+    navigate(nestedPortalSectionPath('dps', 'department-panel', next));
+  }, [navigate]);
   const [divisionRanksForEdit, setDivisionRanksForEdit] = useState<{ id: number; name: string; division_id: number | null }[]>([]);
   const [rosterDivisions, setRosterDivisions] = useState<RosterDivision[]>([]);
   const [divisionStats, setDivisionStats] = useState({ divisions: 0, ranks: 0 });
@@ -1589,9 +1620,6 @@ const DepartmentOfPublicSafety = () => {
   // rank edit modal
   const [editRankId,       setEditRankId]       = useState<number | null>(null);
   const [dpsGuildRoles,    setDpsGuildRoles]    = useState<DpsDiscordRole[]>([]);
-  // department panel section picker
-  const [panelSection,     setPanelSection]     = useState<'personnel' | 'division' | 'vehicle' | 'equipment' | 'resources' | 'calendar' | 'information' | null>(null);
-
   // Event calendar
   const [eventsRaw,       setEventsRaw]       = useState<DpsEvent[]>([]);
   const events = Array.isArray(eventsRaw) ? eventsRaw : [];
@@ -1942,9 +1970,6 @@ const DepartmentOfPublicSafety = () => {
 
   useEffect(() => {
     if (activeTab === 'information') fetchPageInfo();
-  }, [activeTab]);
-  useEffect(() => {
-    if (activeTab !== 'department-panel') setPanelSection(null);
   }, [activeTab]);
 
   const fetchFleetPanel = () => {
@@ -2862,8 +2887,8 @@ const DepartmentOfPublicSafety = () => {
               {/* Department Panel link — Executive Team / panel_access ranks / granted division editors */}
               {session && canSeeDepartmentPanel && (
                 <button type="button" onClick={() => {
-                  setActiveTab('department-panel');
-                  setPanelSection(isDivisionOnlyPanelEditor ? 'division' : null);
+                  if (isDivisionOnlyPanelEditor) setPanelSection('division');
+                  else setActiveTab('department-panel');
                 }}
                   className={`flex w-full items-center gap-3 rounded-md px-4 py-3 text-left text-sm font-black uppercase transition-colors ${
                     activeTab === 'department-panel'
@@ -2876,7 +2901,7 @@ const DepartmentOfPublicSafety = () => {
               )}
 
               {/* Member Portal link */}
-              <button type="button" onClick={() => navigate('/portal')}
+              <button type="button" onClick={() => navigate('/portal_dashboard')}
                 className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]">
                 <LayoutDashboard className="h-4 w-4" />
                 Member Portal

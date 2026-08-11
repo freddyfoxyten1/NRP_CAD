@@ -1,5 +1,11 @@
-import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  nestedPortalSectionPath,
+  parseNestedPortalSection,
+  portalSectionPath,
+  usePortalSection,
+} from '@/hooks/usePortalSection';
 import { BookOpen, Car, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Crosshair, ExternalLink, FileText, GripVertical, Image as ImageIcon, Info, Link, Lock, LogOut, Megaphone, Pencil, Plus, RefreshCw, Scale, Search, Settings, Shield, ShoppingBag, Terminal as TerminalIcon, Trash2, Upload, User, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
@@ -66,6 +72,19 @@ type EditMemberForm = Pick<
 >;
 
 type AdminTab = 'members' | 'staff-roster' | 'announcement' | 'information-support' | 'staff-resources' | 'terms-privacy' | 'gallery' | 'store' | 'terminal' | 'logs';
+
+const ADMIN_SECTIONS = [
+  'members',
+  'staff-roster',
+  'announcement',
+  'information-support',
+  'staff-resources',
+  'terms-privacy',
+  'gallery',
+  'store',
+  'terminal',
+  'logs',
+] as const satisfies readonly AdminTab[];
 type LegalEditDoc = 'terms' | 'privacy';
 type LogsSubTab =
   | 'members'
@@ -659,7 +678,23 @@ const SrRankEditModal = ({ rank, discordRoles, onClose, onSaved }: {
 
 const AdminPortal = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<AdminTab>('members');
+  const [activeTab, setActiveTab, rawSection] = usePortalSection<AdminTab>({
+    base: 'admin',
+    valid: ADMIN_SECTIONS,
+    defaultSection: 'members',
+    resolveParent: (raw) => (raw === 'logs' || raw.startsWith('logs-') ? 'logs' : null),
+  });
+  const logsSubTab = useMemo((): LogsSubTab => {
+    const parsed = parseNestedPortalSection(rawSection, 'logs');
+    if (!parsed.isParent || !parsed.nested) return null;
+    return parsed.nested in LOGS_SUB_TAB_TITLES
+      ? (parsed.nested as Exclude<LogsSubTab, null>)
+      : null;
+  }, [rawSection]);
+  const setLogsSubTab = useCallback((next: LogsSubTab) => {
+    if (next) navigate(nestedPortalSectionPath('admin', 'logs', next));
+    else navigate(portalSectionPath('admin', 'logs'));
+  }, [navigate]);
   const [members, setMembers] = useState<AdminMember[]>([]);
   // Guild-member view (Discord members merged with CAD profiles + staff groups)
   const [guildMembers,        setGuildMembers]        = useState<GuildMember[]>([]);
@@ -841,7 +876,6 @@ const AdminPortal = () => {
   const [assigningDiscordRoles,   setAssigningDiscordRoles]   = useState(false);
 
   // -- System Logs ----
-  const [logsSubTab,       setLogsSubTab]       = useState<LogsSubTab>(null);
   const [auditLogs,        setAuditLogs]        = useState<AuditLog[]>([]);
   const [auditLogsLoading, setAuditLogsLoading] = useState(false);
   const [auditLogSearch,   setAuditLogSearch]   = useState('');
@@ -866,10 +900,9 @@ const AdminPortal = () => {
       .finally(() => setAuditLogsLoading(false));
   }, [activeTab, logsSubTab]);
 
-  // Reset sub-tab when navigating away from logs
+  // Clear log filters when leaving the logs section
   useEffect(() => {
     if (activeTab !== 'logs') {
-      setLogsSubTab(null);
       setAuditLogSearch('');
       setAuditLogActionFilter('all');
       setAuditLogActorFilter('all');
@@ -1677,7 +1710,7 @@ const AdminPortal = () => {
       }
       if (!hasAccess) {
         toast.error('Admin portal access requires an admin-level role.');
-        navigate('/portal', { replace: true });
+        navigate('/portal_dashboard', { replace: true });
         return;
       }
 
@@ -2627,7 +2660,7 @@ const AdminPortal = () => {
 
             <button
               type="button"
-              onClick={() => navigate('/staff')}
+              onClick={() => navigate('/staff_roster')}
               className="mt-6 flex w-full items-center gap-3 border-t border-[#131f30] px-4 pt-6 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff] lg:mt-5"
             >
               <Users className="h-4 w-4" />
@@ -2645,7 +2678,7 @@ const AdminPortal = () => {
 
             <button
               type="button"
-              onClick={() => navigate('/portal')}
+              onClick={() => navigate('/portal_dashboard')}
               className="mt-4 flex w-full items-center gap-3 px-4 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]"
             >
               <Shield className="h-4 w-4" />
@@ -4159,7 +4192,7 @@ const AdminPortal = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => navigate('/?tab=store')}
+                      onClick={() => navigate('/public_store')}
                       className="inline-flex items-center gap-2 rounded-lg border border-[#4384ff]/35 bg-[#4384ff]/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.14em] text-[#4384ff] transition-colors hover:bg-[#4384ff]/18"
                     >
                       <ExternalLink className="h-3.5 w-3.5" />

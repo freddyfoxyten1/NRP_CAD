@@ -5,7 +5,8 @@
 // and press/news items for the DOJRP community.
 // ----
 import { useCallback, useEffect, useRef, useState, Fragment } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { sectionFromPathname } from "@/hooks/usePortalSection";
 import {
   CalendarDays, Gamepad2, Users, Megaphone, Image as ImageIcon,
   Newspaper, ChevronLeft, ExternalLink, Calendar, User,
@@ -149,9 +150,16 @@ const SERVER_STORE_URL_FALLBACK = (import.meta.env.VITE_SERVER_STORE_URL as stri
 
 const VALID_TABS = new Set<Tab>(["home", "events", "departments", "announcements", "gallery", "press", "staff", "store"]);
 
-function tabFromSearch(): Tab {
+/** Home is `/`; other public sections use `/public_<section>` (e.g. `/public_store`). */
+function publicSectionPath(tab: Tab): string {
+  return tab === "home" ? "/" : `/public_${tab}`;
+}
+
+function tabFromRoute(section: string | undefined, search: string): Tab {
+  const fromPath = section?.trim().toLowerCase();
+  if (fromPath && VALID_TABS.has(fromPath as Tab)) return fromPath as Tab;
   try {
-    const raw = new URLSearchParams(window.location.search).get("tab")?.trim().toLowerCase();
+    const raw = new URLSearchParams(search).get("tab")?.trim().toLowerCase();
     if (raw && VALID_TABS.has(raw as Tab)) return raw as Tab;
   } catch { /* ignore */ }
   return "home";
@@ -248,16 +256,46 @@ const isPublicDepartmentResource = (r: DpsResource) =>
 // -- Main component ----
 const PublicView = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const pathSection = sectionFromPathname(location.pathname, "public");
+  const sectionParam =
+    location.pathname === "/" || location.pathname === ""
+      ? "home"
+      : pathSection === "home"
+        ? "home"
+        : pathSection;
+  const [searchParams] = useSearchParams();
 
   const [isLoginOpen,   setIsLoginOpen]   = useState(false);
-  const [tab,           setTab]           = useState<Tab>(() => tabFromSearch());
+  const [tab,           setTabState]      = useState<Tab>(() =>
+    tabFromRoute(sectionParam, typeof window !== "undefined" ? window.location.search : ""),
+  );
   const [serverStoreUrl, setServerStoreUrl] = useState(SERVER_STORE_URL_FALLBACK);
   const [storeProducts, setStoreProducts] = useState<StoreProduct[]>([]);
   const [storeProductsLoading, setStoreProductsLoading] = useState(false);
 
+  useEffect(() => {
+    const next = tabFromRoute(sectionParam, location.search);
+    setTabState(next);
+    const legacy = searchParams.get("tab")?.trim().toLowerCase();
+    if (legacy && VALID_TABS.has(legacy as Tab)) {
+      navigate(publicSectionPath(legacy as Tab), { replace: true });
+      return;
+    }
+    // Normalize legacy `/public_home` bookmarks (route also redirects).
+    if (location.pathname === "/public_home") {
+      navigate("/", { replace: true });
+    }
+  }, [sectionParam, location.pathname, location.search, searchParams, navigate]);
+
+  const setTab = useCallback((next: Tab) => {
+    setTabState(next);
+    navigate(publicSectionPath(next));
+  }, [navigate]);
+
   const handleSignIn = () => {
     if (getCadSession()) {
-      navigate("/portal");
+      navigate("/portal_dashboard");
     } else {
       setIsLoginOpen(true);
     }
@@ -1320,9 +1358,9 @@ const PublicView = () => {
                     type="button"
                     onClick={() => {
                       if (getCadSession()) {
-                        navigate("/dps?tab=information");
+                        navigate("/dps_information");
                       } else {
-                        sessionStorage.setItem("post_login_redirect", "/dps?tab=information");
+                        sessionStorage.setItem("post_login_redirect", "/dps_information");
                         setIsLoginOpen(true);
                       }
                     }}
@@ -1351,9 +1389,9 @@ const PublicView = () => {
                     type="button"
                     onClick={() => {
                       if (getCadSession()) {
-                        navigate("/dps?tab=event-calendar");
+                        navigate("/dps_event-calendar");
                       } else {
-                        sessionStorage.setItem("post_login_redirect", "/dps?tab=event-calendar");
+                        sessionStorage.setItem("post_login_redirect", "/dps_event-calendar");
                         setIsLoginOpen(true);
                       }
                     }}
@@ -1421,9 +1459,9 @@ const PublicView = () => {
                     type="button"
                     onClick={() => {
                       if (getCadSession()) {
-                        navigate("/dph?tab=information");
+                        navigate("/dph_information");
                       } else {
-                        sessionStorage.setItem("post_login_redirect", "/dph?tab=information");
+                        sessionStorage.setItem("post_login_redirect", "/dph_information");
                         setIsLoginOpen(true);
                       }
                     }}
@@ -1452,9 +1490,9 @@ const PublicView = () => {
                     type="button"
                     onClick={() => {
                       if (getCadSession()) {
-                        navigate("/dph?tab=event-calendar");
+                        navigate("/dph_event-calendar");
                       } else {
-                        sessionStorage.setItem("post_login_redirect", "/dph?tab=event-calendar");
+                        sessionStorage.setItem("post_login_redirect", "/dph_event-calendar");
                         setIsLoginOpen(true);
                       }
                     }}

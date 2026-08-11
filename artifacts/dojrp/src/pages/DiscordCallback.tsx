@@ -128,7 +128,7 @@ const DiscordCallback = () => {
         setCadSession(payload, { renewExpiry: true });
         const redirect = sessionStorage.getItem('post_login_redirect');
         sessionStorage.removeItem('post_login_redirect');
-        navigate(redirect ?? '/portal', { replace: true });
+        navigate(redirect ?? '/portal_dashboard', { replace: true });
       } catch {
         if (cancelled) return;
         setState({ kind: 'error', message: 'Something went wrong. Redirecting…' });

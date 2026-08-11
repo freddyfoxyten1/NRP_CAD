@@ -76,7 +76,9 @@ export default defineConfig({
     },
   },
   preview: {
-    port,
+    // Keep preview off the Vite dev port so `bun run preview` works while `dev` is up.
+    port: Number(process.env.PREVIEW_PORT ?? '4173'),
+    strictPort: true,
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {

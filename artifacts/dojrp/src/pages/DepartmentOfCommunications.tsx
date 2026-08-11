@@ -1,5 +1,10 @@
-import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  nestedPortalSectionPath,
+  parseNestedPortalSection,
+  usePortalSection,
+} from '@/hooks/usePortalSection';
 import {
   AlertCircle, CalendarDays, Car, ChevronDown, ChevronRight, ChevronUp,
   GripVertical, LayoutDashboard, LogOut, Package,
@@ -19,6 +24,14 @@ import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Tab = 'personnel-roster' | 'vehicle-roster' | 'equipment-roster' | 'event-calendar' | 'department-panel';
+
+const DOC_SECTIONS = [
+  'personnel-roster',
+  'vehicle-roster',
+  'equipment-roster',
+  'event-calendar',
+  'department-panel',
+] as const satisfies readonly Tab[];
 
 type DocRank = {
   id: number; name: string; sort_order: number; group_id: number | null;
@@ -608,7 +621,23 @@ const DepartmentOfCommunications = () => {
   const [profileOpen,  setProfileOpen]  = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen]                  = useState(true);
-  const [activeTab,    setActiveTab]    = useState<Tab>('personnel-roster');
+  type PanelSection = 'personnel' | 'vehicle' | 'calendar';
+  const PANEL_SECTIONS = new Set<string>(['personnel', 'vehicle', 'calendar']);
+  const [activeTab, setActiveTab, rawSection] = usePortalSection<Tab>({
+    base: 'doc',
+    valid: DOC_SECTIONS,
+    defaultSection: 'personnel-roster',
+    resolveParent: (raw) =>
+      (raw === 'department-panel' || raw.startsWith('department-panel-') ? 'department-panel' : null),
+  });
+  const panelSection = useMemo((): PanelSection | null => {
+    const parsed = parseNestedPortalSection(rawSection, 'department-panel');
+    if (!parsed.isParent || !parsed.nested || !PANEL_SECTIONS.has(parsed.nested)) return null;
+    return parsed.nested as PanelSection;
+  }, [rawSection]);
+  const setPanelSection = useCallback((next: PanelSection | null) => {
+    navigate(nestedPortalSectionPath('doc', 'department-panel', next));
+  }, [navigate]);
   const [showPhone,    setShowPhone]    = useState(false);
   const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const [phoneCallEvent, setPhoneCallEvent] = useState<import('@/hooks/usePhoneSSE').PhoneSSEEvent | null>(null);
@@ -666,7 +695,6 @@ const DepartmentOfCommunications = () => {
   const [newRankName,      setNewRankName]      = useState('');
   const [addingRank,       setAddingRank]       = useState(false);
   const [editRankId,       setEditRankId]       = useState<number | null>(null);
-  const [panelSection,     setPanelSection]     = useState<'personnel' | 'vehicle' | 'calendar' | null>(null);
 
   // Drag-and-drop — ranks
   const [dragRankId,       setDragRankId]       = useState<number | null>(null);
@@ -827,10 +855,6 @@ const DepartmentOfCommunications = () => {
       .then(r => r.json()).then((rows: DocGroup[]) => setGroups(rows))
       .catch(() => toast.error('Failed to load groups.')).finally(() => setGroupsLoading(false));
   };
-  useEffect(() => {
-    if (activeTab !== 'department-panel') setPanelSection(null);
-  }, [activeTab]);
-
   const fetchFleetPanel = () => {
     setFleetLoading(true); setCategoriesLoading(true);
     Promise.all([
@@ -1160,7 +1184,7 @@ const DepartmentOfCommunications = () => {
 
               {/* Department Panel — visible to staff execs or rank groups with panel_access */}
               {session && hasPanelAccess && (
-                <button type="button" onClick={() => { setActiveTab('department-panel'); setPanelSection(null); }}
+                <button type="button" onClick={() => setActiveTab('department-panel')}
                   className={`flex w-full items-center gap-3 rounded-md px-4 py-3 text-left text-sm font-black uppercase transition-colors ${
                     activeTab === 'department-panel'
                       ? 'border-l-2 border-[#f4c542] bg-[#131002] text-[#f4c542]'
@@ -1171,7 +1195,7 @@ const DepartmentOfCommunications = () => {
                 </button>
               )}
 
-              <button type="button" onClick={() => navigate('/portal')}
+              <button type="button" onClick={() => navigate('/portal_dashboard')}
                 className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]">
                 <LayoutDashboard className="h-4 w-4" />
                 Member Portal

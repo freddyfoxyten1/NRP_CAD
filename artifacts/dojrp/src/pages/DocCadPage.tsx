@@ -3707,7 +3707,7 @@ export default function DocCadPage() {
           }
           onClose={() => setShowGate(false)}
           onSignOn={handleSignOn}
-          onSignOff={async () => { await handleSignOff(); navigate('/doc'); }}
+          onSignOff={async () => { await handleSignOff(); navigate('/doc_personnel-roster'); }}
           onStatusChange={handleStatusChange}
         />
       )}
@@ -3824,7 +3824,7 @@ export default function DocCadPage() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => navigate('/doc')}
+            onClick={() => navigate('/doc_personnel-roster')}
             className="flex items-center gap-1.5 rounded border border-[#1a2e4a] bg-[#060f20] px-2.5 py-1 text-[10px] font-black text-[#a8b7cd] transition-colors hover:border-[#2f70ff] hover:text-[#4384ff]">
             <ArrowLeft className="h-3 w-3" />
             DOC
