@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { pool } from "@workspace/db";
+import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
 import {
   type DphGuildMember,
@@ -1156,8 +1156,8 @@ router.post("/dph/ranks", async (req, res) => {
     if (discord_role_id?.trim()) void syncDphDiscordRoles().catch(console.error);
     res.status(201).json(result.rows[0]);
   } catch (err: unknown) {
-    const pg = err as { code?: string };
-    if (pg.code === "23505") { res.status(409).json({ error: "A rank with that name already exists." }); return; }
+    req.log.error({ err }, "dph ranks POST error");
+    if (isUniqueViolation(err)) { res.status(409).json({ error: "A rank with that name already exists." }); return; }
     res.status(500).json({ error: "Unable to add rank." });
   }
 });

@@ -26,6 +26,11 @@ function stripCasts(sql: string): string {
     .replace(/\bnow\(\)/gi, "CURRENT_TIMESTAMP");
 }
 
+/** Collapse whitespace so multiline INSERT/SELECT patterns match reliably. */
+function normalizeSqlWhitespace(sql: string): string {
+  return sql.replace(/\s+/g, " ").trim();
+}
+
 function mapTable(table: string): string {
   const map: Record<string, string> = {
     cad_user_profiles: "users",
@@ -412,15 +417,60 @@ async function executeSelect(sql: string, original: string): Promise<QueryResult
     return { rows: [{ [alias]: c, count: c, c }], rowCount: 1 };
   }
 
-  // MAX / COALESCE(MAX)
+  // MAX / COALESCE(MAX(sort_order), -1) [+ N]
+  const coalesceMaxMatch = sql.match(
+    /select\s+coalesce\s*\(\s*max\(([a-zA-Z0-9_.]+)\)\s*,\s*(-?\d+)\s*\)(?:\s*\+\s*(\d+))?\s+(?:as\s+(\w+)\s+)?from\s+([a-zA-Z0-9_]+)(?:\s+where\s+(.+?))?(?:\s+order\s+by|\s+limit|\s*$)/i,
+  );
+  if (coalesceMaxMatch) {
+    const field = stripAlias(coalesceMaxMatch[1]);
+    const coalesceDefault = Number(coalesceMaxMatch[2]);
+    const addend = coalesceMaxMatch[3] ? Number(coalesceMaxMatch[3]) : 0;
+    const alias = coalesceMaxMatch[4] || "m";
+    const table = mapTable(coalesceMaxMatch[5]);
+    const whereRaw = coalesceMaxMatch[6]?.trim() ?? "";
+    const col = await getCollection(table);
+    let docs = await col.find(applyResourceDeptFilter(table, original, {})).toArray();
+    if (whereRaw) docs = docs.filter((d) => evalPredicate(d, whereRaw));
+    let max: number | null = null;
+    for (const d of docs) {
+      const n = Number(d[field]);
+      if (!Number.isFinite(n)) continue;
+      max = max == null ? n : Math.max(max, n);
+    }
+    const base = Number.isFinite(coalesceDefault) ? (max ?? coalesceDefault) : (max ?? 0);
+    const value = base + addend;
+    return { rows: [{ [alias]: value, m: value, mx: value }], rowCount: 1 };
+  }
+
   const maxMatch = sql.match(
-    /select\s+(?:coalesce\s*\(\s*)?max\(([a-zA-Z0-9_.]+)\)(?:\s*,\s*0\s*\))?(?:\s+as\s+(\w+))?\s+from\s+([a-zA-Z0-9_]+)(?:\s+where\s+([\s\S]+))?$/i,
+    /select\s+max\(([a-zA-Z0-9_.]+)\)(?:\s+as\s+(\w+))?\s+from\s+([a-zA-Z0-9_]+)(?:\s+where\s+(.+?))?(?:\s+order\s+by|\s+limit|\s*$)/i,
   );
   if (maxMatch) {
     const field = stripAlias(maxMatch[1]);
     const alias = maxMatch[2] || "m";
     const table = mapTable(maxMatch[3]);
-    const whereRaw = maxMatch[4] ?? "";
+    const whereRaw = maxMatch[4]?.trim() ?? "";
+    const col = await getCollection(table);
+    let docs = await col.find(applyResourceDeptFilter(table, original, {})).toArray();
+    if (whereRaw) docs = docs.filter((d) => evalPredicate(d, whereRaw));
+    let max: number | null = null;
+    for (const d of docs) {
+      const n = Number(d[field]);
+      if (!Number.isFinite(n)) continue;
+      max = max == null ? n : Math.max(max, n);
+    }
+    return { rows: [{ [alias]: max, m: max, mx: max }], rowCount: 1 };
+  }
+
+  // Legacy: COALESCE(MAX(...), 0) without nested coalesce form above
+  const legacyMaxMatch = sql.match(
+    /select\s+(?:coalesce\s*\(\s*)?max\(([a-zA-Z0-9_.]+)\)(?:\s*,\s*0\s*\))?(?:\s+as\s+(\w+))?\s+from\s+([a-zA-Z0-9_]+)(?:\s+where\s+(.+?))?(?:\s+order\s+by|\s+limit|\s*$)/i,
+  );
+  if (legacyMaxMatch) {
+    const field = stripAlias(legacyMaxMatch[1]);
+    const alias = legacyMaxMatch[2] || "m";
+    const table = mapTable(legacyMaxMatch[3]);
+    const whereRaw = legacyMaxMatch[4]?.trim() ?? "";
     const col = await getCollection(table);
     let docs = await col.find(applyResourceDeptFilter(table, original, {})).toArray();
     if (whereRaw) docs = docs.filter((d) => evalPredicate(d, whereRaw));
@@ -530,7 +580,7 @@ export async function mongoSqlQuery<T = Document>(
     }
   }
 
-  const sql = stripCasts(bindParams(original, params));
+  const sql = normalizeSqlWhitespace(stripCasts(bindParams(original, params)));
   const sqlUpper = sql.toUpperCase();
 
   // INSERT

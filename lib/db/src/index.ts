@@ -76,6 +76,7 @@ export {
 } from "./redis";
 export { nextId, ensureCounterAtLeast } from "./counters";
 export { ensureMongoIndexes } from "./ensure-indexes";
+export { isUniqueViolation } from "./sql-errors";
 
 export * as mediaRepo from "./repositories/media";
 export * as resourcesRepo from "./repositories/resources";

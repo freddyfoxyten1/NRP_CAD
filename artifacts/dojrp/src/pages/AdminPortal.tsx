@@ -1155,15 +1155,20 @@ const AdminPortal = () => {
       const fd = new FormData();
       fd.append('file', galleryFile);
       const upRes = await fetch('/api/images/upload', { method: 'POST', body: fd });
-      if (!upRes.ok) { const e = await upRes.json(); throw new Error(e.error ?? 'Upload failed'); }
-      const { url } = await upRes.json() as { url: string };
+      const upJson = await upRes.json().catch(() => ({})) as { url?: string; error?: string };
+      if (!upRes.ok || !upJson.url) {
+        throw new Error(upJson.error ?? 'Upload failed');
+      }
 
       const saveRes = await fetch('/api/public/gallery', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-admin-code': ADMIN_CODE, 'x-actor': currentAdmin?.username ?? 'Admin' },
-        body: JSON.stringify({ image_url: url, title: '', caption: galleryCredit.trim() }),
+        body: JSON.stringify({ image_url: upJson.url, title: '', caption: galleryCredit.trim() }),
       });
-      if (!saveRes.ok) throw new Error('Failed to add image to gallery');
+      if (!saveRes.ok) {
+        const data = await saveRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? 'Failed to add image to gallery');
+      }
 
       toast.success('Image added to gallery.');
       setGalleryFile(null);
@@ -1172,7 +1177,12 @@ const AdminPortal = () => {
       const fresh = await fetch('/api/public/gallery').then(r => r.json()) as typeof galleryImages;
       setGalleryImages(fresh);
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to upload image.');
+      const msg = e instanceof Error ? e.message : 'Failed to upload image.';
+      toast.error(
+        /failed to fetch|networkerror|load failed/i.test(msg)
+          ? 'Could not reach the API to upload. Make sure the API server is running, then try again.'
+          : msg,
+      );
     } finally {
       setGalleryUploading(false);
     }
@@ -1181,10 +1191,14 @@ const AdminPortal = () => {
   const handleGalleryDelete = async (id: number) => {
     setGalleryDeletingId(id);
     try {
-      await fetch(`/api/public/gallery/${id}`, {
+      const res = await fetch(`/api/public/gallery/${id}`, {
         method: 'DELETE',
         headers: { 'x-admin-code': ADMIN_CODE, 'x-actor': currentAdmin?.username ?? 'Admin' },
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? 'Failed to remove image.');
+      }
       setGalleryImages(prev => prev.filter(img => img.id !== id));
       setGalleryDeleteId(null);
       if (galleryEditId === id) {
@@ -1193,8 +1207,8 @@ const AdminPortal = () => {
         setGalleryEditCredit('');
       }
       toast.success('Image removed from gallery.');
-    } catch {
-      toast.error('Failed to remove image.');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove image.');
     } finally {
       setGalleryDeletingId(null);
     }
