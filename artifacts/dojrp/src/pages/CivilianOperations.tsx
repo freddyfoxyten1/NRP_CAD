@@ -435,7 +435,7 @@ const CivilianOperations = () => {
 
             {/* Back links */}
             <div className="mt-6 flex flex-col gap-0 border-t border-[#131f30] pt-6 lg:mt-5">
-              <button type="button" onClick={() => navigate('/portal')} className="flex w-full items-center gap-3 px-4 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]">
+              <button type="button" onClick={() => navigate('/portal_dashboard')} className="flex w-full items-center gap-3 px-4 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]">
                 <LayoutDashboard className="h-4 w-4" />
                 Member Portal
               </button>

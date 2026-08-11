@@ -7,7 +7,21 @@ import { isSuperAdminSession } from '@/lib/superadmin';
 import { getMemberDisplayRank, getMemberDisplayRole } from '@/lib/display-rank';
 import { useCadStatus } from '@/hooks/useCadStatus';
 import { usePhoneSSE, type PhoneSSEEvent } from '@/hooks/usePhoneSSE';
+import { usePortalSection } from '@/hooks/usePortalSection';
 import type { ContentBlock } from '@/components/shared/ContentBlocks';
+
+export const PORTAL_SECTIONS = ['dashboard', 'information-support'] as const;
+export type PortalSection = (typeof PORTAL_SECTIONS)[number];
+
+const PORTAL_SECTION_TO_NAV: Record<PortalSection, string> = {
+  dashboard: 'Dashboard',
+  'information-support': 'Information & Support',
+};
+
+const PORTAL_NAV_TO_SECTION: Record<string, PortalSection> = {
+  Dashboard: 'dashboard',
+  'Information & Support': 'information-support',
+};
 
 export type Announcement = {
   id: number;
@@ -117,7 +131,16 @@ export function useMemberPortal() {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [staffGroups, setStaffGroups] = useState<StaffGroup[]>([]);
   const [canAccessDphIab, setCanAccessDphIab] = useState(false);
-  const [activeNav, setActiveNav] = useState<string>('Dashboard');
+  const [portalSection, setPortalSection] = usePortalSection<PortalSection>({
+    base: 'portal',
+    valid: PORTAL_SECTIONS,
+    defaultSection: 'dashboard',
+  });
+  const activeNav = PORTAL_SECTION_TO_NAV[portalSection];
+  const setActiveNav = (nav: string) => {
+    const next = PORTAL_NAV_TO_SECTION[nav];
+    if (next) setPortalSection(next);
+  };
   const [infoSections, setInfoSections] = useState<ContentBlock[]>([]);
   const [infoLoading, setInfoLoading] = useState(false);
 
@@ -229,7 +252,7 @@ export function useMemberPortal() {
   }, [profileOpen]);
 
   useEffect(() => {
-    if (activeNav !== 'Information & Support') return;
+    if (portalSection !== 'information-support') return;
     let cancelled = false;
     setInfoLoading(true);
     fetch('/api/portal/content/information_support', { headers: { accept: 'application/json' } })
@@ -245,7 +268,7 @@ export function useMemberPortal() {
         if (!cancelled) setInfoLoading(false);
       });
     return () => { cancelled = true; };
-  }, [activeNav]);
+  }, [portalSection]);
 
   const handleSignOut = async () => {
     setIsSigningOut(true);
@@ -256,7 +279,7 @@ export function useMemberPortal() {
   };
 
   const handleAdminPortal = () => {
-    navigate('/admin');
+    navigate('/admin_members');
   };
 
   const { online: cadOnline, mode: cadMode } = useCadStatus();

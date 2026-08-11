@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { usePortalSection } from '@/hooks/usePortalSection';
 import { BookOpen, CalendarDays, ChevronDown, ChevronRight, FileText, LayoutDashboard, LogOut, MapPin, Pencil, Plus, Search, Shield, Trash2, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
@@ -125,7 +126,11 @@ const StaffPortalIndex = () => {
   const [authLoading, setAuthLoading] = useState(true);
 
   // ── Tab ───────────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<'roster' | 'resources' | 'events'>('roster');
+  const [activeTab, setActiveTab] = usePortalSection<'roster' | 'resources' | 'events'>({
+    base: 'staff',
+    valid: ['roster', 'resources', 'events'] as const,
+    defaultSection: 'roster',
+  });
 
   // ── Roster state ──────────────────────────────────────────────────────────
   const [groups,       setGroups]       = useState<StaffGroup[]>([]);
@@ -206,12 +211,12 @@ const StaffPortalIndex = () => {
             canAccess = grp?.staff_access ?? false;
           } catch { /* deny on parse error */ }
         }
-        if (!canAccess) { navigate('/portal', { replace: true }); return; }
+        if (!canAccess) { navigate('/portal_dashboard', { replace: true }); return; }
         setCadSession(account);
         if (mounted) { setSession(account); setAuthLoading(false); }
       } catch {
         // Network failure — cannot verify group flags; deny access
-        navigate('/portal', { replace: true });
+        navigate('/portal_dashboard', { replace: true });
       }
     };
     validate();
@@ -233,7 +238,7 @@ const StaffPortalIndex = () => {
       const userGroup = groupList.find(g => g.name.toLowerCase() === userRole.toLowerCase().trim());
       if (!isSuperAdminSession(sess) && userGroup && !userGroup.staff_access) {
         toast.error('Your role no longer has Staff Portal access.');
-        navigate('/portal', { replace: true }); return;
+        navigate('/portal_dashboard', { replace: true }); return;
       }
       setGroups(groupList);
       setRanks(rnks   as StaffRank[]);
@@ -452,7 +457,7 @@ const StaffPortalIndex = () => {
             {(isSuperAdminSession(session) || (groups.find(g => g.name.toLowerCase() === ((session?.staff_role ?? session?.role) ?? '').toLowerCase().trim())?.admin_access ?? false)) && (
               <button
                 type="button"
-                onClick={() => navigate('/admin')}
+                onClick={() => navigate('/admin_members')}
                 className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]"
               >
                 <Shield className="h-4 w-4" />
@@ -461,7 +466,7 @@ const StaffPortalIndex = () => {
             )}
             <button
               type="button"
-              onClick={() => navigate('/portal')}
+              onClick={() => navigate('/portal_dashboard')}
               className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]"
             >
               <LayoutDashboard className="h-4 w-4" />

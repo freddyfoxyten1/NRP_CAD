@@ -2,23 +2,15 @@
 // App.tsx  —  Application root
 //
 // Sets up React Query, the Tooltip provider, toast renderers, and React Router.
-// All routes are defined here — one <Route> per page.
-// Add new routes ABOVE the "*" catch-all at the bottom of the <Routes> block.
+// Section URLs use `/base_section` (e.g. `/dps_information`, `/public_store`).
+// Public home stays at `/`.
 // ─────────────────────────────────────────────────────────────────────────────
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import RequireAuth from "./components/auth/RequireAuth";
-import MemberPortal from "./pages/MemberPortal";
-import AdminPortal from "./pages/AdminPortal";
-import DepartmentOfPublicSafety from "./pages/DepartmentOfPublicSafety";
-import DepartmentOfCommunications from "./pages/DepartmentOfCommunications";
-import DepartmentOfPublicHealth from "./pages/DepartmentOfPublicHealth";
-import DpsInternalAffairs from "./pages/DpsInternalAffairs";
-import DphInternalAffairs from "./pages/DphInternalAffairs";
-import StaffPortal from "./pages/StaffPortal";
+import SectionPathRoute from "./components/routing/SectionPathRoute";
 import DiscordCallback from "./pages/DiscordCallback";
 import PublicView from "./pages/PublicView";
 import NotFound from "./pages/NotFound";
@@ -32,25 +24,28 @@ const App = () => (
       <Sonner />
       <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '') || undefined} future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Routes>
+          {/* Public home (default index) */}
           <Route path="/" element={<PublicView />} />
+          <Route path="/public_home" element={<Navigate to="/" replace />} />
+
+          {/* OAuth / legacy slash paths */}
           <Route path="/discord-callback" element={<DiscordCallback />} />
-          {/* Alias matching the redirect URI registered in the Discord Developer Portal */}
           <Route path="/dojcad/discord-callback" element={<DiscordCallback />} />
+          <Route path="/dps/internal-affairs" element={<Navigate to="/dps_internal-affairs" replace />} />
+          <Route path="/dph/internal-affairs" element={<Navigate to="/dph_internal-affairs" replace />} />
+          <Route path="/civilian" element={<Navigate to="/portal_dashboard" replace />} />
 
-          <Route path="/portal" element={<RequireAuth><MemberPortal /></RequireAuth>} />
-          <Route path="/admin" element={<RequireAuth><AdminPortal /></RequireAuth>} />
-          <Route path="/civilian" element={<Navigate to="/portal" replace />} />
-          <Route path="/dps" element={<RequireAuth><DepartmentOfPublicSafety /></RequireAuth>} />
-          <Route path="/dps/internal-affairs" element={<RequireAuth><DpsInternalAffairs /></RequireAuth>} />
-          <Route path="/doc" element={<RequireAuth><DepartmentOfCommunications /></RequireAuth>} />
-          <Route path="/dph" element={<RequireAuth><DepartmentOfPublicHealth /></RequireAuth>} />
-          <Route path="/dph/internal-affairs" element={<RequireAuth><DphInternalAffairs /></RequireAuth>} />
-          <Route path="/staff" element={<RequireAuth><StaffPortal /></RequireAuth>} />
-          <Route path="/doc_cad" element={<Navigate to="/doc" replace />} />
-          <Route path="/dps_cad" element={<Navigate to="/dps" replace />} />
-          <Route path="/dph_cad" element={<Navigate to="/dph" replace />} />
+          {/* Bare bases → default sections */}
+          <Route path="/portal" element={<Navigate to="/portal_dashboard" replace />} />
+          <Route path="/admin" element={<Navigate to="/admin_members" replace />} />
+          <Route path="/dps" element={<Navigate to="/dps_personnel-roster" replace />} />
+          <Route path="/dph" element={<Navigate to="/dph_personnel-roster" replace />} />
+          <Route path="/doc" element={<Navigate to="/doc_personnel-roster" replace />} />
+          <Route path="/staff" element={<Navigate to="/staff_roster" replace />} />
 
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+          {/* `/dps_information`, `/public_store`, `/admin_logs-members`, … */}
+          <Route path="/:sectionPath" element={<SectionPathRoute />} />
+
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

@@ -101,8 +101,8 @@ const MemberPortalIndex = () => {
                         setActiveNav(item);
                         return;
                       }
-                      if (item === 'Department of Public Safety') navigate('/dps?tab=information');
-                      if (item === 'Department of Public Health') navigate('/dph?tab=information');
+                      if (item === 'Department of Public Safety') navigate('/dps_information');
+                      if (item === 'Department of Public Health') navigate('/dph_information');
                     }}
                     className={`flex w-[240px] shrink-0 flex-col items-start justify-center gap-0.5 rounded-md border-l-2 px-4 py-3 text-left text-sm font-semibold leading-snug transition-colors lg:w-full ${
                       isComingSoon
@@ -122,7 +122,7 @@ const MemberPortalIndex = () => {
                   {item === 'Department of Public Safety' && canAccessIab && (
                     <button
                       type="button"
-                      onClick={() => navigate('/dps/internal-affairs')}
+                      onClick={() => navigate('/dps_internal-affairs')}
                       className="flex w-[240px] shrink-0 items-center rounded-md border-l-2 border-transparent px-4 py-3 pl-8 text-left text-sm font-semibold leading-snug text-[#8392aa] transition-colors hover:bg-[#070d16] hover:text-white lg:w-full"
                     >
                       <span className="w-full whitespace-normal break-words">DPS Internal Affairs</span>
@@ -131,7 +131,7 @@ const MemberPortalIndex = () => {
                   {item === 'Department of Public Health' && canAccessDphInternalAffairs && (
                     <button
                       type="button"
-                      onClick={() => navigate('/dph/internal-affairs')}
+                      onClick={() => navigate('/dph_internal-affairs')}
                       className="flex w-[240px] shrink-0 items-center rounded-md border-l-2 border-transparent px-4 py-3 pl-8 text-left text-sm font-semibold leading-snug text-[#8392aa] transition-colors hover:bg-[#070d16] hover:text-white lg:w-full"
                     >
                       <span className="w-full whitespace-normal break-words">DPH Internal Affairs</span>
@@ -157,7 +157,7 @@ const MemberPortalIndex = () => {
                 {canAccessStaff && (
                   <button
                     type="button"
-                    onClick={() => navigate('/staff')}
+                    onClick={() => navigate('/staff_roster')}
                     className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]"
                   >
                     <Users className="h-4 w-4" />

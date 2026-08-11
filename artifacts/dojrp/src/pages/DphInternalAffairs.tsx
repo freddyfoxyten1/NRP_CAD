@@ -57,12 +57,12 @@ const DphInternalAffairs = () => {
         const allowed = dphIab || isSuperAdminSession(next);
         if (!allowed) {
           toast.error('You do not have access to DPH Internal Affairs.');
-          navigate('/portal', { replace: true });
+          navigate('/portal_dashboard', { replace: true });
         }
       } catch {
         if (!cancelled) {
           toast.error('Unable to verify session.');
-          navigate('/portal', { replace: true });
+          navigate('/portal_dashboard', { replace: true });
         }
       } finally {
         if (!cancelled) setIsLoading(false);
@@ -120,7 +120,7 @@ const DphInternalAffairs = () => {
           <div className="mt-6 flex flex-col gap-2 border-t border-[#131f30] pt-6">
             <button
               type="button"
-              onClick={() => navigate('/dph?tab=information')}
+              onClick={() => navigate('/dph_information')}
               className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]"
             >
               <Shield className="h-4 w-4" />
@@ -128,7 +128,7 @@ const DphInternalAffairs = () => {
             </button>
             <button
               type="button"
-              onClick={() => navigate('/portal')}
+              onClick={() => navigate('/portal_dashboard')}
               className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]"
             >
               <LayoutDashboard className="h-4 w-4" />
