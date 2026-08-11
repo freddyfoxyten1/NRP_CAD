@@ -1882,15 +1882,18 @@ const DepartmentOfPublicHealth = () => {
     try {
       const res = await fetch('/api/dph/sync-discord-roles', { method: 'POST' });
       const data = await res.json().catch(() => ({})) as {
-        assigned?: number; skipped?: number; removed?: number; errors?: string[]; error?: string;
+        assigned?: number; skipped?: number; removed?: number; errors?: string[];
+        divisions?: { assigned?: number; removed?: number; errors?: string[] };
+        error?: string;
       };
       if (!res.ok) throw new Error(data.error ?? 'Discord sync failed.');
       fetchPanelMembers();
       fetchRanks();
       if (!opts?.silent) {
-        const assigned = data.assigned ?? 0;
-        const removed = data.removed ?? 0;
-        const errCount = Array.isArray(data.errors) ? data.errors.length : 0;
+        const assigned = (data.assigned ?? 0) + (data.divisions?.assigned ?? 0);
+        const removed = (data.removed ?? 0) + (data.divisions?.removed ?? 0);
+        const errCount = (Array.isArray(data.errors) ? data.errors.length : 0)
+          + (Array.isArray(data.divisions?.errors) ? data.divisions.errors.length : 0);
         if (errCount > 0) {
           toast.error(`Discord sync finished with ${errCount} error(s). Added ${assigned}, removed ${removed}.`);
         } else {

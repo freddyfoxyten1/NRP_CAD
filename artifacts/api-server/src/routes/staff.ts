@@ -156,15 +156,15 @@ async function ensureStaffMembersCache(force = false): Promise<StaffMemberCacheE
 
 async function ensureCadProfileForStaffDiscordMember(
   m: { user: { id: string; username: string; avatar?: string | null }; nick?: string | null },
-): Promise<{ profileId: number; staffRank: string | null }> {
+): Promise<{ profileId: number; staffRank: string | null; staffRole: string | null; username: string | null }> {
   const avatar = m.user.avatar?.trim() ?? "";
-  let p = await pool.query<{ id: number; staff_rank: string | null; discord_id: string | null }>(
-    `SELECT id, staff_rank, discord_id FROM cad_user_profiles WHERE discord_id = $1 LIMIT 1`,
+  let p = await pool.query<{ id: number; staff_rank: string | null; staff_role: string | null; username: string | null; discord_id: string | null }>(
+    `SELECT id, staff_rank, staff_role, username, discord_id FROM cad_user_profiles WHERE discord_id = $1 LIMIT 1`,
     [m.user.id],
   );
   if (p.rows.length === 0 && m.user.username) {
-    p = await pool.query<{ id: number; staff_rank: string | null; discord_id: string | null }>(
-      `SELECT id, staff_rank, discord_id FROM cad_user_profiles
+    p = await pool.query<{ id: number; staff_rank: string | null; staff_role: string | null; username: string | null; discord_id: string | null }>(
+      `SELECT id, staff_rank, staff_role, username, discord_id FROM cad_user_profiles
        WHERE lower(discord_username) = lower($1) LIMIT 1`,
       [m.user.username],
     );
@@ -179,7 +179,12 @@ async function ensureCadProfileForStaffDiscordMember(
        WHERE id = $4`,
       [m.user.id, m.user.username, avatar, profileId],
     );
-    return { profileId, staffRank: p.rows[0].staff_rank };
+    return {
+      profileId,
+      staffRank: p.rows[0].staff_rank,
+      staffRole: p.rows[0].staff_role,
+      username: p.rows[0].username,
+    };
   }
 
   const displayName = m.nick ?? m.user.username;
@@ -195,14 +200,19 @@ async function ensureCadProfileForStaffDiscordMember(
        RETURNING id`,
       [`discord-${m.user.id}`, displayName, placeholderEmail, m.user.username, m.user.id, avatar],
     );
-    return { profileId: created.rows[0].id, staffRank: null };
+    return { profileId: created.rows[0].id, staffRank: null, staffRole: null, username: displayName };
   } catch {
-    const again = await pool.query<{ id: number; staff_rank: string | null }>(
-      `SELECT id, staff_rank FROM cad_user_profiles WHERE discord_id = $1 OR email = $2 LIMIT 1`,
+    const again = await pool.query<{ id: number; staff_rank: string | null; staff_role: string | null; username: string | null }>(
+      `SELECT id, staff_rank, staff_role, username FROM cad_user_profiles WHERE discord_id = $1 OR email = $2 LIMIT 1`,
       [m.user.id, placeholderEmail],
     );
     if (again.rows.length > 0) {
-      return { profileId: again.rows[0].id, staffRank: again.rows[0].staff_rank };
+      return {
+        profileId: again.rows[0].id,
+        staffRank: again.rows[0].staff_rank,
+        staffRole: again.rows[0].staff_role,
+        username: again.rows[0].username,
+      };
     }
     throw new Error(`Unable to create CAD profile for Discord user ${m.user.id}`);
   }
@@ -224,8 +234,10 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
     const groupNameById = new Map(groupsRes.rows.map(g => [g.id, g.name]));
     const rankMap = new Map<string, { rankName: string; groupName: string | null; sortOrder: number }>();
     for (const rank of ranksRes.rows) {
+      const roleId = rank.discord_role_id?.trim();
+      if (!roleId) continue;
       const groupName = rank.group_id != null ? (groupNameById.get(rank.group_id) ?? null) : null;
-      rankMap.set(rank.discord_role_id, { rankName: rank.name, groupName, sortOrder: rank.sort_order });
+      rankMap.set(roleId, { rankName: rank.name, groupName, sortOrder: rank.sort_order });
     }
     const linkedRoleIds = [...rankMap.keys()];
 
@@ -251,14 +263,22 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
         });
         const { rankName, groupName } = rankMap.get(rid)!;
         try {
-          const { profileId, staffRank } = await ensureCadProfileForStaffDiscordMember(m);
-          if (staffRank === rankName) { skipped++; continue; }
+          const displayName = m.nick ?? m.user.username;
+          const { profileId, staffRank, staffRole, username } = await ensureCadProfileForStaffDiscordMember(m);
+          if (
+            staffRank === rankName
+            && (staffRole ?? null) === (groupName ?? null)
+            && username === displayName
+          ) {
+            skipped++;
+            continue;
+          }
 
           await pool.query(
             `UPDATE cad_user_profiles
-             SET staff_rank = $2, staff_role = COALESCE($3, staff_role)
+             SET username = $2, staff_rank = $3, staff_role = $4
              WHERE id = $1`,
-            [profileId, rankName, groupName]
+            [profileId, displayName, rankName, groupName]
           );
           assigned++;
         } catch (e) { errors.push(`discord_id ${m.user.id}: ${String(e)}`); }
@@ -266,15 +286,15 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
     }
 
     // 4. Remove staff ranks from members whose linked Discord role was taken away
-    const linkedRankNames = ranksRes.rows.map(r => r.name);
-    if (linkedRankNames.length > 0) {
+    if (linkedRoleIds.length > 0) {
       const staffWithLinkedRank = await pool.query<{
         id: number; discord_id: string | null; discord_username: string | null; staff_rank: string;
       }>(
         `SELECT id, discord_id, discord_username, staff_rank
          FROM cad_user_profiles
-         WHERE staff_rank = ANY($1::text[])`,
-        [linkedRankNames]
+         WHERE staff_rank IN (
+           SELECT name FROM staff_ranks WHERE discord_role_id IS NOT NULL AND discord_role_id != ''
+         )`
       );
 
       // Build sets of members who still hold a linked role
@@ -1008,7 +1028,8 @@ router.post("/staff/assign-discord-roles", async (_req, res) => {
   try {
     // All ranks that have a Discord role linked
     const ranksRes = await pool.query<{ name: string; discord_role_id: string }>(
-      `SELECT name, discord_role_id FROM staff_ranks WHERE discord_role_id IS NOT NULL`
+      `SELECT name, discord_role_id FROM staff_ranks
+       WHERE discord_role_id IS NOT NULL AND discord_role_id != ''`
     );
     if (ranksRes.rows.length === 0) {
       res.json({ assigned: 0, skipped: 0, errors: ["No ranks are linked to a Discord role yet."] });
@@ -1016,7 +1037,11 @@ router.post("/staff/assign-discord-roles", async (_req, res) => {
     }
 
     // Map rank name → discord role id
-    const rankToRole = new Map(ranksRes.rows.map(r => [r.name.toLowerCase(), r.discord_role_id]));
+    const rankToRole = new Map(
+      ranksRes.rows
+        .map(r => [r.name.toLowerCase(), r.discord_role_id.trim()] as const)
+        .filter(([, roleId]) => roleId.length > 0),
+    );
 
     // All CAD profiles with a staff_rank and a discord_id
     const profilesRes = await pool.query<{ discord_id: string; staff_rank: string }>(
