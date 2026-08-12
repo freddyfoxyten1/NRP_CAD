@@ -16,6 +16,22 @@ type JoinSpec = {
   on: string;
 };
 
+const ALIAS_KEY = "__aliases__";
+
+function rowWithAlias(doc: Document, alias: string): Document {
+  const clean = { ...doc };
+  delete (clean as Document)._id;
+  return { [ALIAS_KEY]: { [alias]: clean } };
+}
+
+function mergeJoinRow(left: Document, right: Document, rightAlias: string): Document {
+  const leftAliases = { ...((left[ALIAS_KEY] ?? {}) as Record<string, Document>) };
+  const rightClean = { ...right };
+  delete (rightClean as Document)._id;
+  leftAliases[rightAlias] = rightClean;
+  return { [ALIAS_KEY]: leftAliases };
+}
+
 function stripCasts(sql: string): string {
   return sql
     .replace(/::text(\[\])?/gi, "")
@@ -110,6 +126,20 @@ function stripAlias(field: string): string {
 
 function getField(row: Document, expr: string): unknown {
   const e = expr.trim();
+
+  const aliasField = e.match(/^([a-zA-Z_][\w]*)\.([a-zA-Z_][\w]*)$/);
+  if (aliasField) {
+    const aliases = row[ALIAS_KEY] as Record<string, Document> | undefined;
+    const bucket = aliases?.[aliasField[1]];
+    if (bucket && aliasField[2] in bucket) return bucket[aliasField[2]];
+  }
+
+  const trimM = e.match(/^trim\((.+)\)$/i);
+  if (trimM) {
+    const v = getField(row, trimM[1]);
+    return v == null ? null : String(v).trim();
+  }
+
   const lower = e.match(/^lower\((.+)\)$/i);
   if (lower) {
     const v = getField(row, lower[1]);
@@ -147,7 +177,13 @@ function getField(row: Document, expr: string): unknown {
   }
   const plain = stripAlias(e);
   if (plain in row) return row[plain];
-  // Prefixed alias.field already stripped; try dotted key as-is
+  // Fallback: unqualified field — search alias buckets (prefer first match)
+  const aliases = row[ALIAS_KEY] as Record<string, Document> | undefined;
+  if (aliases) {
+    for (const bucket of Object.values(aliases)) {
+      if (plain in bucket) return bucket[plain];
+    }
+  }
   return row[e] ?? row[plain];
 }
 
@@ -315,10 +351,11 @@ function parseWhereEquals(where: string): Filter<Document> {
   return filter;
 }
 
-function parseJoins(fromClause: string): { primary: string; joins: JoinSpec[] } {
+function parseJoins(fromClause: string): { primary: string; primaryAlias: string; joins: JoinSpec[] } {
   const primaryMatch = fromClause.match(/^([a-zA-Z0-9_]+)(?:\s+(?:as\s+)?([a-zA-Z0-9_]+))?/i);
   if (!primaryMatch) throw new Error("mongo-sql-bridge: bad FROM clause");
   const primary = primaryMatch[1];
+  const primaryAlias = primaryMatch[2] || primaryMatch[1];
   const joins: JoinSpec[] = [];
   const joinRe = /\b(left\s+join|inner\s+join|join)\s+([a-zA-Z0-9_]+)(?:\s+(?:as\s+)?([a-zA-Z0-9_]+))?\s+on\s+/gi;
   let m: RegExpExecArray | null;
@@ -342,7 +379,7 @@ function parseJoins(fromClause: string): { primary: string; joins: JoinSpec[] } 
       on,
     });
   }
-  return { primary, joins };
+  return { primary, primaryAlias, joins };
 }
 
 function projectSelect(sql: string, row: Document): Document {
@@ -496,10 +533,10 @@ async function executeSelect(sql: string, original: string): Promise<QueryResult
   const limit = bodyMatch[5] ? Number(bodyMatch[5]) : undefined;
   const offset = bodyMatch[6] ? Number(bodyMatch[6]) : 0;
 
-  const { primary, joins } = parseJoins(fromAndJoins);
+  const { primary, primaryAlias, joins } = parseJoins(fromAndJoins);
   let rows = (await loadCollection(primary, original)).map((d) => {
     const { _id: _a, ...rest } = d;
-    return { ...rest } as Document;
+    return rowWithAlias(rest, primaryAlias);
   });
 
   for (const join of joins) {
@@ -508,7 +545,7 @@ async function executeSelect(sql: string, original: string): Promise<QueryResult
     for (const left of rows) {
       const matches = rightDocs.filter((r) => {
         const { _id: _a, ...right } = r;
-        const merged = { ...left, ...right };
+        const merged = mergeJoinRow(left, right, join.alias);
         return evalPredicate(merged, join.on);
       });
       if (matches.length === 0) {
@@ -517,7 +554,7 @@ async function executeSelect(sql: string, original: string): Promise<QueryResult
       }
       for (const r of matches) {
         const { _id: _a, ...right } = r;
-        next.push({ ...left, ...right });
+        next.push(mergeJoinRow(left, right, join.alias));
       }
     }
     rows = next;

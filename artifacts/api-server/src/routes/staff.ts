@@ -286,15 +286,15 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
     }
 
     // 4. Remove staff ranks from members whose linked Discord role was taken away
-    if (linkedRoleIds.length > 0) {
+    const linkedRankNames = ranksRes.rows.map(r => r.name);
+    if (linkedRankNames.length > 0) {
       const staffWithLinkedRank = await pool.query<{
         id: number; discord_id: string | null; discord_username: string | null; staff_rank: string;
       }>(
         `SELECT id, discord_id, discord_username, staff_rank
          FROM cad_user_profiles
-         WHERE staff_rank IN (
-           SELECT name FROM staff_ranks WHERE discord_role_id IS NOT NULL AND discord_role_id != ''
-         )`
+         WHERE staff_rank = ANY($1::text[])`,
+        [linkedRankNames],
       );
 
       // Build sets of members who still hold a linked role
@@ -472,6 +472,11 @@ router.get("/staff/users/search", async (req, res) => {
 router.get("/staff/roster", async (req, res) => {
   const all = req.query.all === "1";
   try {
+    const groupsRes = await pool.query<{ name: string }>(`SELECT name FROM staff_rank_groups`);
+    const ranksRes = await pool.query<{ name: string }>(`SELECT name FROM staff_ranks`);
+    const groupNames = groupsRes.rows.map(r => String(r.name).trim().toLowerCase()).filter(Boolean);
+    const rankNames = ranksRes.rows.map(r => String(r.name).trim().toLowerCase()).filter(Boolean);
+
     const r = await pool.query(
       `SELECT p.id, p.username, p.discord_username, p.discord_id, p.avatar_hash,
               p.staff_rank, p.staff_role, p.status, p.staff_appointed_date,
@@ -480,21 +485,21 @@ router.get("/staff/roster", async (req, res) => {
               COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
               COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
        FROM cad_user_profiles p
-       LEFT JOIN staff_ranks sr ON lower(sr.name) = lower(trim(COALESCE(p.staff_rank, '')))
+       LEFT JOIN staff_ranks sr ON lower(sr.name) = lower(COALESCE(p.staff_rank, ''))
        WHERE (
-         lower(trim(COALESCE(p.staff_role, ''))) IN (SELECT lower(trim(name)) FROM staff_rank_groups)
+         lower(COALESCE(p.staff_role, '')) = ANY($1::text[])
          OR (
-           p.staff_rank IS NOT NULL AND trim(p.staff_rank) != ''
-           AND EXISTS (
-             SELECT 1 FROM staff_ranks r WHERE lower(r.name) = lower(trim(p.staff_rank))
-           )
+           p.staff_rank IS NOT NULL AND p.staff_rank != ''
+           AND lower(p.staff_rank) = ANY($2::text[])
          )
        )
          ${all ? "" : "AND lower(COALESCE(p.status, 'active')) != 'inactive'"}
-       ORDER BY COALESCE(sr.sort_order, 999999), p.username`
+       ORDER BY COALESCE(sr.sort_order, 999999), p.username`,
+      [groupNames, rankNames],
     );
     res.json(r.rows);
   } catch (err) {
+    req.log?.error?.({ err }, "staff/roster GET error");
     res.status(500).json({ error: "Unable to load staff roster." });
   }
 });
