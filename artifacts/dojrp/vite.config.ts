@@ -17,6 +17,25 @@ const apiPort = process.env.API_PORT ?? '8080';
 
 const workspaceRoot = path.resolve(import.meta.dirname, '..', '..');
 
+/** Forward the browser host to the API so Discord OAuth uses the Vite port (5173/4173), not 8080. */
+function apiProxyOptions() {
+  return {
+    target: `http://127.0.0.1:${apiPort}`,
+    changeOrigin: true,
+    timeout: 120_000,
+    proxyTimeout: 120_000,
+    configure: (proxy: { on: (event: string, fn: (...args: unknown[]) => void) => void }) => {
+      proxy.on('proxyReq', (proxyReq: { setHeader: (name: string, value: string) => void }, req: { headers: { host?: string } }) => {
+        const browserHost = req.headers.host;
+        if (browserHost) {
+          proxyReq.setHeader('x-forwarded-host', browserHost);
+          proxyReq.setHeader('x-forwarded-proto', 'http');
+        }
+      });
+    },
+  };
+}
+
 export default defineConfig({
   envDir: workspaceRoot,
   base: basePath,
@@ -67,12 +86,7 @@ export default defineConfig({
       strict: true,
     },
     proxy: {
-      '/api': {
-        target: `http://127.0.0.1:${apiPort}`,
-        changeOrigin: true,
-        timeout: 120_000,
-        proxyTimeout: 120_000,
-      },
+      '/api': apiProxyOptions(),
     },
   },
   preview: {
@@ -82,12 +96,7 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
-      '/api': {
-        target: `http://127.0.0.1:${apiPort}`,
-        changeOrigin: true,
-        timeout: 120_000,
-        proxyTimeout: 120_000,
-      },
+      '/api': apiProxyOptions(),
     },
   },
 });

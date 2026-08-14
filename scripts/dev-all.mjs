@@ -11,6 +11,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = process.env.API_PORT ?? "8080";
 const WEB_PORT = process.env.WEB_PORT ?? "5173";
 
+/** Ensure local preview/dev use the repo-root SQLite store, not api-server/cad-database. */
+const repoEnv = {
+  ...process.env,
+  CAD_DATABASE_PATH: process.env.CAD_DATABASE_PATH ?? path.join(root, "cad-database"),
+};
+
 const children = [];
 let exiting = false;
 
@@ -61,6 +67,7 @@ function spawnInRoot(command, args) {
     cwd: root,
     stdio: "inherit",
     shell: true,
+    env: repoEnv,
   });
   children.push(child);
   child.on("exit", (code, signal) => {

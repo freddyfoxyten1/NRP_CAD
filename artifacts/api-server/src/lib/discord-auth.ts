@@ -77,26 +77,51 @@ export type CadSessionPayload = {
   can_access_terminal_offline: boolean;
 };
 
+function isDirectApiHost(host: string): boolean {
+  const apiPort = process.env.API_PORT ?? "8080";
+  const normalized = host.toLowerCase();
+  return (
+    normalized === `127.0.0.1:${apiPort}` ||
+    normalized === `localhost:${apiPort}` ||
+    normalized === `[::1]:${apiPort}`
+  );
+}
+
+/** Discord OAuth only accepts registered URIs — keep localhost consistent (not 127.0.0.1). */
+function normalizeBrowserHost(host: string): string {
+  const lower = host.toLowerCase();
+  if (lower.startsWith("127.0.0.1:")) {
+    return `localhost${host.slice("127.0.0.1".length)}`;
+  }
+  if (lower === "127.0.0.1") return "localhost";
+  if (lower.startsWith("[::1]:")) {
+    return `localhost${host.slice("[::1]".length)}`;
+  }
+  if (lower === "[::1]") return "localhost";
+  return host;
+}
+
+/** Discord OAuth redirect — prefer the browser-facing host (Vite/nginx), not the API port. */
 export function getRedirectUri(req: Request): string {
+  const forwardedHost = (req.headers["x-forwarded-host"] as string | undefined)
+    ?.split(",")[0]
+    .trim();
+  const host = normalizeBrowserHost(forwardedHost || (req.headers.host as string | undefined) || "");
+
+  if (host && !isDirectApiHost(host)) {
+    const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)
+      ?.split(",")[0]
+      .trim();
+    const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+    const proto = forwardedProto || (isLocal ? "http" : "https");
+    return `${proto}://${host}/dojcad/discord-callback`;
+  }
+
   if (process.env.DISCORD_REDIRECT_URI) {
     return process.env.DISCORD_REDIRECT_URI;
   }
 
-  const host =
-    (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0].trim() ||
-    req.headers.host;
-
-  if (!host) {
-    throw new Error("Cannot determine host for redirect URI");
-  }
-
-  const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)
-    ?.split(",")[0]
-    .trim();
-  const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
-  const proto = forwardedProto || (isLocal ? "http" : "https");
-
-  return `${proto}://${host}/dojcad/discord-callback`;
+  throw new Error("Cannot determine host for redirect URI");
 }
 
 export async function discordBotFetch(url: string): Promise<Response> {

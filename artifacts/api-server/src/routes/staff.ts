@@ -9,6 +9,29 @@ import { buildLinkedRankByRoleId, pickHighestLinkedDiscordRole } from "../lib/di
 
 const router = Router();
 
+function asBool(v: unknown): boolean {
+  return v === true || v === 1 || v === "1" || v === "t" || v === "true";
+}
+
+function normalizeStaffMemberRow<T extends Record<string, unknown>>(row: T): T {
+  return {
+    ...row,
+    can_access_iab: asBool(row.can_access_iab),
+    can_access_system_logs: asBool(row.can_access_system_logs),
+    can_access_terms_privacy: asBool(row.can_access_terms_privacy),
+    can_access_terminal_offline: asBool(row.can_access_terminal_offline),
+  };
+}
+
+function normalizeStaffGroupRow<T extends Record<string, unknown>>(row: T): T {
+  return {
+    ...row,
+    staff_access: row.staff_access === undefined ? true : asBool(row.staff_access),
+    admin_access: asBool(row.admin_access),
+    doc_access: asBool(row.doc_access),
+  };
+}
+
 function requestDiscordId(req: Request): string | null {
   const raw = req.headers["x-discord-id"];
   if (typeof raw === "string" && raw.trim()) return raw.trim();
@@ -496,7 +519,7 @@ router.get("/staff/roster", async (req, res) => {
        ORDER BY COALESCE(sr.sort_order, 999999), p.username`,
       [groupNames, rankNames],
     );
-    res.json(sortStaffByRank(r.rows, rankOrderByName));
+    res.json(sortStaffByRank(r.rows.map(normalizeStaffMemberRow), rankOrderByName));
   } catch (err) {
     req.log?.error?.({ err }, "staff/roster GET error");
     res.status(500).json({ error: "Unable to load staff roster." });
@@ -533,10 +556,10 @@ router.patch("/staff/roster/:id/iab-access", async (req, res) => {
       can_access_iab ? "Granted DPS Internal Affairs access" : "Revoked DPS Internal Affairs access",
       String(result.rows[0].username ?? id),
     );
-    res.json({
+    res.json(normalizeStaffMemberRow({
       id: result.rows[0].id,
       can_access_iab: Boolean(result.rows[0].can_access_iab),
-    });
+    }));
   } catch (err) {
     req.log.error({ err }, "staff iab-access PATCH error");
     res.status(500).json({ error: "Unable to update Internal Affairs access." });
@@ -577,10 +600,10 @@ router.patch("/staff/roster/:id/terminal-offline-access", async (req, res) => {
         : "Revoked terminal lockdown access",
       String(result.rows[0].username ?? id),
     );
-    res.json({
+    res.json(normalizeStaffMemberRow({
       id: result.rows[0].id,
       can_access_terminal_offline: Boolean(result.rows[0].can_access_terminal_offline),
-    });
+    }));
   } catch (err) {
     req.log.error({ err }, "staff terminal-offline-access PATCH error");
     res.status(500).json({ error: "Unable to update terminal lockdown access." });
@@ -646,11 +669,11 @@ router.patch("/staff/roster/:id/admin-tab-access", async (req, res) => {
         String(result.rows[0].username ?? id),
       );
     }
-    res.json({
+    res.json(normalizeStaffMemberRow({
       id: result.rows[0].id,
       can_access_system_logs: Boolean(result.rows[0].can_access_system_logs),
       can_access_terms_privacy: Boolean(result.rows[0].can_access_terms_privacy),
-    });
+    }));
   } catch (err) {
     req.log.error({ err }, "staff admin-tab-access PATCH error");
     res.status(500).json({ error: "Unable to update admin tab access." });
@@ -834,7 +857,7 @@ router.get("/staff/groups", async (_req, res) => {
       `SELECT id, name, sort_order, locked, staff_access, admin_access, doc_access
        FROM staff_rank_groups ORDER BY sort_order, id`
     );
-    res.json(r.rows);
+    res.json(r.rows.map(normalizeStaffGroupRow));
   } catch (err) {
     res.status(500).json({ error: "Unable to load groups." });
   }
@@ -925,7 +948,7 @@ router.patch("/staff/groups/:id", async (req, res) => {
       [id, name.trim()]
     );
     void writeLog("staff", logActor, "Renamed staff group", `"${oldName}" → "${name.trim()}"`);
-    res.json(r.rows[0]);
+    res.json(normalizeStaffGroupRow(r.rows[0]));
   } catch (err: unknown) {
     const pg = err as { code?: string };
     if (pg.code === "23505") { res.status(409).json({ error: "A group with that name already exists." }); return; }
@@ -986,7 +1009,7 @@ router.patch("/staff/groups/:id/access", async (req, res) => {
         groupName,
       );
     }
-    res.json(r.rows[0]);
+    res.json(normalizeStaffGroupRow(r.rows[0]));
   } catch (err) {
     res.status(500).json({ error: "Unable to update group access." });
   }
@@ -1285,7 +1308,7 @@ router.patch("/staff/ranks/:id", async (req, res) => {
     );
     if ((r.rowCount ?? 0) === 0) { res.status(404).json({ error: "Rank not found." }); return; }
     if (hasDiscordRole) void syncStaffDiscordRoles().catch(console.error);
-    res.json(r.rows[0]);
+    res.json(normalizeStaffGroupRow(r.rows[0]));
   } catch (err: unknown) {
     const pg = err as { code?: string };
     if (pg.code === "23505") { res.status(409).json({ error: "That name is already taken." }); return; }

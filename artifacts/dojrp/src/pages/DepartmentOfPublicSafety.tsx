@@ -32,6 +32,8 @@ import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
 import { buildPersonnelTitleGroups, buildPersonnelRankSections, sortByRankThenCallsign } from '@/lib/roster-sort';
+import { collectDepartmentPermissions } from '@/lib/permission-access';
+import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
 
 // ── Access control ─────────────────────────────────────────────────────────────
 // Panel access is now driven by the panel_access flag on each rank group.
@@ -2249,6 +2251,20 @@ const DepartmentOfPublicSafety = () => {
     return !q || m.username.toLowerCase().includes(q) || (m.dps_rank || m.rank).toLowerCase().includes(q) || m.callsign?.toLowerCase().includes(q);
   }));
 
+  const departmentPermissionOverviewRows = useMemo((): PermissionAccessOverviewRow[] => (
+    sortRosterMembers(Array.isArray(panelMembers) ? panelMembers : []).map(m => {
+      const rankMeta = ranks.find(r => r.name.toLowerCase() === (m.dps_rank || m.rank)?.toLowerCase());
+      return {
+        id: m.id,
+        username: m.username,
+        subtitle: m.discord_username,
+        rankLabel: m.dps_rank || m.rank || '—',
+        rankColor: rankMeta?.color_hex ?? null,
+        permissions: collectDepartmentPermissions(m, ranks, groups),
+      };
+    })
+  ), [panelMembers, ranks, groups]);
+
   const formatDate = (d: string | null) => {
     if (!d) return '—';
     try { return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
@@ -4271,6 +4287,15 @@ const DepartmentOfPublicSafety = () => {
                         </div>
                       )}
                     </div>
+
+                    <PermissionAccessOverview
+                      title="Department Permission Access"
+                      description="Department Panel (by title), all-resources and IAB grants, plus division editor access."
+                      accentTextClass="text-[#f4c542]"
+                      accentBorderClass="border-[#f4c542]/20"
+                      rows={departmentPermissionOverviewRows}
+                      emptyMessage="No personnel with department permission grants match your filters."
+                    />
                   </div>
                 )}
 

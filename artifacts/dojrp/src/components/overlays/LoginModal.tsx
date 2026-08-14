@@ -43,7 +43,7 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
         data = await res.json() as { url?: string; error?: string };
       } catch {
         if (res.status >= 500) {
-          throw new Error('The API server is not running. From the project root, run: pnpm dev');
+          throw new Error('The API server is not running. From the project root, run: bun run dev');
         }
         throw new Error('The server returned an unexpected response.');
       }

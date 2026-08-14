@@ -26,6 +26,8 @@ import {
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { getStaffRosterTitle, getStaffSidebarTitle } from '@/lib/display-rank';
 import { sortByRankThenUsername } from '@/lib/roster-sort';
+import { collectStaffWebsitePermissions } from '@/lib/permission-access';
+import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
 import { cadModeLabel, type CadMode } from '@/hooks/useCadStatus';
 
 type StoreProductRow = StoreProduct & { id: number; sort_order?: number | null; created_at?: string };
@@ -481,11 +483,13 @@ const StaffAccessPermissionsModal = ({
   onToggleIab,
   onToggleAdminTab,
   onToggleTerminalOffline,
+  terminalSaving,
 }: {
   member: StaffMember;
   onClose: () => void;
   iabSaving: boolean;
   adminTabSaving: boolean;
+  terminalSaving: boolean;
   onToggleIab: (enabled: boolean) => void;
   onToggleAdminTab: (field: 'can_access_system_logs' | 'can_access_terms_privacy', enabled: boolean) => void;
   onToggleTerminalOffline: (enabled: boolean) => void;
@@ -539,7 +543,7 @@ const StaffAccessPermissionsModal = ({
       label: 'Terminal Lockdown',
       description: 'Sign in during Terminal lockdown',
       enabled: Boolean(member.can_access_terminal_offline),
-      saving: adminTabSaving,
+      saving: terminalSaving,
       icon: <TerminalIcon className="h-3.5 w-3.5" />,
       on: 'border-[#ff7070]/50 bg-[#ff7070]/10 text-[#ff7070]',
       off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#ff7070]/40 hover:text-[#ff7070]',
@@ -831,6 +835,7 @@ const AdminPortal = () => {
   const [staffRosterLoading,  setStaffRosterLoading]   = useState(false);
   const [iabAccessSavingId,   setIabAccessSavingId]    = useState<number | null>(null);
   const [adminTabAccessSavingId, setAdminTabAccessSavingId] = useState<number | null>(null);
+  const [terminalAccessSavingId, setTerminalAccessSavingId] = useState<number | null>(null);
   // Group management
   const [addStaffGroupOpen,    setAddStaffGroupOpen]    = useState(false);
   const [newStaffGroupName,    setNewStaffGroupName]    = useState('');
@@ -2148,21 +2153,23 @@ const AdminPortal = () => {
         },
         body: JSON.stringify({ [field]: value, actor: currentAdmin?.username ?? 'Admin' }),
       });
-      const data = await res.json() as { error?: string };
+      const data = await res.json() as StaffGroup & { error?: string };
       if (!res.ok) { toast.error(data.error ?? 'Failed to update access.'); return; }
-      setStaffGroups(prev => prev.map(g => g.id === id ? { ...g, [field]: value } : g));
+      setStaffGroups(prev => prev.map(g => g.id === id ? { ...g, ...data } : g));
     } catch {
       toast.error('Failed to update access.');
     }
   };
 
-  const handleToggleStaffIabAccess = async (member: StaffMember, enabled: boolean) => {
-    setIabAccessSavingId(member.id);
+  const handleToggleStaffIabAccess = async (memberId: number, enabled: boolean) => {
+    const member = staffRosterMembers.find(m => m.id === memberId);
+    if (!member) return;
+    setIabAccessSavingId(memberId);
     setStaffRosterMembers(prev => prev.map(m =>
-      m.id === member.id ? { ...m, can_access_iab: enabled } : m
+      m.id === memberId ? { ...m, can_access_iab: enabled } : m
     ));
     try {
-      const res = await fetch(`/api/staff/roster/${member.id}/iab-access`, {
+      const res = await fetch(`/api/staff/roster/${memberId}/iab-access`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -2170,19 +2177,29 @@ const AdminPortal = () => {
           actor: currentAdmin?.username ?? 'Admin',
         }),
       });
+      const data = await res.json() as { can_access_iab?: boolean; error?: string };
       if (!res.ok) {
         setStaffRosterMembers(prev => prev.map(m =>
-          m.id === member.id ? { ...m, can_access_iab: !enabled } : m
+          m.id === memberId ? { ...m, can_access_iab: !enabled } : m
         ));
-        toast.error('Failed to update Internal Affairs access.');
+        toast.error(data.error ?? 'Failed to update Internal Affairs access.');
         return;
       }
-      toast.success(enabled
+      const nextFlag = Boolean(data.can_access_iab);
+      setStaffRosterMembers(prev => prev.map(m =>
+        m.id === memberId ? { ...m, can_access_iab: nextFlag } : m
+      ));
+      if (currentAdmin && currentAdmin.id === memberId) {
+        const next = { ...currentAdmin, can_access_iab: nextFlag };
+        setCurrentAdmin(next);
+        setCadSession(next);
+      }
+      toast.success(nextFlag
         ? `${member.username} granted DPS Internal Affairs access.`
         : `${member.username} Internal Affairs access revoked.`);
     } catch {
       setStaffRosterMembers(prev => prev.map(m =>
-        m.id === member.id ? { ...m, can_access_iab: !enabled } : m
+        m.id === memberId ? { ...m, can_access_iab: !enabled } : m
       ));
       toast.error('Failed to update Internal Affairs access.');
     } finally {
@@ -2191,15 +2208,17 @@ const AdminPortal = () => {
   };
 
   const handleToggleStaffTerminalOfflineAccess = async (
-    member: StaffMember,
+    memberId: number,
     enabled: boolean,
   ) => {
-    setAdminTabAccessSavingId(member.id);
+    const member = staffRosterMembers.find(m => m.id === memberId);
+    if (!member) return;
+    setTerminalAccessSavingId(memberId);
     setStaffRosterMembers(prev => prev.map(m =>
-      m.id === member.id ? { ...m, can_access_terminal_offline: enabled } : m
+      m.id === memberId ? { ...m, can_access_terminal_offline: enabled } : m
     ));
     try {
-      const res = await fetch(`/api/staff/roster/${member.id}/terminal-offline-access`, {
+      const res = await fetch(`/api/staff/roster/${memberId}/terminal-offline-access`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -2207,49 +2226,47 @@ const AdminPortal = () => {
           actor: currentAdmin?.username ?? 'Admin',
         }),
       });
+      const data = await res.json() as { can_access_terminal_offline?: boolean; error?: string };
       if (!res.ok) {
         setStaffRosterMembers(prev => prev.map(m =>
-          m.id === member.id ? { ...m, can_access_terminal_offline: !enabled } : m
+          m.id === memberId ? { ...m, can_access_terminal_offline: !enabled } : m
         ));
-        toast.error('Failed to update terminal lockdown access.');
+        toast.error(data.error ?? 'Failed to update terminal lockdown access.');
         return;
       }
-      const data = await res.json() as { can_access_terminal_offline?: boolean };
+      const nextFlag = Boolean(data.can_access_terminal_offline);
       setStaffRosterMembers(prev => prev.map(m =>
-        m.id === member.id
-          ? { ...m, can_access_terminal_offline: Boolean(data.can_access_terminal_offline) }
-          : m
+        m.id === memberId ? { ...m, can_access_terminal_offline: nextFlag } : m
       ));
-      if (currentAdmin && currentAdmin.id === member.id) {
-        const next = {
-          ...currentAdmin,
-          can_access_terminal_offline: Boolean(data.can_access_terminal_offline),
-        };
+      if (currentAdmin && currentAdmin.id === memberId) {
+        const next = { ...currentAdmin, can_access_terminal_offline: nextFlag };
         setCurrentAdmin(next);
         setCadSession(next);
       }
-      toast.success(enabled ? 'Terminal lockdown access granted.' : 'Terminal lockdown access revoked.');
+      toast.success(nextFlag ? 'Terminal lockdown access granted.' : 'Terminal lockdown access revoked.');
     } catch {
       setStaffRosterMembers(prev => prev.map(m =>
-        m.id === member.id ? { ...m, can_access_terminal_offline: !enabled } : m
+        m.id === memberId ? { ...m, can_access_terminal_offline: !enabled } : m
       ));
       toast.error('Failed to update terminal lockdown access.');
     } finally {
-      setAdminTabAccessSavingId(null);
+      setTerminalAccessSavingId(null);
     }
   };
 
   const handleToggleStaffAdminTabAccess = async (
-    member: StaffMember,
+    memberId: number,
     field: 'can_access_system_logs' | 'can_access_terms_privacy',
     enabled: boolean,
   ) => {
-    setAdminTabAccessSavingId(member.id);
+    const member = staffRosterMembers.find(m => m.id === memberId);
+    if (!member) return;
+    setAdminTabAccessSavingId(memberId);
     setStaffRosterMembers(prev => prev.map(m =>
-      m.id === member.id ? { ...m, [field]: enabled } : m
+      m.id === memberId ? { ...m, [field]: enabled } : m
     ));
     try {
-      const res = await fetch(`/api/staff/roster/${member.id}/admin-tab-access`, {
+      const res = await fetch(`/api/staff/roster/${memberId}/admin-tab-access`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -2257,19 +2274,20 @@ const AdminPortal = () => {
           actor: currentAdmin?.username ?? 'Admin',
         }),
       });
-      if (!res.ok) {
-        setStaffRosterMembers(prev => prev.map(m =>
-          m.id === member.id ? { ...m, [field]: !enabled } : m
-        ));
-        toast.error('Failed to update access permission.');
-        return;
-      }
       const data = await res.json() as {
         can_access_system_logs?: boolean;
         can_access_terms_privacy?: boolean;
+        error?: string;
       };
+      if (!res.ok) {
+        setStaffRosterMembers(prev => prev.map(m =>
+          m.id === memberId ? { ...m, [field]: !enabled } : m
+        ));
+        toast.error(data.error ?? 'Failed to update access permission.');
+        return;
+      }
       setStaffRosterMembers(prev => prev.map(m =>
-        m.id === member.id
+        m.id === memberId
           ? {
               ...m,
               can_access_system_logs: Boolean(data.can_access_system_logs),
@@ -2277,8 +2295,7 @@ const AdminPortal = () => {
             }
           : m
       ));
-      // Keep own session in sync if editing yourself
-      if (currentAdmin && currentAdmin.id === member.id) {
+      if (currentAdmin && currentAdmin.id === memberId) {
         const next = {
           ...currentAdmin,
           can_access_system_logs: Boolean(data.can_access_system_logs),
@@ -2295,7 +2312,7 @@ const AdminPortal = () => {
         : `${member.username} ${label} access revoked.`);
     } catch {
       setStaffRosterMembers(prev => prev.map(m =>
-        m.id === member.id ? { ...m, [field]: !enabled } : m
+        m.id === memberId ? { ...m, [field]: !enabled } : m
       ));
       toast.error('Failed to update access permission.');
     } finally {
@@ -2603,6 +2620,21 @@ const AdminPortal = () => {
   const isAdminSuper = isSuperAdminSession(currentAdmin);
   const canViewSystemLogs = isAdminSuper || Boolean(currentAdmin?.can_access_system_logs);
   const canViewTermsPrivacy = isAdminSuper || Boolean(currentAdmin?.can_access_terms_privacy);
+
+  const staffPermissionOverviewRows = useMemo((): PermissionAccessOverviewRow[] => (
+    sortByRankThenUsername(staffRosterMembers, staffRanks, m => m.staff_rank ?? null).map(m => {
+      const rankMeta = staffRanks.find(r => r.name.toLowerCase() === (m.staff_rank ?? '').toLowerCase());
+      return {
+        id: m.id,
+        username: m.username,
+        subtitle: m.discord_username,
+        rankLabel: getStaffRosterTitle(m),
+        rankColor: rankMeta?.color_hex ?? null,
+        permissions: collectStaffWebsitePermissions(m, staffGroups),
+      };
+    })
+  ), [staffRosterMembers, staffRanks, staffGroups]);
+
   const adminNavTabs = ([
     { id: 'members' as const, label: 'Members' },
     { id: 'staff-roster' as const, label: 'Staff Roster' },
@@ -3054,9 +3086,10 @@ const AdminPortal = () => {
                       onClose={() => setSrAccessMemberId(null)}
                       iabSaving={iabAccessSavingId === accessMember.id}
                       adminTabSaving={adminTabAccessSavingId === accessMember.id}
-                      onToggleIab={enabled => void handleToggleStaffIabAccess(accessMember, enabled)}
-                      onToggleAdminTab={(field, enabled) => void handleToggleStaffAdminTabAccess(accessMember, field, enabled)}
-                      onToggleTerminalOffline={enabled => void handleToggleStaffTerminalOfflineAccess(accessMember, enabled)}
+                      terminalSaving={terminalAccessSavingId === accessMember.id}
+                      onToggleIab={enabled => void handleToggleStaffIabAccess(accessMember.id, enabled)}
+                      onToggleAdminTab={(field, enabled) => void handleToggleStaffAdminTabAccess(accessMember.id, field, enabled)}
+                      onToggleTerminalOffline={enabled => void handleToggleStaffTerminalOfflineAccess(accessMember.id, enabled)}
                     />
                   );
                 })()}
@@ -3070,6 +3103,7 @@ const AdminPortal = () => {
                 )}
 
                 {/* -- Main panel card (DPS-style) ---- */}
+                <div className="space-y-6">
                 <div className="rounded-xl border border-[#ff5d5d]/20 bg-[#070d16] shadow-[0_22px_55px_rgba(0,0,0,0.22)] overflow-hidden">
 
                   {/* Card header */}
@@ -3486,6 +3520,16 @@ const AdminPortal = () => {
                       </div>
                     );
                   })()}
+                </div>
+
+                <PermissionAccessOverview
+                  title="Website Permission Access"
+                  description="Staff Portal, Admin Portal, DOC, and individual grants (IAB, System Logs, TS & PP, Terminal Lockdown)."
+                  accentTextClass="text-[#ff7070]"
+                  accentBorderClass="border-[#ff5d5d]/20"
+                  rows={staffPermissionOverviewRows}
+                  emptyMessage="No staff members with website permission grants match your filters."
+                />
                 </div>
               </>
             )}

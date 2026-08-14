@@ -416,7 +416,9 @@ function evaluateCase(raw: string, row?: Document): unknown | undefined {
   const elseV = m[3].trim();
   let condTrue = false;
   if (/^(TRUE|FALSE)$/i.test(cond)) condTrue = /^TRUE$/i.test(cond);
-  else if (row) condTrue = evalPredicate(row, cond);
+  else if (/^(TRUE|FALSE|NULL)\s+IS\s+NOT\s+NULL$/i.test(cond)) {
+    condTrue = !/^NULL\s/i.test(cond);
+  } else if (row) condTrue = evalPredicate(row, cond);
   else return undefined;
   if (condTrue) return parseLiteral(thenV);
   // ELSE column reference → leave unchanged (skip patch)
