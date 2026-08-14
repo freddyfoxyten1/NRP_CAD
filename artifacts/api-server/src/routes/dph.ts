@@ -13,6 +13,7 @@ import {
 } from "../lib/dph-discord.js";
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 import { sortByCallsignThenUsername, sortDepartmentPersonnel } from "../lib/roster-sort.js";
+import { buildLinkedRankByRoleId, pickHighestLinkedDiscordRole } from "../lib/discord-rank-pick.js";
 import {
   DPH_DEFAULT_CALLSIGN,
   loadDphDivisionAssignments,
@@ -374,15 +375,12 @@ async function syncDphDiscordRoles(
     );
     if (ranksRes.rows.length === 0) return { assigned: 0, skipped: 0, removed: 0, errors: [] };
 
-    const groupsRes = await pool.query<{ id: number; name: string }>(`SELECT id, name FROM dph_rank_groups`);
+    const groupsRes = await pool.query<{ id: number; name: string; sort_order: number }>(
+      `SELECT id, name, sort_order FROM dph_rank_groups`,
+    );
     const groupNameById = new Map(groupsRes.rows.map(g => [g.id, g.name]));
-    const rankMap = new Map<string, { rankName: string; groupName: string | null; sortOrder: number }>();
-    for (const rank of ranksRes.rows) {
-      const roleId = rank.discord_role_id?.trim();
-      if (!roleId) continue;
-      const groupName = rank.group_id != null ? (groupNameById.get(rank.group_id) ?? null) : null;
-      rankMap.set(roleId, { rankName: rank.name, groupName, sortOrder: rank.sort_order });
-    }
+    const groupSortById = new Map(groupsRes.rows.map(g => [g.id, Number(g.sort_order ?? 999_999)]));
+    const rankMap = buildLinkedRankByRoleId(ranksRes.rows, groupSortById, groupNameById);
     const linkedRoleIds = [...rankMap.keys()];
 
     let assigned = 0; let skipped = 0; let removed = 0; const errors: string[] = [];
@@ -391,11 +389,8 @@ async function syncDphDiscordRoles(
     for (const m of allMembers) {
       const matchingRids = m.roles.filter(r => linkedRoleIds.includes(r));
       if (matchingRids.length === 0) continue;
-      const rid = matchingRids.reduce((best, r) => {
-        const bOrder = rankMap.get(best)!.sortOrder;
-        const rOrder = rankMap.get(r)!.sortOrder;
-        return rOrder < bOrder ? r : best;
-      });
+      const rid = pickHighestLinkedDiscordRole(matchingRids, rankMap);
+      if (!rid) continue;
       activeDiscordIds.add(m.user.id);
       const { rankName, groupName } = rankMap.get(rid)!;
       try {

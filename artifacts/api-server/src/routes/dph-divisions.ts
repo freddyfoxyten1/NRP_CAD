@@ -1055,12 +1055,13 @@ export async function syncDphDivisionDiscordRoles(
 
     const rankByRole = new Map<string, { division_id: number; division_rank: string; sort_order: number }>();
     for (const r of rankLinks.rows) {
+      const sortOrder = Number(r.sort_order ?? 999_999);
       const existing = rankByRole.get(r.discord_role_id);
-      if (!existing || r.sort_order < existing.sort_order) {
+      if (!existing || sortOrder < existing.sort_order) {
         rankByRole.set(r.discord_role_id, {
           division_id: r.division_id,
           division_rank: r.name,
-          sort_order: r.sort_order,
+          sort_order: sortOrder,
         });
       }
     }
