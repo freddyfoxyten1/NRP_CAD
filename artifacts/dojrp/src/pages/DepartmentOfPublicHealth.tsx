@@ -31,7 +31,7 @@ import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
-import { buildPersonnelTitleGroups, sortByRankThenCallsign } from '@/lib/roster-sort';
+import { buildPersonnelTitleGroups, dedupeRosterMembersById, sortByRankThenCallsign } from '@/lib/roster-sort';
 import { collectDepartmentPermissions } from '@/lib/permission-access';
 import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
 
@@ -1782,7 +1782,7 @@ const DepartmentOfPublicHealth = () => {
     fetch('/api/dph', { headers: { accept: 'application/json' } })
       .then(r => (r.ok ? r.json() : null))
       .then((rows: unknown) => {
-        if (Array.isArray(rows)) setRoster((rows as RosterMember[]).map(normalizeRosterMember));
+        if (Array.isArray(rows)) setRoster(dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)));
       })
       .catch(() => { /* silent — division-only resources may stay hidden until roster loads elsewhere */ });
   }, [activeTab, roster.length]);
@@ -1817,7 +1817,7 @@ const DepartmentOfPublicHealth = () => {
           setRoster([]);
           toast.error('Failed to load roster.');
         } else {
-          setRoster(members.map(normalizeRosterMember));
+          setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
         }
         if (Array.isArray(grps)) setGroups(grps);
         if (Array.isArray(rnks)) setRanks(rnks);
@@ -1844,7 +1844,7 @@ const DepartmentOfPublicHealth = () => {
     if (!opts?.silent) setPanelLoading(true);
     fetch('/api/dph?all=1', { headers: { accept: 'application/json' } })
       .then(r => r.json())
-      .then((rows) => setPanelMembers(Array.isArray(rows) ? (rows as RosterMember[]).map(normalizeRosterMember) : []))
+      .then((rows) => setPanelMembers(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : []))
       .catch(() => {
         if (!opts?.silent) {
           setPanelMembers([]);
@@ -2271,7 +2271,7 @@ const DepartmentOfPublicHealth = () => {
     // Also refresh personnel roster if it's loaded
     if (roster.length > 0) {
       fetch('/api/dph', { headers: { accept: 'application/json' } })
-        .then(r => r.json()).then((rows) => setRoster(Array.isArray(rows) ? (rows as RosterMember[]).map(normalizeRosterMember) : [])).catch(() => {});
+        .then(r => r.json()).then((rows) => setRoster(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : [])).catch(() => {});
     }
   };
 
@@ -4308,7 +4308,7 @@ const DepartmentOfPublicHealth = () => {
                       if (roster.length > 0) {
                         fetch('/api/dph', { headers: { accept: 'application/json' } })
                           .then(r => r.json())
-                          .then((rows) => setRoster(Array.isArray(rows) ? (rows as RosterMember[]).map(normalizeRosterMember) : []))
+                          .then((rows) => setRoster(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : []))
                           .catch(() => {});
                       }
                     }}

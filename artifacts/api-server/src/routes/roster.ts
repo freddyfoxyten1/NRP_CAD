@@ -1200,15 +1200,11 @@ router.get("/roster", async (req, res) => {
                   ELSE NULL
                 END AS group_name,
                 COALESCE(rg.sort_order, 999)  AS group_sort_order,
-                COALESCE(dr.sort_order, 999)  AS rank_sort_order,
-                dd.name AS division_name,
-                COALESCE(dd.sort_order, 999) AS division_sort_order
+                COALESCE(dr.sort_order, 999)  AS rank_sort_order
          FROM cad_user_profiles p
          JOIN dps_users d ON d.profile_id = p.id
          LEFT JOIN dps_ranks dr ON lower(dr.name) = lower(d.dps_rank)
          LEFT JOIN dps_rank_groups rg ON dr.group_id = rg.id
-         LEFT JOIN dps_division_ranks ddr ON lower(ddr.name) = lower(d.division_rank)
-         LEFT JOIN dps_divisions dd ON ddr.division_id = dd.id
          ${where}
          ${orderBy}`
       );
@@ -1226,7 +1222,13 @@ router.get("/roster", async (req, res) => {
         (row) => (row.callsign as string | null | undefined) ?? null,
         (row) => String(row.username ?? ""),
       );
-      res.json(sortedRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null; division_name: string | null }) => {
+      const seenIds = new Set<number>();
+      const uniqueRows = sortedRows.filter((row: { id: number }) => {
+        if (seenIds.has(row.id)) return false;
+        seenIds.add(row.id);
+        return true;
+      });
+      res.json(uniqueRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null; division_name: string | null }) => {
         const assignments = assignmentMap.get(row.id) ?? [];
         // Prefer multi-assignment primary; fall back to legacy single join fields
         const primary = assignments[0];

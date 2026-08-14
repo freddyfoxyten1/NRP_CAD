@@ -3,6 +3,7 @@ import { Car, ChevronDown, ChevronRight, Package, Search, Users, X } from "lucid
 import { imageStyle } from "@/components/shared/ImageInput";
 import {
   buildPersonnelTitleGroups,
+  dedupeRosterMembersById,
   type TitleGroup,
 } from "@/lib/roster-sort";
 
@@ -227,7 +228,11 @@ export default function DpsPublicRosterModal({
     ])
       .then(([rosterRows, groupRows, rankRows, vehicleRows, equipmentRows]) => {
         if (cancelled) return;
-        setMembers(Array.isArray(rosterRows) ? rosterRows as RosterMember[] : []);
+        setMembers(
+          Array.isArray(rosterRows)
+            ? dedupeRosterMembersById(rosterRows as RosterMember[])
+            : [],
+        );
         setGroups(
           (Array.isArray(groupRows) ? groupRows : []).map((row: Record<string, unknown>) => ({
             id: Number(row.id),
