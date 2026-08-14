@@ -77,17 +77,53 @@ export function sortByRankThenCallsign<
 }
 
 export type TitleGroup = { id: number; name: string; sort_order: number };
+export type TitleRank = RankLike & { group_id?: number | null };
 
 export type PersonnelRosterMember = {
   group_name?: string | null;
   staff_role?: string | null;
 };
 
-/** Title heading for department personnel roster — never "Community Members". */
+function isCommunityTitle(name: string): boolean {
+  return name.trim().toLowerCase() === "community members";
+}
+
+/** Title group from the member's configured department rank only (not staff role). */
+export function personnelGroupLabelFromRank<
+  T extends PersonnelRosterMember,
+>(
+  member: T,
+  ranks: TitleRank[],
+  groups: TitleGroup[],
+  getRankName: (member: T) => string | null | undefined,
+): string | null {
+  const rankName = (getRankName(member) ?? "").trim();
+  if (!rankName) return null;
+  const rankMeta = ranks.find(
+    (r) => r.name.toLowerCase() === rankName.toLowerCase(),
+  );
+  if (rankMeta?.group_id == null) return null;
+  const group = groups.find((g) => g.id === rankMeta.group_id);
+  if (!group || isCommunityTitle(group.name)) return null;
+  return group.name;
+}
+
+/** Whether a member should appear on the department personnel roster display. */
+export function isPersonnelRosterMemberVisible<
+  T extends PersonnelRosterMember,
+>(
+  member: T,
+  ranks: TitleRank[],
+  groups: TitleGroup[],
+  getRankName: (member: T) => string | null | undefined,
+): boolean {
+  return personnelGroupLabelFromRank(member, ranks, groups, getRankName) != null;
+}
+
+/** @deprecated Prefer personnelGroupLabelFromRank for roster display grouping. */
 export function personnelGroupLabel(m: PersonnelRosterMember): string | null {
   const raw = (m.group_name ?? "").trim();
-  if (raw && raw.toLowerCase() !== "community members") return raw;
-  if ((m.staff_role ?? "").trim().toLowerCase() === "executive team") return "Executive Team";
+  if (raw && !isCommunityTitle(raw)) return raw;
   return null;
 }
 
@@ -97,39 +133,24 @@ export function buildPersonnelTitleGroups<
 >(
   members: T[],
   groups: TitleGroup[],
-  ranks: RankLike[],
+  ranks: TitleRank[],
   getRankName: (member: T) => string | null | undefined,
 ): Array<{ id: number | null; label: string; members: T[] }> {
-  const safeGroups = groups.filter(g => g.name.trim().toLowerCase() !== "community members");
-  const defined = safeGroups
+  const eligible = members.filter(m =>
+    isPersonnelRosterMemberVisible(m, ranks, groups, getRankName),
+  );
+  const safeGroups = groups.filter(g => !isCommunityTitle(g.name));
+  return safeGroups
     .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
     .map(g => ({
       id: g.id as number | null,
       label: g.name,
       members: sortByRankThenCallsign(
-        members.filter(m => personnelGroupLabel(m) === g.name),
+        eligible.filter(m => personnelGroupLabelFromRank(m, ranks, groups, getRankName) === g.name),
         ranks,
         getRankName,
       ),
     }));
-
-  const definedLabels = new Set(safeGroups.map(g => g.name));
-  const orphanByLabel = new Map<string, T[]>();
-  for (const m of members) {
-    const label = personnelGroupLabel(m);
-    if (!label || definedLabels.has(label)) continue;
-    if (!orphanByLabel.has(label)) orphanByLabel.set(label, []);
-    orphanByLabel.get(label)!.push(m);
-  }
-  for (const [label, list] of orphanByLabel) {
-    defined.push({
-      id: null,
-      label,
-      members: sortByRankThenCallsign(list, ranks, getRankName),
-    });
-  }
-
-  return defined;
 }
 
 export type RankSection<T> = {
