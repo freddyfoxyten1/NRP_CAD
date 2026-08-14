@@ -79,6 +79,18 @@ export function sortByRankThenCallsign<
 export type TitleGroup = { id: number; name: string; sort_order: number };
 export type TitleRank = RankLike & { group_id?: number | null };
 
+/** Keep one row per profile id — guards against join-multiplied API rows. */
+export function dedupeRosterMembersById<T extends { id: number }>(members: T[]): T[] {
+  const seen = new Set<number>();
+  const out: T[] = [];
+  for (const m of members) {
+    if (seen.has(m.id)) continue;
+    seen.add(m.id);
+    out.push(m);
+  }
+  return out;
+}
+
 export type PersonnelRosterMember = {
   group_name?: string | null;
   staff_role?: string | null;
@@ -136,7 +148,7 @@ export function buildPersonnelTitleGroups<
   ranks: TitleRank[],
   getRankName: (member: T) => string | null | undefined,
 ): Array<{ id: number | null; label: string; members: T[] }> {
-  const eligible = members.filter(m =>
+  const eligible = dedupeRosterMembersById(members).filter(m =>
     isPersonnelRosterMemberVisible(m, ranks, groups, getRankName),
   );
   const safeGroups = groups.filter(g => !isCommunityTitle(g.name));

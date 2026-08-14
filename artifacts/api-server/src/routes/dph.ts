@@ -576,7 +576,14 @@ router.get("/dph", async (req, res) => {
       (row) => String(row.username ?? ""),
     );
 
-    const ids = sortedRows.map((r: { id: number }) => r.id);
+    const seenIds = new Set<number>();
+    const uniqueRows = sortedRows.filter((row: { id: number }) => {
+      if (seenIds.has(row.id)) return false;
+      seenIds.add(row.id);
+      return true;
+    });
+
+    const ids = uniqueRows.map((r: { id: number }) => r.id);
     let assignmentMap = new Map<number, DphDivisionAssignment[]>();
     try {
       assignmentMap = await loadDphDivisionAssignments(ids);
@@ -584,7 +591,7 @@ router.get("/dph", async (req, res) => {
       req.log.warn({ err: assignErr }, "dph GET division assignments load failed");
     }
 
-    res.json(sortedRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null }) => {
+    res.json(uniqueRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null }) => {
       const assignments = assignmentMap.get(row.id) ?? [];
       const primary = assignments[0];
       return {

@@ -29,7 +29,47 @@ export type DpsDivisionRank = {
   callsign_max?: number | null;
 };
 
-type DiscordGuildRole = { id: string; name: string; position: number };
+type DpsPersonnelRank = {
+  id: number;
+  name: string;
+  sort_order: number;
+  color_hex: string | null;
+  insignia_url: string | null;
+};
+
+function getPersonnelRankMeta(
+  ranks: DpsPersonnelRank[],
+  name: string | null | undefined,
+): DpsPersonnelRank | null {
+  if (!name?.trim()) return null;
+  return ranks.find(r => r.name.toLowerCase() === name.toLowerCase().trim()) ?? null;
+}
+
+function RankWithInsignia({
+  rankName,
+  meta,
+  className = 'text-[10px] font-black',
+}: {
+  rankName: string;
+  meta: DpsPersonnelRank | DpsDivisionRank | null;
+  className?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {meta?.insignia_url && (
+        <img
+          src={meta.insignia_url}
+          alt=""
+          className="h-4 w-4 object-contain shrink-0"
+          onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+        />
+      )}
+      <span className={className} style={{ color: meta?.color_hex ?? '#a8b7cd' }}>
+        {rankName}
+      </span>
+    </div>
+  );
+}
 
 export type DivisionRosterMember = {
   id: number;
@@ -38,7 +78,8 @@ export type DivisionRosterMember = {
   discord_id: string;
   avatar_hash: string;
   callsign: string;
-  dps_rank: string | null;
+  dps_rank?: string | null;
+  dph_rank?: string | null;
   rank?: string;
   division_rank: string | null;
   division_name?: string | null;
@@ -96,6 +137,10 @@ function canViewDivisionResource(
   const rank = (viewerRank ?? '').trim().toLowerCase();
   if (!rank) return false;
   return ranks.some(r => r.trim().toLowerCase() === rank);
+}
+
+function memberDepartmentRank(m: DivisionRosterMember): string | null {
+  return m.dps_rank ?? m.dph_rank ?? m.rank ?? null;
 }
 
 function memberAssignments(m: DivisionRosterMember) {
@@ -202,6 +247,7 @@ export function DivisionRosterView({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [divisions, setDivisions] = useState<DpsDivision[]>([]);
   const [divisionRanks, setDivisionRanks] = useState<DpsDivisionRank[]>([]);
+  const [personnelRanks, setPersonnelRanks] = useState<DpsPersonnelRank[]>([]);
   const [selectedDivisionId, setSelectedDivisionId] = useState<number | null>(null);
   const [panelMode, setPanelMode] = useState<DivisionPanelMode>('roster');
   const [cardSearch, setCardSearch] = useState('');
@@ -213,6 +259,8 @@ export function DivisionRosterView({
       .then(r => r.json()).then(rows => setDivisions(Array.isArray(rows) ? rows : [])).catch(() => setDivisions([]));
     fetch(`${apiBase}/division-ranks`, { headers: { accept: 'application/json' } })
       .then(r => r.json()).then(rows => setDivisionRanks(Array.isArray(rows) ? rows : [])).catch(() => setDivisionRanks([]));
+    fetch(`${apiBase}/ranks`, { headers: { accept: 'application/json' } })
+      .then(r => r.json()).then(rows => setPersonnelRanks(Array.isArray(rows) ? rows : [])).catch(() => setPersonnelRanks([]));
   }, [apiBase]);
 
   const selectedDivision = selectedDivisionId != null
@@ -270,6 +318,9 @@ export function DivisionRosterView({
 
   const membersInDivision = (division: DpsDivision) =>
     members.filter(m => assignmentForDivision(m, division) != null);
+
+  const getDpsRankMeta = (name: string | null | undefined) =>
+    getPersonnelRankMeta(personnelRanks, name);
 
   const getDivRankMeta = (divisionId: number, name: string | null | undefined) => {
     if (!name?.trim()) return null;
@@ -516,7 +567,7 @@ export function DivisionRosterView({
     return (
       m.username.toLowerCase().includes(q)
       || (assign?.division_rank ?? '').toLowerCase().includes(q)
-      || (m.dps_rank || m.rank || '').toLowerCase().includes(q)
+      || (memberDepartmentRank(m) ?? '').toLowerCase().includes(q)
       || (m.callsign ?? '').toLowerCase().includes(q)
       || (m.discord_username ?? '').toLowerCase().includes(q)
       || (m.discord_id ?? '').includes(q)
@@ -685,7 +736,12 @@ export function DivisionRosterView({
                               </span>
                             </div>
                           </td>
-                          <td className="px-4 py-3.5 capitalize text-[#a8b7cd]">{m.dps_rank || m.rank || '—'}</td>
+                          <td className="px-4 py-3.5">
+                            <RankWithInsignia
+                              rankName={memberDepartmentRank(m) || '—'}
+                              meta={getDpsRankMeta(memberDepartmentRank(m))}
+                            />
+                          </td>
                           <td className="px-4 py-3.5">
                             <span className="inline-flex items-center rounded border border-[#1b2d44] bg-[#070d16] px-2 py-0.5 font-mono text-[10px] font-black text-[#4384ff]">
                               {m.callsign || '—'}
@@ -1828,6 +1884,7 @@ export function DivisionPanelSection({
   const personNounTitle = personNoun.charAt(0).toUpperCase() + personNoun.slice(1);
   const [divisions, setDivisions] = useState<DpsDivision[]>([]);
   const [divisionRanks, setDivisionRanks] = useState<DpsDivisionRank[]>([]);
+  const [personnelRanks, setPersonnelRanks] = useState<DpsPersonnelRank[]>([]);
   const [discordRoles, setDiscordRoles] = useState<DiscordGuildRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDivisionId, setSelectedDivisionId] = useState<number | null>(null);
@@ -1863,13 +1920,15 @@ export function DivisionPanelSection({
     Promise.all([
       fetch(`${apiBase}/divisions`, { headers: { accept: 'application/json' } }).then(r => r.json()),
       fetch(`${apiBase}/division-ranks`, { headers: { accept: 'application/json' } }).then(r => r.json()),
+      fetch(`${apiBase}/ranks`, { headers: { accept: 'application/json' } }).then(r => r.json()),
       fetch(`${apiBase}/division-discord-roles?refresh=1`, { headers: { accept: 'application/json' } })
         .then(r => (r.ok ? r.json() : []))
         .catch(() => []),
     ])
-      .then(([divs, ranks, roles]) => {
+      .then(([divs, ranks, personnel, roles]) => {
         setDivisions(Array.isArray(divs) ? divs : []);
         setDivisionRanks(Array.isArray(ranks) ? ranks : []);
+        setPersonnelRanks(Array.isArray(personnel) ? personnel : []);
         setDiscordRoles(Array.isArray(roles) ? roles : []);
       })
       .catch(() => toast.error('Failed to load divisions.'))
@@ -1949,6 +2008,14 @@ export function DivisionPanelSection({
     divisionRanks
       .filter(r => r.division_id === divisionId)
       .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+
+  const getDpsRankMeta = (name: string | null | undefined) =>
+    getPersonnelRankMeta(personnelRanks, name);
+
+  const getDivRankMeta = (divisionId: number, name: string | null | undefined) => {
+    if (!name?.trim()) return null;
+    return ranksForDivision(divisionId).find(r => r.name.toLowerCase() === name.toLowerCase().trim()) ?? null;
+  };
 
   const membersInDivision = (division: DpsDivision) =>
     members.filter(m => assignmentForDivision(m, division) != null);
@@ -2704,7 +2771,7 @@ export function DivisionPanelSection({
       return (
         m.username.toLowerCase().includes(q)
         || (assign?.division_rank ?? '').toLowerCase().includes(q)
-        || (m.dps_rank || m.rank || '').toLowerCase().includes(q)
+        || (memberDepartmentRank(m) ?? '').toLowerCase().includes(q)
         || (m.callsign ?? '').toLowerCase().includes(q)
         || (m.discord_username ?? '').toLowerCase().includes(q)
       );
@@ -2977,7 +3044,12 @@ export function DivisionPanelSection({
                           </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3.5 capitalize text-[#a8b7cd]">{m.dps_rank || m.rank || '—'}</td>
+                      <td className="px-4 py-3.5">
+                        <RankWithInsignia
+                          rankName={memberDepartmentRank(m) || '—'}
+                          meta={getDpsRankMeta(memberDepartmentRank(m))}
+                        />
+                      </td>
                       <td className="px-4 py-3.5">
                         {canManageRoster ? (
                         <select
@@ -2991,7 +3063,10 @@ export function DivisionPanelSection({
                           ))}
                         </select>
                         ) : (
-                          <span className="text-[#a8b7cd]">{currentRank || '—'}</span>
+                          <RankWithInsignia
+                            rankName={currentRank || '—'}
+                            meta={getDivRankMeta(selectedDivision.id, currentRank)}
+                          />
                         )}
                       </td>
                       <td className="px-4 py-3.5 font-black text-[#4384ff]">{m.callsign || '—'}</td>
