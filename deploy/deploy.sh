@@ -21,27 +21,53 @@ if [ ! -d "$REPO_DIR/.git" ]; then
   exit 1
 fi
 
-echo "==> 1/5 Pulling latest code..."
+echo "==> 1/6 Pulling latest code..."
 cd "$REPO_DIR"
 git pull
 
-echo "==> 2/5 Installing dependencies..."
+echo "==> 2/6 Installing dependencies..."
 bun install
 
-echo "==> 3/5 Building (API + frontend)..."
+echo "==> 3/6 Building (API + frontend)..."
 bun run build
 
-echo "==> 4/5 Ensuring frontend is readable by nginx..."
+echo "==> 4/6 Ensuring frontend is readable by nginx..."
 chown -R www-data:www-data "$REPO_DIR/artifacts/dojrp/dist/public" 2>/dev/null || true
 
-echo "==> 5/5 Restarting API via bm2..."
+echo "==> 5/6 Restarting API via bm2..."
 if bm2 list 2>/dev/null | grep -q "$API_NAME"; then
   bm2 restart "$API_NAME"
 else
   bm2 start ecosystem.config.js
 fi
 
+echo "==> 6/6 Verifying API + database..."
+sleep 2
+if ! curl -sf "http://127.0.0.1:8080/api/healthz" >/dev/null; then
+  echo "ERROR: API health check failed. Run: bm2 logs $API_NAME --lines 50"
+  exit 1
+fi
+
+DB_HEALTH="$(curl -sf "http://127.0.0.1:8080/api/health/db" || true)"
+if [ -n "$DB_HEALTH" ]; then
+  echo "   Database: $DB_HEALTH"
+  if echo "$DB_HEALTH" | grep -q '"dataStore":"mongo"'; then
+    if ! echo "$DB_HEALTH" | grep -q '"mongo":true'; then
+      echo "ERROR: DATA_STORE=mongo but Mongo ping failed. Check MONGODB_URI in .env"
+      exit 1
+    fi
+    # Roster sorting and other API changes use existing Mongo fields (sort_order, callsign).
+    # Re-run ETL only when intentionally syncing a SQL backup into Atlas:
+    #   SYNC_SQL_TO_MONGO=1 bun run migrate:mongo
+    if [ "${SYNC_SQL_TO_MONGO:-}" = "1" ] && [ -f "$REPO_DIR/cad-database/dojcad.sqlite" ]; then
+      echo "==> Syncing SQL backup → Mongo (SYNC_SQL_TO_MONGO=1)..."
+      bun run migrate:mongo
+      bun run migrate:mongo:verify
+    fi
+  fi
+fi
+
 echo ""
-echo "✅ Deploy complete!"
+echo "✅ Deploy complete! ($(git rev-parse --short HEAD))"
 echo "   Frontend: https://cad.dojrblx.com/"
 echo "   API:      https://cad.dojrblx.com/api/healthz"
