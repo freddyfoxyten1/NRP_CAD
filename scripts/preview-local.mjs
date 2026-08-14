@@ -11,6 +11,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = process.env.API_PORT ?? "8080";
 const PREVIEW_PORT = process.env.PREVIEW_PORT ?? "4173";
 
+/** Ensure local preview/dev use the repo-root SQLite store, not api-server/cad-database. */
+const previewRedirectUri =
+  process.env.DISCORD_REDIRECT_URI?.includes(":5173")
+    ? `http://localhost:${PREVIEW_PORT}/dojcad/discord-callback`
+    : (process.env.DISCORD_REDIRECT_URI ??
+      `http://localhost:${PREVIEW_PORT}/dojcad/discord-callback`);
+
+const repoEnv = {
+  ...process.env,
+  CAD_DATABASE_PATH: process.env.CAD_DATABASE_PATH ?? path.join(root, "cad-database"),
+  DISCORD_REDIRECT_URI: previewRedirectUri,
+};
+
 const children = [];
 let exiting = false;
 let apiStarted = false;
@@ -62,6 +75,7 @@ function spawnInRoot(command, args) {
     cwd: root,
     stdio: "inherit",
     shell: true,
+    env: repoEnv,
   });
   children.push(child);
   child.on("exit", (code, signal) => {
@@ -79,9 +93,18 @@ if (!(await probe(`http://127.0.0.1:${API_PORT}/api/healthz`))) {
   apiStarted = true;
   spawnInRoot("bun", ["run", "dev:api"]);
   await waitFor(`http://127.0.0.1:${API_PORT}/api/healthz`, "API");
+} else {
+  console.warn(
+    [
+      "",
+      "Note: API is already running on port " + API_PORT + ".",
+      "If Discord sign-in fails, stop it (Ctrl+C on dev) and run preview again.",
+      "",
+    ].join("\n"),
+  );
 }
 
-spawnInRoot("bun", ["run", "preview"]);
+spawnInRoot("bun", ["run", "preview:build"]);
 
 const ready = await waitFor(`http://127.0.0.1:${PREVIEW_PORT}/`, "preview server");
 if (ready) {
@@ -96,6 +119,9 @@ if (ready) {
       `  API:   http://localhost:${API_PORT}/api/healthz`,
       "",
       "  Re-run after code changes (rebuilds first). For live edits use: bun run dev",
+      "",
+      `  Discord sign-in redirect: ${previewRedirectUri}`,
+      "  Add that URI in the Discord Developer Portal if sign-in fails.",
       "",
     ].join("\n"),
   );
