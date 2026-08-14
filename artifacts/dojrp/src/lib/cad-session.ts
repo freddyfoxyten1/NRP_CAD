@@ -36,6 +36,8 @@ export type CadSession = {
   can_access_terms_privacy?: boolean;
   /** Sign-in during Terminal lockdown (staff roster grant) */
   can_access_terminal_offline?: boolean;
+  /** Staff roster grant — view DOC & DPS CAD terminals without department roster membership */
+  can_access_doc_dps_cad?: boolean;
   /** ISO timestamp when this local session expires (set on Discord login). */
   expires_at?: string;
 };

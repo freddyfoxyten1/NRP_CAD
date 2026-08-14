@@ -30,6 +30,7 @@ type AuthAccount = {
   can_access_system_logs: boolean | number | null;
   can_access_terms_privacy: boolean | number | null;
   can_access_terminal_offline: boolean | number | null;
+  can_access_doc_dps_cad: boolean | number | null;
   discord_id?: string | null;
   avatar_hash?: string | null;
 };
@@ -55,6 +56,7 @@ async function loadAccountByUsernameMongo(username: string): Promise<AuthAccount
     can_access_system_logs: merged.can_access_system_logs ?? false,
     can_access_terms_privacy: merged.can_access_terms_privacy ?? false,
     can_access_terminal_offline: merged.can_access_terminal_offline ?? false,
+    can_access_doc_dps_cad: merged.can_access_doc_dps_cad ?? false,
   };
 }
 
@@ -81,6 +83,7 @@ async function loadAccountByIdEmailMongo(id: number, email: string): Promise<Aut
     can_access_system_logs: merged.can_access_system_logs ?? false,
     can_access_terms_privacy: merged.can_access_terms_privacy ?? false,
     can_access_terminal_offline: merged.can_access_terminal_offline ?? false,
+    can_access_doc_dps_cad: merged.can_access_doc_dps_cad ?? false,
   };
 }
 
@@ -108,7 +111,8 @@ router.post("/cad-auth/sign-in", async (req, res) => {
                 COALESCE(p.can_access_iab, false) AS can_access_iab,
                 COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
                 COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
-                COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
+                COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline,
+                COALESCE(p.can_access_doc_dps_cad, false) AS can_access_doc_dps_cad
          FROM cad_user_profiles p
          LEFT JOIN dps_users d ON d.profile_id = p.id
          WHERE lower(p.username) = $1
@@ -155,6 +159,7 @@ router.post("/cad-auth/sign-in", async (req, res) => {
       can_access_system_logs: Boolean(account.can_access_system_logs),
       can_access_terms_privacy: Boolean(account.can_access_terms_privacy),
       can_access_terminal_offline: Boolean(account.can_access_terminal_offline),
+      can_access_doc_dps_cad: Boolean(account.can_access_doc_dps_cad),
     });
   } catch (err) {
     req.log.error({ err }, "cad-auth/sign-in error");
@@ -186,7 +191,8 @@ router.post("/cad-auth/session-status", async (req, res) => {
                 COALESCE(p.can_access_iab, false) AS can_access_iab,
                 COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
                 COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
-                COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
+                COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline,
+                COALESCE(p.can_access_doc_dps_cad, false) AS can_access_doc_dps_cad
          FROM cad_user_profiles p
          LEFT JOIN dps_users d ON d.profile_id = p.id
          WHERE p.id = $1 AND lower(p.email) = $2
@@ -205,6 +211,7 @@ router.post("/cad-auth/session-status", async (req, res) => {
         can_access_system_logs: Boolean(account.can_access_system_logs),
         can_access_terms_privacy: Boolean(account.can_access_terms_privacy),
         can_access_terminal_offline: Boolean(account.can_access_terminal_offline),
+        can_access_doc_dps_cad: Boolean(account.can_access_doc_dps_cad),
       },
     } : { active: false });
   } catch (err) {

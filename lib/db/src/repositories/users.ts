@@ -28,6 +28,7 @@ export type UserDoc = {
   can_access_system_logs?: boolean | null;
   can_access_terms_privacy?: boolean | null;
   can_access_terminal_offline?: boolean | null;
+  can_access_doc_dps_cad?: boolean | null;
   staff_appointed_date?: string | null;
   created_at?: string;
   updated_at?: string;

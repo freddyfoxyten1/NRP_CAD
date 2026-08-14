@@ -20,6 +20,7 @@ function normalizeStaffMemberRow<T extends Record<string, unknown>>(row: T): T {
     can_access_system_logs: asBool(row.can_access_system_logs),
     can_access_terms_privacy: asBool(row.can_access_terms_privacy),
     can_access_terminal_offline: asBool(row.can_access_terminal_offline),
+    can_access_doc_dps_cad: asBool(row.can_access_doc_dps_cad),
   };
 }
 
@@ -422,6 +423,13 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
   } catch (e) {
     console.error("can_access_terminal_offline migration failed:", e);
   }
+  try {
+    await pool.query(
+      `ALTER TABLE cad_user_profiles ADD COLUMN IF NOT EXISTS can_access_doc_dps_cad boolean NOT NULL DEFAULT false`
+    );
+  } catch (e) {
+    console.error("can_access_doc_dps_cad migration failed:", e);
+  }
   // Discord role link column
   try {
     await pool.query(`ALTER TABLE staff_ranks ADD COLUMN IF NOT EXISTS discord_role_id text`);
@@ -505,7 +513,8 @@ router.get("/staff/roster", async (req, res) => {
               COALESCE(p.can_access_iab, false) AS can_access_iab,
               COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
               COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
-              COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
+              COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline,
+              COALESCE(p.can_access_doc_dps_cad, false) AS can_access_doc_dps_cad
        FROM cad_user_profiles p
        LEFT JOIN staff_ranks sr ON lower(sr.name) = lower(COALESCE(p.staff_rank, ''))
        WHERE (
@@ -677,6 +686,46 @@ router.patch("/staff/roster/:id/admin-tab-access", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "staff admin-tab-access PATCH error");
     res.status(500).json({ error: "Unable to update admin tab access." });
+  }
+});
+
+// ── PATCH /staff/roster/:id/doc-dps-cad-access — view DOC & DPS CAD terminals ─
+router.patch("/staff/roster/:id/doc-dps-cad-access", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id." }); return;
+  }
+  const { can_access_doc_dps_cad } = req.body as { can_access_doc_dps_cad?: boolean };
+  if (typeof can_access_doc_dps_cad !== "boolean") {
+    res.status(400).json({ error: "can_access_doc_dps_cad (boolean) is required." }); return;
+  }
+  try {
+    const result = await pool.query(
+      `UPDATE cad_user_profiles
+          SET can_access_doc_dps_cad = $2, updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, username, can_access_doc_dps_cad`,
+      [id, can_access_doc_dps_cad],
+    );
+    if (!result.rows.length) {
+      res.status(404).json({ error: "Member not found." }); return;
+    }
+    const actor = (req.body as Record<string, unknown>).actor as string
+      || (req.headers["x-actor"] as string)
+      || "Admin";
+    void writeLog(
+      "staff",
+      actor,
+      can_access_doc_dps_cad ? "Granted DOC & DPS CAD view access" : "Revoked DOC & DPS CAD view access",
+      String(result.rows[0].username ?? id),
+    );
+    res.json(normalizeStaffMemberRow({
+      id: result.rows[0].id,
+      can_access_doc_dps_cad: Boolean(result.rows[0].can_access_doc_dps_cad),
+    }));
+  } catch (err) {
+    req.log.error({ err }, "staff doc-dps-cad-access PATCH error");
+    res.status(500).json({ error: "Unable to update DOC & DPS CAD access." });
   }
 });
 

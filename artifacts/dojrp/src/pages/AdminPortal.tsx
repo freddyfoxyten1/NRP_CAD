@@ -6,7 +6,7 @@ import {
   portalSectionPath,
   usePortalSection,
 } from '@/hooks/usePortalSection';
-import { BookOpen, Car, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Crosshair, ExternalLink, FileText, GripVertical, Image as ImageIcon, Info, Link, Lock, LogOut, Megaphone, Pencil, Plus, RefreshCw, Scale, Search, Settings, Shield, ShoppingBag, Terminal as TerminalIcon, Trash2, Upload, User, Users, X } from 'lucide-react';
+import { BookOpen, Car, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Crosshair, ExternalLink, FileText, GripVertical, Image as ImageIcon, Info, Link, Lock, LogOut, Megaphone, Monitor, Pencil, Plus, RefreshCw, Scale, Search, Settings, Shield, ShoppingBag, Terminal as TerminalIcon, Trash2, Upload, User, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
 import DojrpShield from '@/components/shared/DojrpShield';
@@ -139,7 +139,7 @@ type AuditLog = {
 type StaffGroup  = { id: number; name: string; sort_order: number; locked: boolean; staff_access: boolean; admin_access: boolean; doc_access: boolean };
 type StaffRank        = { id: number; name: string; sort_order: number; group_id: number | null; color_hex: string | null; discord_role_id: string | null; };
 type DiscordRoleOption = { id: string; name: string; position: number };
-type StaffMember = { id: number; username: string; discord_username: string; discord_id: string; avatar_hash: string | null; staff_rank: string | null; staff_role: string | null; status: string; staff_appointed_date: string | null; can_access_iab?: boolean; can_access_system_logs?: boolean; can_access_terms_privacy?: boolean; can_access_terminal_offline?: boolean };
+type StaffMember = { id: number; username: string; discord_username: string; discord_id: string; avatar_hash: string | null; staff_rank: string | null; staff_role: string | null; status: string; staff_appointed_date: string | null; can_access_iab?: boolean; can_access_system_logs?: boolean; can_access_terms_privacy?: boolean; can_access_terminal_offline?: boolean; can_access_doc_dps_cad?: boolean };
 type UserHit     = { id: number | null; username: string; discord_username: string | null; discord_id: string | null; nick: string | null; rank: string | null; source: 'cad' | 'discord' };
 
 type Announcement = {
@@ -483,16 +483,20 @@ const StaffAccessPermissionsModal = ({
   onToggleIab,
   onToggleAdminTab,
   onToggleTerminalOffline,
+  onToggleDocDpsCad,
   terminalSaving,
+  cadSaving,
 }: {
   member: StaffMember;
   onClose: () => void;
   iabSaving: boolean;
   adminTabSaving: boolean;
   terminalSaving: boolean;
+  cadSaving: boolean;
   onToggleIab: (enabled: boolean) => void;
   onToggleAdminTab: (field: 'can_access_system_logs' | 'can_access_terms_privacy', enabled: boolean) => void;
   onToggleTerminalOffline: (enabled: boolean) => void;
+  onToggleDocDpsCad: (enabled: boolean) => void;
 }) => {
   const rows: Array<{
     key: string;
@@ -548,6 +552,17 @@ const StaffAccessPermissionsModal = ({
       on: 'border-[#ff7070]/50 bg-[#ff7070]/10 text-[#ff7070]',
       off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#ff7070]/40 hover:text-[#ff7070]',
       onClick: () => onToggleTerminalOffline(!member.can_access_terminal_offline),
+    },
+    {
+      key: 'cad',
+      label: 'DOC & DPS CAD',
+      description: 'View DOC and DPS CAD terminals without department roster membership',
+      enabled: Boolean(member.can_access_doc_dps_cad),
+      saving: cadSaving,
+      icon: <Monitor className="h-3.5 w-3.5" />,
+      on: 'border-[#4384ff]/50 bg-[#4384ff]/10 text-[#4384ff]',
+      off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#4384ff]/40 hover:text-[#4384ff]',
+      onClick: () => onToggleDocDpsCad(!member.can_access_doc_dps_cad),
     },
   ];
 
@@ -836,6 +851,7 @@ const AdminPortal = () => {
   const [iabAccessSavingId,   setIabAccessSavingId]    = useState<number | null>(null);
   const [adminTabAccessSavingId, setAdminTabAccessSavingId] = useState<number | null>(null);
   const [terminalAccessSavingId, setTerminalAccessSavingId] = useState<number | null>(null);
+  const [cadAccessSavingId, setCadAccessSavingId] = useState<number | null>(null);
   // Group management
   const [addStaffGroupOpen,    setAddStaffGroupOpen]    = useState(false);
   const [newStaffGroupName,    setNewStaffGroupName]    = useState('');
@@ -864,6 +880,7 @@ const AdminPortal = () => {
 
   // Staff Roster  -  DPS-style panel state
   const [srPanelSearch,       setSrPanelSearch]       = useState('');
+  const [srMembersCollapsed,  setSrMembersCollapsed]  = useState(false);
   const [srAddOpen,           setSrAddOpen]           = useState(false);
   const [srEditMember,        setSrEditMember]        = useState<StaffMember | null>(null);
   const [srAccessMemberId,    setSrAccessMemberId]    = useState<number | null>(null);
@@ -2254,6 +2271,52 @@ const AdminPortal = () => {
     }
   };
 
+  const handleToggleStaffDocDpsCadAccess = async (memberId: number, enabled: boolean) => {
+    const member = staffRosterMembers.find(m => m.id === memberId);
+    if (!member) return;
+    setCadAccessSavingId(memberId);
+    setStaffRosterMembers(prev => prev.map(m =>
+      m.id === memberId ? { ...m, can_access_doc_dps_cad: enabled } : m
+    ));
+    try {
+      const res = await fetch(`/api/staff/roster/${memberId}/doc-dps-cad-access`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          can_access_doc_dps_cad: enabled,
+          actor: currentAdmin?.username ?? 'Admin',
+        }),
+      });
+      const data = await res.json() as { can_access_doc_dps_cad?: boolean; error?: string };
+      if (!res.ok) {
+        setStaffRosterMembers(prev => prev.map(m =>
+          m.id === memberId ? { ...m, can_access_doc_dps_cad: !enabled } : m
+        ));
+        toast.error(data.error ?? 'Failed to update DOC & DPS CAD access.');
+        return;
+      }
+      const nextFlag = Boolean(data.can_access_doc_dps_cad);
+      setStaffRosterMembers(prev => prev.map(m =>
+        m.id === memberId ? { ...m, can_access_doc_dps_cad: nextFlag } : m
+      ));
+      if (currentAdmin && currentAdmin.id === memberId) {
+        const next = { ...currentAdmin, can_access_doc_dps_cad: nextFlag };
+        setCurrentAdmin(next);
+        setCadSession(next);
+      }
+      toast.success(nextFlag
+        ? `${member.username} granted DOC & DPS CAD view access.`
+        : `${member.username} DOC & DPS CAD view access revoked.`);
+    } catch {
+      setStaffRosterMembers(prev => prev.map(m =>
+        m.id === memberId ? { ...m, can_access_doc_dps_cad: !enabled } : m
+      ));
+      toast.error('Failed to update DOC & DPS CAD access.');
+    } finally {
+      setCadAccessSavingId(null);
+    }
+  };
+
   const handleToggleStaffAdminTabAccess = async (
     memberId: number,
     field: 'can_access_system_logs' | 'can_access_terms_privacy',
@@ -3087,9 +3150,11 @@ const AdminPortal = () => {
                       iabSaving={iabAccessSavingId === accessMember.id}
                       adminTabSaving={adminTabAccessSavingId === accessMember.id}
                       terminalSaving={terminalAccessSavingId === accessMember.id}
+                      cadSaving={cadAccessSavingId === accessMember.id}
                       onToggleIab={enabled => void handleToggleStaffIabAccess(accessMember.id, enabled)}
                       onToggleAdminTab={(field, enabled) => void handleToggleStaffAdminTabAccess(accessMember.id, field, enabled)}
                       onToggleTerminalOffline={enabled => void handleToggleStaffTerminalOfflineAccess(accessMember.id, enabled)}
+                      onToggleDocDpsCad={enabled => void handleToggleStaffDocDpsCadAccess(accessMember.id, enabled)}
                     />
                   );
                 })()}
@@ -3426,7 +3491,22 @@ const AdminPortal = () => {
                   )}
 
                   {/* -- Staff member table ---- */}
-                  {(() => {
+                  <div className="border-t border-[#131f30]">
+                    <button
+                      type="button"
+                      onClick={() => setSrMembersCollapsed(c => !c)}
+                      className="flex w-full items-center gap-2 bg-[#070d16] px-6 py-2.5 text-left hover:bg-[#081422] transition-colors"
+                      aria-expanded={!srMembersCollapsed}
+                    >
+                      <Users className="h-3.5 w-3.5 shrink-0 text-[#ff7070]" />
+                      <span className="text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Staff Members</span>
+                      <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] font-black text-[#3f5470]">{staffRosterMembers.length}</span>
+                      {srMembersCollapsed
+                        ? <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-[#526179]" />
+                        : <ChevronUp className="ml-auto h-4 w-4 shrink-0 text-[#526179]" />}
+                    </button>
+
+                  {!srMembersCollapsed && (() => {
                     const q        = srPanelSearch.toLowerCase();
                     const filtered = sortByRankThenUsername(
                       staffRosterMembers.filter(m =>
@@ -3520,11 +3600,12 @@ const AdminPortal = () => {
                       </div>
                     );
                   })()}
+                  </div>
                 </div>
 
                 <PermissionAccessOverview
                   title="Website Permission Access"
-                  description="Staff Portal, Admin Portal, DOC, and individual grants (IAB, System Logs, TS & PP, Terminal Lockdown)."
+                  description="Staff Portal, Admin Portal, DOC, and individual grants (IAB, System Logs, TS & PP, Terminal Lockdown, DOC & DPS CAD)."
                   accentTextClass="text-[#ff7070]"
                   accentBorderClass="border-[#ff5d5d]/20"
                   rows={staffPermissionOverviewRows}

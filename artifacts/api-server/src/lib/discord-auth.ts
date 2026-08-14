@@ -75,6 +75,7 @@ export type CadSessionPayload = {
   can_access_system_logs: boolean;
   can_access_terms_privacy: boolean;
   can_access_terminal_offline: boolean;
+  can_access_doc_dps_cad: boolean;
 };
 
 function isDirectApiHost(host: string): boolean {
@@ -215,6 +216,7 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
       can_access_system_logs: Boolean(merged.can_access_system_logs),
       can_access_terms_privacy: Boolean(merged.can_access_terms_privacy),
       can_access_terminal_offline: Boolean(merged.can_access_terminal_offline),
+      can_access_doc_dps_cad: Boolean(merged.can_access_doc_dps_cad),
     };
   }
 
@@ -228,7 +230,8 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
             COALESCE(p.can_access_iab, false) AS can_access_iab,
             COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
             COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
-            COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline
+            COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline,
+            COALESCE(p.can_access_doc_dps_cad, false) AS can_access_doc_dps_cad
      FROM cad_user_profiles p
      LEFT JOIN dps_users d ON d.profile_id = p.id
      WHERE p.id = $1
@@ -244,6 +247,7 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
     can_access_system_logs: Boolean(row.can_access_system_logs),
     can_access_terms_privacy: Boolean(row.can_access_terms_privacy),
     can_access_terminal_offline: Boolean(row.can_access_terminal_offline),
+    can_access_doc_dps_cad: Boolean(row.can_access_doc_dps_cad),
   };
 }
 
