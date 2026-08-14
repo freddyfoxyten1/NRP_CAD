@@ -1533,6 +1533,7 @@ const DepartmentOfPublicHealth = () => {
   const [panelMembers,  setPanelMembers]  = useState<RosterMember[]>([]);
   const [panelLoading,  setPanelLoading]  = useState(false);
   const [panelSearch,   setPanelSearch]   = useState('');
+  const [panelMembersCollapsed, setPanelMembersCollapsed] = useState(false);
   const [editMember,    setEditMember]    = useState<RosterMember | null>(null);
   const [accessMemberId, setAccessMemberId] = useState<number | null>(null);
   const [addOpen,       setAddOpen]       = useState(false);
@@ -4204,8 +4205,24 @@ const DepartmentOfPublicHealth = () => {
                         </div>
                       )}
 
-                      {/* Officers table */}
-                      {filteredPanel.length === 0 ? (
+                      {/* Members table */}
+                      <div className="border-t border-[#131f30]">
+                        <button
+                          type="button"
+                          onClick={() => setPanelMembersCollapsed(c => !c)}
+                          className="flex w-full items-center gap-2 bg-[#070d16] px-6 py-2.5 text-left hover:bg-[#081422] transition-colors"
+                          aria-expanded={!panelMembersCollapsed}
+                        >
+                          <Users className="h-3.5 w-3.5 shrink-0 text-[#f4c542]" />
+                          <span className="text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Members</span>
+                          <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] font-black text-[#3f5470]">{filteredPanel.length}</span>
+                          {panelMembersCollapsed
+                            ? <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-[#526179]" />
+                            : <ChevronUp className="ml-auto h-4 w-4 shrink-0 text-[#526179]" />}
+                        </button>
+
+                      {!panelMembersCollapsed && (
+                      filteredPanel.length === 0 ? (
                         <div className="flex min-h-[200px] flex-col items-center justify-center gap-2">
                           <Users className="h-8 w-8 text-[#1e2e42]" />
                           <p className="text-sm font-bold text-[#3f5470]">No members found.</p>
@@ -4281,7 +4298,9 @@ const DepartmentOfPublicHealth = () => {
                             </tbody>
                           </table>
                         </div>
+                      )
                       )}
+                      </div>
                     </div>
 
                     <PermissionAccessOverview

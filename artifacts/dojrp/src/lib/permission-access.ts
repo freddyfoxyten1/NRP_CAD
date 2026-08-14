@@ -11,6 +11,7 @@ const IAB = 'border-[#f4c542]/40 bg-[#f4c542]/10 text-[#f4c542]';
 const LOGS = 'border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8]';
 const LEGAL = 'border-[#a78bfa]/40 bg-[#a78bfa]/10 text-[#a78bfa]';
 const TERMINAL = 'border-[#ff7070]/40 bg-[#ff7070]/10 text-[#ff9090]';
+const CAD_VIEW = 'border-[#4384ff]/40 bg-[#4384ff]/10 text-[#4384ff]';
 const DEPT_PANEL = 'border-[#f4c542]/40 bg-[#f4c542]/10 text-[#f4c542]';
 const RESOURCES = 'border-[#a78bfa]/40 bg-[#a78bfa]/10 text-[#a78bfa]';
 const DIVISION = 'border-[#38bdf8]/40 bg-[#38bdf8]/10 text-[#38bdf8]';
@@ -28,6 +29,7 @@ type StaffMemberAccess = {
   can_access_system_logs?: boolean;
   can_access_terms_privacy?: boolean;
   can_access_terminal_offline?: boolean;
+  can_access_doc_dps_cad?: boolean;
 };
 
 /** Website-wide permissions granted via staff title or individual roster flags. */
@@ -58,6 +60,9 @@ export function collectStaffWebsitePermissions(
   }
   if (member.can_access_terminal_offline) {
     badges.push({ key: 'terminal_lockdown', label: 'Terminal Lockdown', className: TERMINAL });
+  }
+  if (member.can_access_doc_dps_cad) {
+    badges.push({ key: 'doc_dps_cad', label: 'DOC & DPS CAD', className: CAD_VIEW });
   }
 
   return badges;
