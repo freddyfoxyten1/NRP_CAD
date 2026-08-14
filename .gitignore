@@ -58,3 +58,5 @@ Thumbs.db
 # Local CAD SQLite database files (folder kept via cad-database/.gitignore)
 cad-database/*.sqlite
 cad-database/*.sqlite-*
+artifacts/api-server/cad-database/
+lib/db/cad-database/

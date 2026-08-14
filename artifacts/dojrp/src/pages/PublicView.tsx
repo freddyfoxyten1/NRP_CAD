@@ -4,7 +4,7 @@
 // No authentication required. Displays live stats, announcements, gallery,
 // and press/news items for the DOJRP community.
 // ----
-import { useCallback, useEffect, useRef, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { sectionFromPathname } from "@/hooks/usePortalSection";
 import {
@@ -151,6 +151,102 @@ const SERVER_STORE_URL_FALLBACK = (import.meta.env.VITE_SERVER_STORE_URL as stri
 
 const VALID_TABS = new Set<Tab>(["home", "events", "departments", "announcements", "gallery", "press", "staff", "store"]);
 
+interface DpsEvent {
+  id: number;
+  title: string;
+  event_date: string;
+  event_time: string | null;
+  location: string | null;
+  purpose: string | null;
+  hosted_by?: string | null;
+  hosting_department?: string | null;
+  source?: "dps" | "dph" | "staff";
+  is_staff_event?: boolean;
+}
+
+/** Public events tab filters — synced to `?events=` in the URL. */
+type PublicEventFilter = "all" | "staff" | "departments" | "dps" | "dph";
+
+const VALID_EVENT_FILTERS = new Set<PublicEventFilter>(["all", "staff", "departments", "dps", "dph"]);
+
+const EVENT_FILTER_PARAM = "events";
+
+const PRIMARY_EVENT_FILTERS: { id: "all" | "staff" | "departments"; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "staff", label: "Staff Events" },
+  { id: "departments", label: "Department Events" },
+];
+
+const DEPARTMENT_EVENT_FILTERS: { id: "departments" | "dps" | "dph"; label: string }[] = [
+  { id: "departments", label: "All Departments" },
+  { id: "dps", label: "DPS" },
+  { id: "dph", label: "DPH" },
+];
+
+function eventFilterFromSearch(search: string): PublicEventFilter {
+  try {
+    const raw = new URLSearchParams(search).get(EVENT_FILTER_PARAM)?.trim().toLowerCase();
+    if (raw && VALID_EVENT_FILTERS.has(raw as PublicEventFilter)) {
+      return raw as PublicEventFilter;
+    }
+  } catch { /* ignore */ }
+  return "all";
+}
+
+function isDepartmentEventScope(filter: PublicEventFilter): boolean {
+  return filter === "departments" || filter === "dps" || filter === "dph";
+}
+
+function matchesPublicEventFilter(ev: DpsEvent, filter: PublicEventFilter): boolean {
+  switch (filter) {
+    case "all":
+      return true;
+    case "staff":
+      return ev.is_staff_event === true || ev.source === "staff";
+    case "departments":
+      return ev.source === "dps" || ev.source === "dph";
+    case "dps":
+      return ev.source === "dps";
+    case "dph":
+      return ev.source === "dph";
+    default:
+      return true;
+  }
+}
+
+function publicEventsPath(filter: PublicEventFilter): string {
+  if (filter === "all") return publicSectionPath("events");
+  return `${publicSectionPath("events")}?${EVENT_FILTER_PARAM}=${filter}`;
+}
+
+function eventFilterEmptyLabel(filter: PublicEventFilter): string {
+  switch (filter) {
+    case "staff":
+      return "No upcoming staff events scheduled.";
+    case "dps":
+      return "No upcoming DPS events scheduled.";
+    case "dph":
+      return "No upcoming DPH events scheduled.";
+    case "departments":
+      return "No upcoming department events scheduled.";
+    default:
+      return "No upcoming events scheduled.";
+  }
+}
+
+function eventSourceBadge(ev: DpsEvent): { label: string; className: string } | null {
+  if (ev.is_staff_event || ev.source === "staff") {
+    return { label: "Staff", className: "border-[#a78bfa]/30 bg-[#a78bfa]/10 text-[#a78bfa]" };
+  }
+  if (ev.source === "dps") {
+    return { label: "DPS", className: "border-[#4384ff]/30 bg-[#4384ff]/10 text-[#4384ff]" };
+  }
+  if (ev.source === "dph") {
+    return { label: "DPH", className: "border-[#f87171]/30 bg-[#f87171]/10 text-[#f87171]" };
+  }
+  return null;
+}
+
 /** Home is `/`; other public sections use `/public_<section>` (e.g. `/public_store`). */
 function publicSectionPath(tab: Tab): string {
   return tab === "home" ? "/" : `/public_${tab}`;
@@ -202,19 +298,6 @@ function StaffAvatar({ name, discordId, avatarHash }: {
       {initial}
     </div>
   );
-}
-
-interface DpsEvent {
-  id: number;
-  title: string;
-  event_date: string;
-  event_time: string | null;
-  location: string | null;
-  purpose: string | null;
-  hosted_by?: string | null;
-  hosting_department?: string | null;
-  source?: "dps" | "dph" | "staff";
-  is_staff_event?: boolean;
 }
 
 interface IndexInfoContent {
@@ -274,6 +357,11 @@ const PublicView = () => {
   const [serverStoreUrl, setServerStoreUrl] = useState(SERVER_STORE_URL_FALLBACK);
   const [storeProducts, setStoreProducts] = useState<StoreProduct[]>([]);
   const [storeProductsLoading, setStoreProductsLoading] = useState(false);
+  const [events, setEvents] = useState<DpsEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventFilter, setEventFilter] = useState<PublicEventFilter>(() =>
+    eventFilterFromSearch(typeof window !== "undefined" ? window.location.search : ""),
+  );
 
   useEffect(() => {
     const next = tabFromRoute(sectionParam, location.search);
@@ -293,6 +381,26 @@ const PublicView = () => {
     setTabState(next);
     navigate(publicSectionPath(next));
   }, [navigate]);
+
+  const openPublicEvents = useCallback((filter: PublicEventFilter) => {
+    setEventFilter(filter);
+    navigate(publicEventsPath(filter));
+  }, [navigate]);
+
+  const setEventFilterAndUrl = useCallback((filter: PublicEventFilter) => {
+    setEventFilter(filter);
+    navigate(publicEventsPath(filter));
+  }, [navigate]);
+
+  useEffect(() => {
+    if (tab !== "events") return;
+    setEventFilter(eventFilterFromSearch(location.search));
+  }, [tab, location.search]);
+
+  const filteredEvents = useMemo(
+    () => events.filter(ev => matchesPublicEventFilter(ev, eventFilter)),
+    [events, eventFilter],
+  );
 
   const handleSignIn = () => {
     if (getCadSession()) {
@@ -325,8 +433,6 @@ const PublicView = () => {
   }, []);
   const tabScrollRef = useRef<HTMLDivElement | null>(null);
   const [statsLoading,  setStatsLoading]  = useState(true);
-  const [events,        setEvents]        = useState<DpsEvent[]>([]);
-  const [eventsLoading, setEventsLoading] = useState(false);
   const [indexInfo,     setIndexInfo]     = useState<IndexInfoContent | null>(null);
   const [dphIndexInfo,  setDphIndexInfo]  = useState<IndexInfoContent | null>(null);
   const [dpsDivisions,  setDpsDivisions]  = useState<PublicDivision[]>([]);
@@ -1240,14 +1346,61 @@ const PublicView = () => {
         {tab === "events" && (
           <section>
             <SectionHeading icon={CalendarDays} title="Public Events" />
-            {events.length === 0 ? (
+
+            <div className="mb-4 flex flex-wrap gap-2">
+              {PRIMARY_EVENT_FILTERS.map(item => {
+                const active = item.id === "departments"
+                  ? isDepartmentEventScope(eventFilter)
+                  : eventFilter === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setEventFilterAndUrl(item.id === "departments" ? "departments" : item.id)}
+                    className={`rounded-full border px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] transition-colors ${
+                      active
+                        ? "border-[#4384ff]/50 bg-[#4384ff]/15 text-[#4384ff]"
+                        : "border-[#1f3050] bg-[#07111f] text-[#8392aa] hover:border-[#4384ff]/30 hover:text-white"
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {isDepartmentEventScope(eventFilter) && (
+              <div className="mb-5 flex flex-wrap gap-2">
+                {DEPARTMENT_EVENT_FILTERS.map(item => {
+                  const active = eventFilter === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setEventFilterAndUrl(item.id)}
+                      className={`rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-[0.12em] transition-colors ${
+                        active
+                          ? item.id === "dph"
+                            ? "border-[#f87171]/50 bg-[#f87171]/15 text-[#f87171]"
+                            : "border-[#4384ff]/50 bg-[#4384ff]/15 text-[#4384ff]"
+                          : "border-[#1f3050] bg-[#07111f] text-[#526179] hover:border-[#4384ff]/30 hover:text-[#8392aa]"
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {filteredEvents.length === 0 ? (
               <div className="flex flex-col items-center gap-3 rounded-xl border border-[#0f1b28] py-16 text-center">
                 <CalendarDays className="h-8 w-8 text-[#1e2e42]" />
-                <p className="text-sm font-bold text-[#2a3a50]">No upcoming events scheduled.</p>
+                <p className="text-sm font-bold text-[#2a3a50]">{eventFilterEmptyLabel(eventFilter)}</p>
               </div>
             ) : (
               <div className="space-y-3">
-                {events.map(ev => {
+                {filteredEvents.map(ev => {
                   const dateObj = new Date(ev.event_date + 'T12:00:00');
                   const isPast = dateObj < new Date();
                   const dateStr = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -1260,6 +1413,7 @@ const PublicView = () => {
                         ev.hosted_by ? `Hosted by ${ev.hosted_by}` : null,
                         ev.hosting_department || null,
                       ].filter(Boolean).join(' · ');
+                  const badge = eventSourceBadge(ev);
                   return (
                     <div key={`${ev.source ?? 'dps'}-${ev.id}`} className={`flex items-start gap-3 rounded-xl border px-4 py-4 transition-all sm:gap-5 sm:px-6 sm:py-5 ${isPast ? 'border-[#0f1b28] bg-[#04080e] opacity-60' : 'border-[#1b2738] bg-[#070d16] hover:border-[#2f66ee]/40'}`}>
                       {/* Date badge */}
@@ -1274,8 +1428,13 @@ const PublicView = () => {
                       </div>
                       {/* Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <p className="text-sm font-black text-white">{ev.title}</p>
+                          {badge && (
+                            <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.12em] ${badge.className}`}>
+                              {badge.label}
+                            </span>
+                          )}
                           {isPast && <span className="rounded-full bg-[#0f1b28] px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-[#3f5470]">Past</span>}
                         </div>
                         <p className="mt-1 text-xs text-[#526179]">
@@ -1384,14 +1543,7 @@ const PublicView = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (getCadSession()) {
-                        navigate("/dps_event-calendar");
-                      } else {
-                        sessionStorage.setItem("post_login_redirect", "/dps_event-calendar");
-                        setIsLoginOpen(true);
-                      }
-                    }}
+                    onClick={() => openPublicEvents("dps")}
                     className="flex items-center justify-center gap-2 rounded-xl border border-[#2f66ee]/40 bg-[#2f66ee]/10 px-5 py-2.5 text-xs font-black text-[#4384ff] transition-all hover:-translate-y-0.5 hover:bg-[#2f66ee]/20 sm:justify-start"
                   >
                     <CalendarDays className="h-3.5 w-3.5" />
@@ -1485,14 +1637,7 @@ const PublicView = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (getCadSession()) {
-                        navigate("/dph_event-calendar");
-                      } else {
-                        sessionStorage.setItem("post_login_redirect", "/dph_event-calendar");
-                        setIsLoginOpen(true);
-                      }
-                    }}
+                    onClick={() => openPublicEvents("dph")}
                     className="flex items-center justify-center gap-2 rounded-xl border border-[#dc2626]/40 bg-[#dc2626]/10 px-5 py-2.5 text-xs font-black text-[#f87171] transition-all hover:-translate-y-0.5 hover:bg-[#dc2626]/20 sm:justify-start"
                   >
                     <CalendarDays className="h-3.5 w-3.5" />
