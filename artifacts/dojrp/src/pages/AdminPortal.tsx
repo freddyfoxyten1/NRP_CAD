@@ -25,6 +25,7 @@ import {
 } from '@/lib/legal-defaults';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { getStaffRosterTitle, getStaffSidebarTitle } from '@/lib/display-rank';
+import { sortByRankThenUsername } from '@/lib/roster-sort';
 import { cadModeLabel, type CadMode } from '@/hooks/useCadStatus';
 
 type StoreProductRow = StoreProduct & { id: number; sort_order?: number | null; created_at?: string };
@@ -3393,16 +3394,13 @@ const AdminPortal = () => {
                   {/* -- Staff member table ---- */}
                   {(() => {
                     const q        = srPanelSearch.toLowerCase();
-                    const filtered = staffRosterMembers
-                      .filter(m =>
+                    const filtered = sortByRankThenUsername(
+                      staffRosterMembers.filter(m =>
                         !q || m.username.toLowerCase().includes(q) || (m.staff_rank ?? '').toLowerCase().includes(q) || (m.discord_username ?? '').toLowerCase().includes(q)
-                      )
-                      .sort((a, b) => {
-                        const aOrder = staffRanks.find(r => r.name.toLowerCase() === (a.staff_rank ?? '').toLowerCase())?.sort_order ?? 999999;
-                        const bOrder = staffRanks.find(r => r.name.toLowerCase() === (b.staff_rank ?? '').toLowerCase())?.sort_order ?? 999999;
-                        if (aOrder !== bOrder) return aOrder - bOrder;
-                        return a.username.localeCompare(b.username);
-                      });
+                      ),
+                      staffRanks,
+                      m => m.staff_rank ?? null,
+                    );
                     const fmt = (d: string | null) => {
                       if (!d) return ' - ';
                       try {

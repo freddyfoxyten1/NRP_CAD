@@ -8,6 +8,7 @@
 import { Router } from "express";
 import { pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
+import { sortByCallsignThenUsername } from "../lib/roster-sort.js";
 import { wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import {
   DPH_DEFAULT_CALLSIGN,
@@ -492,7 +493,7 @@ async function loadDivisionRankMembers(divisionId: number | null, rankName: stri
      ORDER BY COALESCE(d.username, p.username)`,
     [rankName, divisionId]
   );
-  return result.rows;
+  return sortByCallsignThenUsername(result.rows);
 }
 
 /** Sync callsigns for members assigned to a division rank (writes dph_users.callsign). */

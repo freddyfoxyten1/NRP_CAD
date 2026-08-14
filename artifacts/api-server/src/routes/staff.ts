@@ -4,6 +4,7 @@ import { writeLog } from "../lib/audit-log";
 import { isSuperAdminDiscordId } from "../lib/superadmin";
 import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
+import { sortStaffByRank } from "../lib/roster-sort.js";
 
 const router = Router();
 
@@ -473,9 +474,14 @@ router.get("/staff/roster", async (req, res) => {
   const all = req.query.all === "1";
   try {
     const groupsRes = await pool.query<{ name: string }>(`SELECT name FROM staff_rank_groups`);
-    const ranksRes = await pool.query<{ name: string }>(`SELECT name FROM staff_ranks`);
+    const ranksRes = await pool.query<{ name: string; sort_order: number }>(
+      `SELECT name, sort_order FROM staff_ranks`,
+    );
     const groupNames = groupsRes.rows.map(r => String(r.name).trim().toLowerCase()).filter(Boolean);
     const rankNames = ranksRes.rows.map(r => String(r.name).trim().toLowerCase()).filter(Boolean);
+    const rankOrderByName = new Map(
+      ranksRes.rows.map(r => [String(r.name).trim().toLowerCase(), Number(r.sort_order ?? 999_999)]),
+    );
 
     const r = await pool.query(
       `SELECT p.id, p.username, p.discord_username, p.discord_id, p.avatar_hash,
@@ -497,7 +503,7 @@ router.get("/staff/roster", async (req, res) => {
        ORDER BY COALESCE(sr.sort_order, 999999), p.username`,
       [groupNames, rankNames],
     );
-    res.json(r.rows);
+    res.json(sortStaffByRank(r.rows, rankOrderByName));
   } catch (err) {
     req.log?.error?.({ err }, "staff/roster GET error");
     res.status(500).json({ error: "Unable to load staff roster." });
