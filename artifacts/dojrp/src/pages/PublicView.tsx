@@ -834,7 +834,7 @@ const PublicView = () => {
               <SectionHeading icon={Shield} title="About DOJRP" />
               <div className="mb-6 rounded-xl border border-[#131f30] bg-[#070d16] px-4 py-6 sm:px-8 sm:py-8">
                 <p className="text-sm leading-relaxed text-[#a8b7cd]">
-                  DOJ:RP is one of the largest ER:LC servers out there. With multiple departments including DPS and DPH and sub-divisions like SWAT, Hazmat, SRU and many more. We aim to ensure that the server is fun for everyone who joins us here in DOJ. We always aim for everyone to have a great time with the amazing staff team, great roleplays and fun events.
+                  DOJ:RP is one of the largest ER:LC servers out there. With multiple departments including DPS and DPH and divisions like Hazmat, SRU, HSU and many more. We aim to ensure that the server is fun for everyone who joins us here in DOJ. We always aim for everyone to have a great time with the amazing staff team, great roleplays and fun events.
                 </p>
                 <p className="mt-4 text-sm leading-relaxed text-[#a8b7cd]">
                   Whether you want to patrol as a cop, or save peoples lives in fires or accidents, or have fun roleplaying as a civilian getting up to all sorts of crime, there's always a place here for you at DOJ.
