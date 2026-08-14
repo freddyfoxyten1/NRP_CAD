@@ -698,6 +698,15 @@ function bootstrapSchema(db: Database): void {
     }
   } catch { /* table may not exist yet */ }
 
+  // DPS titles/ranks are user-defined only — remove any legacy Executive Team title group.
+  try {
+    db.exec(`
+      DELETE FROM dps_ranks
+      WHERE group_id IN (SELECT id FROM dps_rank_groups WHERE lower(name) = 'executive team');
+      DELETE FROM dps_rank_groups WHERE lower(name) = 'executive team';
+    `);
+  } catch { /* tables may not exist yet */ }
+
   try {
     const dphUserCols = db.prepare(`PRAGMA table_info(dph_users)`).all() as { name: string }[];
     for (const [column, def] of [

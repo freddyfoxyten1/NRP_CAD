@@ -983,6 +983,12 @@ async function syncDivisionDiscordRoles(
     await pool.query(`ALTER TABLE dps_rank_groups ADD COLUMN IF NOT EXISTS panel_access boolean NOT NULL DEFAULT false`);
     // Division oversight — title + ranks can view all division resources/rosters even when restricted
     await pool.query(`ALTER TABLE dps_rank_groups ADD COLUMN IF NOT EXISTS division_oversight boolean NOT NULL DEFAULT false`);
+    // DPS titles/ranks are user-defined only — remove any legacy Executive Team title group.
+    await pool.query(
+      `DELETE FROM dps_ranks
+       WHERE group_id IN (SELECT id FROM dps_rank_groups WHERE lower(name) = 'executive team')`,
+    );
+    await pool.query(`DELETE FROM dps_rank_groups WHERE lower(name) = 'executive team'`);
     await pool.query(`ALTER TABLE dps_ranks ADD COLUMN IF NOT EXISTS discord_role_id text`);
     await pool.query(`ALTER TABLE dps_ranks ADD COLUMN IF NOT EXISTS callsign_type text`);
     await pool.query(`ALTER TABLE dps_ranks ADD COLUMN IF NOT EXISTS callsign_static text`);
@@ -1191,7 +1197,6 @@ router.get("/roster", async (req, res) => {
                 p.staff_role,
                 CASE
                   WHEN rg.name IS NOT NULL AND lower(rg.name) != 'community members' THEN rg.name
-                  WHEN lower(COALESCE(p.staff_role, '')) = 'executive team' THEN 'Executive Team'
                   ELSE NULL
                 END AS group_name,
                 COALESCE(rg.sort_order, 999)  AS group_sort_order,
@@ -1248,7 +1253,6 @@ router.get("/roster", async (req, res) => {
                 p.staff_role,
                 CASE
                   WHEN rg.name IS NOT NULL AND lower(rg.name) != 'community members' THEN rg.name
-                  WHEN lower(COALESCE(p.staff_role, '')) = 'executive team' THEN 'Executive Team'
                   ELSE NULL
                 END AS group_name,
                 COALESCE(rg.sort_order, 999)  AS group_sort_order,

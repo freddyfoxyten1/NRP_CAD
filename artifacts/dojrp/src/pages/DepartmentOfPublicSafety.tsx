@@ -2224,9 +2224,7 @@ const DepartmentOfPublicSafety = () => {
       ranks,
       departmentRankName,
     );
-    return rosterSearch.trim()
-      ? grouped.filter(g => g.members.length > 0)
-      : grouped;
+    return grouped.filter(g => g.members.length > 0);
   }, [filteredRoster, groups, ranks, rosterSearch]);
   const visibleRosterCount = useMemo(
     () => groupedRoster.reduce((sum, g) => sum + g.members.length, 0),

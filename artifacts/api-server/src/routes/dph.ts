@@ -552,7 +552,10 @@ router.get("/dph", async (req, res) => {
               COALESCE(d.fou, false) AS fou,
               COALESCE(d.can_view_all_resources, false) AS can_view_all_resources,
               COALESCE(d.can_access_iab, false) AS can_access_iab,
-              COALESCE(rg.name, 'Community Members') AS group_name,
+              CASE
+                WHEN rg.name IS NOT NULL AND lower(rg.name) != 'community members' THEN rg.name
+                ELSE NULL
+              END AS group_name,
               COALESCE(rg.sort_order, 999) AS group_sort_order,
               COALESCE(dr.sort_order, 999) AS rank_sort_order
        FROM cad_user_profiles p
