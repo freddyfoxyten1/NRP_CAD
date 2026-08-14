@@ -21,6 +21,7 @@ import DpsPublicRosterModal from "@/components/overlays/DpsPublicRosterModal";
 import DocumentEditor from "@/components/editor/DocumentEditor";
 import PdfViewer from "@/components/shared/PdfViewer";
 import { getCadSession } from "@/lib/cad-session";
+import { sortByRankThenUsername } from "@/lib/roster-sort";
 
 // -- Types ----
 interface Stats {
@@ -949,12 +950,8 @@ const PublicView = () => {
               ? (staffRanks.find(r => r.name.toLowerCase() === rankName.toLowerCase().trim()) ?? null)
               : null;
 
-          const byRankThenName = (a: StaffMember, b: StaffMember) => {
-            const rA = getRankMeta(a.staff_rank)?.sort_order ?? 999999;
-            const rB = getRankMeta(b.staff_rank)?.sort_order ?? 999999;
-            if (rA !== rB) return rA - rB;
-            return (a.username || "").localeCompare(b.username || "");
-          };
+          const byRankThenName = (list: StaffMember[]) =>
+            sortByRankThenUsername(list, staffRanks, m => m.staff_rank);
 
           const memberBelongsToGroup = (m: StaffMember, group: StaffGroup) => {
             const rankMeta = getRankMeta(m.staff_rank);
@@ -968,12 +965,12 @@ const PublicView = () => {
 
           const assignedIds = new Set<number>();
           const grouped = sortedGroups.map(g => {
-            const members = filtered.filter(m => memberBelongsToGroup(m, g)).sort(byRankThenName);
+            const members = byRankThenName(filtered.filter(m => memberBelongsToGroup(m, g)));
             members.forEach(m => assignedIds.add(m.id));
             return { key: `g${g.id}`, label: g.name, members };
           });
 
-          const orphans = filtered.filter(m => !assignedIds.has(m.id)).sort(byRankThenName);
+          const orphans = byRankThenName(filtered.filter(m => !assignedIds.has(m.id)));
           if (orphans.length > 0) {
             grouped.push({ key: "other", label: "Other Staff", members: orphans });
           }

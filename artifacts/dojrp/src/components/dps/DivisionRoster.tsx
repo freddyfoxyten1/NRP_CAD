@@ -119,11 +119,10 @@ function assignmentForDivision(m: DivisionRosterMember, division: DpsDivision) {
   ) ?? null;
 }
 
+import { compareCallsigns } from '@/lib/roster-sort';
+
 function byCallsign(a: DivisionRosterMember, b: DivisionRosterMember) {
-  const nA = parseInt((a.callsign ?? '').split('-').pop() ?? '', 10);
-  const nB = parseInt((b.callsign ?? '').split('-').pop() ?? '', 10);
-  if (!isNaN(nA) && !isNaN(nB)) return nA - nB;
-  return (a.callsign ?? '').localeCompare(b.callsign ?? '');
+  return compareCallsigns(a.callsign, b.callsign);
 }
 
 /** Sort members by division rank hierarchy (sort_order), then callsign within the same rank. */

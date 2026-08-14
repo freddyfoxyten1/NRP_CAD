@@ -12,6 +12,7 @@ import {
   refreshCadAvatarsFromGuildMembers,
 } from "../lib/dph-discord.js";
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
+import { sortByCallsignThenUsername, sortDepartmentPersonnel } from "../lib/roster-sort.js";
 import {
   DPH_DEFAULT_CALLSIGN,
   loadDphDivisionAssignments,
@@ -548,6 +549,7 @@ router.get("/dph", async (req, res) => {
               p.discord_username, p.discord_id, p.avatar_hash,
               d.callsign, d.dph_rank, d.dph_role, d.division_rank, d.status, d.appointed_date,
               d.certifications,
+              p.staff_role,
               COALESCE(d.pob, false) AS pob,
               COALESCE(d.iab, false) AS iab,
               COALESCE(d.hsu, false) AS hsu,
@@ -556,17 +558,27 @@ router.get("/dph", async (req, res) => {
               COALESCE(d.can_view_all_resources, false) AS can_view_all_resources,
               COALESCE(d.can_access_iab, false) AS can_access_iab,
               COALESCE(rg.name, 'Community Members') AS group_name,
-              COALESCE(rg.sort_order, 999) AS group_sort_order
+              COALESCE(rg.sort_order, 999) AS group_sort_order,
+              COALESCE(dr.sort_order, 999) AS rank_sort_order
        FROM cad_user_profiles p
        JOIN dph_users d ON d.profile_id = p.id
        LEFT JOIN dph_ranks dr ON lower(dr.name) = lower(d.dph_rank)
        LEFT JOIN dph_rank_groups rg ON dr.group_id = rg.id
        ${where}
        ORDER BY COALESCE(rg.sort_order, 999), ${rankOrderSubquery},
+                d.callsign,
                 COALESCE(d.username, p.username)`
     );
 
-    const ids = result.rows.map((r: { id: number }) => r.id);
+    const sortedRows = sortDepartmentPersonnel(
+      result.rows,
+      (row) => Number(row.group_sort_order ?? 999),
+      (row) => Number(row.rank_sort_order ?? 999),
+      (row) => row.callsign ?? null,
+      (row) => String(row.username ?? ""),
+    );
+
+    const ids = sortedRows.map((r: { id: number }) => r.id);
     let assignmentMap = new Map<number, DphDivisionAssignment[]>();
     try {
       assignmentMap = await loadDphDivisionAssignments(ids);
@@ -574,7 +586,7 @@ router.get("/dph", async (req, res) => {
       req.log.warn({ err: assignErr }, "dph GET division assignments load failed");
     }
 
-    res.json(result.rows.map((row: Record<string, unknown> & { id: number; division_rank: string | null }) => {
+    res.json(sortedRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null }) => {
       const assignments = assignmentMap.get(row.id) ?? [];
       const primary = assignments[0];
       return {

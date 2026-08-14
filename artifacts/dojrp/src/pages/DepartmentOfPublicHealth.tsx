@@ -31,6 +31,7 @@ import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
+import { buildPersonnelTitleGroups, buildPersonnelRankSections, sortByRankThenCallsign } from '@/lib/roster-sort';
 
 // ── Access control ─────────────────────────────────────────────────────────────
 // Panel access is now driven by the panel_access flag on each rank group.
@@ -2210,52 +2211,43 @@ const DepartmentOfPublicHealth = () => {
   });
   const getRankMeta = (rankName: string | null | undefined) =>
     rankName ? (ranks.find(r => r.name.toLowerCase() === rankName.toLowerCase().trim()) ?? null) : null;
-  const byCallsign = (a: RosterMember, b: RosterMember) => {
-    const nA = parseInt((a.callsign ?? '').split('-').pop() ?? '', 10);
-    const nB = parseInt((b.callsign ?? '').split('-').pop() ?? '', 10);
-    if (!isNaN(nA) && !isNaN(nB)) return nA - nB;
-    return (a.callsign ?? '').localeCompare(b.callsign ?? '');
+  const departmentRankName = (m: RosterMember) => m.dph_rank || m.rank || null;
+  const sortRosterMembers = (list: RosterMember[]) =>
+    sortByRankThenCallsign(list, ranks, departmentRankName);
+  const groupedRoster = useMemo(() => {
+    const grouped = buildPersonnelTitleGroups(
+      filteredRoster,
+      groups,
+      ranks,
+      departmentRankName,
+    );
+    return rosterSearch.trim()
+      ? grouped.filter(g => g.members.length > 0)
+      : grouped;
+  }, [filteredRoster, groups, ranks, rosterSearch]);
+  const visibleRosterCount = useMemo(
+    () => groupedRoster.reduce((sum, g) => sum + g.members.length, 0),
+    [groupedRoster],
+  );
+  const rosterRankSections = (groupLabel: string, members: RosterMember[]) => {
+    const groupDef = groups.find(g => g.name === groupLabel);
+    const groupRanks = groupDef
+      ? ranks.filter(r => r.group_id === groupDef.id)
+      : ranks;
+    return buildPersonnelRankSections(
+      members,
+      groupRanks,
+      departmentRankName,
+      { hideEmpty: Boolean(rosterSearch.trim()) },
+    );
   };
-  const byRankThenCallsign = (a: RosterMember, b: RosterMember) => {
-    const rA = getRankMeta(a.dph_rank)?.sort_order ?? 999;
-    const rB = getRankMeta(b.dph_rank)?.sort_order ?? 999;
-    if (rA !== rB) return rA - rB;
-    return byCallsign(a, b);
-  };
-  /** Title heading for personnel roster — never "Community Members". */
-  const personnelGroupLabel = (m: RosterMember): string | null => {
-    const raw = (m.group_name ?? '').trim();
-    if (raw && raw.toLowerCase() !== 'community members') return raw;
-    if ((m.staff_role ?? '').trim().toLowerCase() === 'executive team') return 'Executive Team';
-    return null;
-  };
-  const groupedRoster = (() => {
-    const safeGroups = (Array.isArray(groups) ? groups : [])
-      .filter(g => g.name.trim().toLowerCase() !== 'community members');
-    const defined = safeGroups.map(g => ({
-      id: g.id as number | null,
-      label: g.name,
-      members: filteredRoster.filter(m => personnelGroupLabel(m) === g.name).sort(byRankThenCallsign),
-    }));
-    const definedLabels = new Set(safeGroups.map(g => g.name));
-    const orphanByLabel = new Map<string, RosterMember[]>();
-    for (const m of filteredRoster) {
-      const label = personnelGroupLabel(m);
-      if (!label || definedLabels.has(label)) continue;
-      if (!orphanByLabel.has(label)) orphanByLabel.set(label, []);
-      orphanByLabel.get(label)!.push(m);
-    }
-    for (const [label, members] of orphanByLabel) {
-      defined.push({ id: null, label, members: members.sort(byRankThenCallsign) });
-    }
-    return defined;
-  })();
+  const rankCollapseKey = (groupLabel: string, rankLabel: string) => `${groupLabel}::${rankLabel}`;
   const toggleGroup = (label: string) => setCollapsed(p => ({ ...p, [label]: !p[label] }));
 
-  const filteredPanel = (Array.isArray(panelMembers) ? panelMembers : []).filter(m => {
+  const filteredPanel = sortRosterMembers((Array.isArray(panelMembers) ? panelMembers : []).filter(m => {
     const q = panelSearch.toLowerCase();
     return !q || m.username.toLowerCase().includes(q) || (m.dph_rank || m.rank).toLowerCase().includes(q) || m.callsign?.toLowerCase().includes(q);
-  });
+  }));
 
   const formatDate = (d: string | null) => {
     if (!d) return '—';
@@ -3024,11 +3016,11 @@ const DepartmentOfPublicHealth = () => {
                       className="h-9 w-full rounded-lg border border-[#1f3050] bg-[#07111f] pl-9 pr-4 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#2f70ff]" />
                   </div>
                   <span className="shrink-0 text-[10px] font-black text-[#526179]">
-                    {filteredRoster.length} member{filteredRoster.length !== 1 ? 's' : ''}
+                    {visibleRosterCount} member{visibleRosterCount !== 1 ? 's' : ''}
                   </span>
                 </div>
 
-                {filteredRoster.length === 0 ? (
+                {visibleRosterCount === 0 ? (
                   <div className="flex min-h-[260px] flex-col items-center justify-center gap-2">
                     <Users className="h-8 w-8 text-[#1e2e42]" />
                     <p className="text-sm font-bold text-[#3f5470]">
@@ -3057,22 +3049,16 @@ const DepartmentOfPublicHealth = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {groupedRoster.map(group => {
-                          const groupDef  = groups.find(g => g.name === group.label);
-                          const groupRanks = groupDef
-                            ? ranks.filter(r => r.group_id === groupDef.id).sort((a, b) => a.sort_order - b.sort_order)
-                            : [];
-                          return (
-                            <React.Fragment key={group.label}>
-                              {/* ── Group header row ──────────────────────────────── */}
+                        {groupedRoster.map(group => (
+                          <React.Fragment key={group.label}>
                               <tr
                                 className="cursor-pointer border-b border-t border-[#131f30] bg-[#0a1525] hover:bg-[#0c1830] transition-colors"
                                 onClick={() => toggleGroup(group.label)}>
                                 <td colSpan={8 + rosterDivisions.length} className="px-5 py-2.5">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {collapsed[group.label]
-                                      ? <ChevronRight className="h-3.5 w-3.5 text-[#4384ff] shrink-0" />
-                                      : <ChevronDown  className="h-3.5 w-3.5 text-[#4384ff] shrink-0" />}
+                                      ? <ChevronRight className="h-3.5 w-3.5 text-[#f87171] shrink-0" />
+                                      : <ChevronDown  className="h-3.5 w-3.5 text-[#f87171] shrink-0" />}
                                     <span className="text-xs font-black text-white">{group.label}</span>
                                     <span className="rounded-full bg-[#172235] px-2 py-0.5 text-[9px] font-black text-[#526179]">
                                       {group.members.length}
@@ -3081,20 +3067,42 @@ const DepartmentOfPublicHealth = () => {
                                 </td>
                               </tr>
 
-                              {/* ── Member rows ───────────────────────────────────── */}
-                              {!collapsed[group.label] && group.members.map(m => {
-                                const rankMeta  = getRankMeta(m.dph_rank || m.rank);
+                              {!collapsed[group.label] && rosterRankSections(group.label, group.members).map(rankSection => {
+                                const rankKey = rankCollapseKey(group.label, rankSection.label);
+                                const rankMeta = getRankMeta(rankSection.label);
                                 const chipColor = rankMeta?.color_hex ?? null;
                                 return (
+                                  <React.Fragment key={rankKey}>
+                                    <tr
+                                      className="cursor-pointer border-b border-[#172235] bg-[#081422] hover:bg-[#0a1525] transition-colors"
+                                      onClick={() => toggleGroup(rankKey)}>
+                                      <td colSpan={8 + rosterDivisions.length} className="px-5 py-2 pl-10">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          {collapsed[rankKey]
+                                            ? <ChevronRight className="h-3 w-3 text-[#fca5a5] shrink-0" />
+                                            : <ChevronDown className="h-3 w-3 text-[#fca5a5] shrink-0" />}
+                                          {rankMeta?.insignia_url && (
+                                            <img src={rankMeta.insignia_url} alt="" className="h-3.5 w-3.5 object-contain shrink-0"
+                                              onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                          )}
+                                          <span className="text-[11px] font-black" style={{ color: chipColor ?? '#a8b7cd' }}>
+                                            {rankSection.label}
+                                          </span>
+                                          <span className="rounded-full bg-[#172235] px-2 py-0.5 text-[9px] font-black text-[#526179]">
+                                            {rankSection.members.length}
+                                          </span>
+                                        </div>
+                                      </td>
+                                    </tr>
+
+                                    {!collapsed[rankKey] && rankSection.members.map(m => (
                                   <tr key={m.id} className="border-b border-[#0f1b28] hover:bg-[#081422] transition-colors">
-                                    {/* Name */}
-                                    <td className="px-5 py-3.5">
+                                    <td className="px-5 py-3.5 pl-14">
                                       <div className="flex items-center gap-2">
                                         <DiscordAvatar name={m.discord_username || m.username} discordId={m.discord_id} avatarHash={m.avatar_hash} />
                                         <span className="text-xs font-black text-white">{m.username || '—'}</span>
                                       </div>
                                     </td>
-                                    {/* Rank */}
                                     <td className="px-4 py-3.5">
                                       <div className="flex items-center gap-1.5">
                                         {rankMeta?.insignia_url && (
@@ -3107,9 +3115,8 @@ const DepartmentOfPublicHealth = () => {
                                         </span>
                                       </div>
                                     </td>
-                                    {/* Callsign */}
                                     <td className="px-4 py-3.5">
-                                      <span className="inline-flex items-center rounded border border-[#1b2d44] bg-[#070d16] px-2 py-0.5 font-mono text-[10px] font-black text-[#4384ff]">
+                                      <span className="inline-flex items-center rounded border border-[#3a1b1b] bg-[#120808] px-2 py-0.5 font-mono text-[10px] font-black text-[#f87171]">
                                         {m.callsign || '—'}
                                       </span>
                                     </td>
@@ -3138,11 +3145,12 @@ const DepartmentOfPublicHealth = () => {
                                       </div>
                                     </td>
                                   </tr>
+                                    ))}
+                                  </React.Fragment>
                                 );
                               })}
-                            </React.Fragment>
-                          );
-                        })}
+                          </React.Fragment>
+                        ))}
                       </tbody>
                     </table>
                   </div>

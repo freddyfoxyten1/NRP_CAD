@@ -11,6 +11,7 @@ import PdfViewer from '@/components/shared/PdfViewer';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { getStaffRosterTitle, getStaffSidebarTitle } from '@/lib/display-rank';
+import { sortByRankThenUsername } from '@/lib/roster-sort';
 
 // ── Access control ─────────────────────────────────────────────────────────────
 const STAFF_ROLE_GROUPS = ['Executive Team', 'Owner', 'Executive', 'Management', 'Admin', 'Moderation'];
@@ -377,10 +378,18 @@ const StaffPortalIndex = () => {
   const sortedGroups = [...groups].sort((a, b) => a.sort_order - b.sort_order);
   const groupedRoster = sortedGroups.map(g => ({
     id: g.id, label: g.name, locked: g.locked,
-    members: filteredMembers.filter(m => (m.staff_role ?? m.role) === g.name),
+    members: sortByRankThenUsername(
+      filteredMembers.filter(m => (m.staff_role ?? m.role) === g.name),
+      ranks,
+      m => m.staff_rank ?? m.rank ?? null,
+    ),
   }));
   const definedLabels = new Set(groups.map(g => g.name));
-  const orphans = filteredMembers.filter(m => !definedLabels.has(m.staff_role ?? m.role ?? ''));
+  const orphans = sortByRankThenUsername(
+    filteredMembers.filter(m => !definedLabels.has(m.staff_role ?? m.role ?? '')),
+    ranks,
+    m => m.staff_rank ?? m.rank ?? null,
+  );
   if (orphans.length > 0) groupedRoster.push({ id: -1, label: 'Other', locked: false, members: orphans });
   const totalVisible = filteredMembers.length;
 

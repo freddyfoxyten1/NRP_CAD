@@ -3,6 +3,7 @@ import { isUniqueViolation, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
 import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
+import { sortByCallsignThenUsername, sortDepartmentPersonnel } from "../lib/roster-sort.js";
 
 const router = Router();
 
@@ -1200,6 +1201,7 @@ router.get("/roster", async (req, res) => {
                   ELSE NULL
                 END AS group_name,
                 COALESCE(rg.sort_order, 999)  AS group_sort_order,
+                COALESCE(dr.sort_order, 999)  AS rank_sort_order,
                 dd.name AS division_name,
                 COALESCE(dd.sort_order, 999) AS division_sort_order
          FROM cad_user_profiles p
@@ -1218,7 +1220,14 @@ router.get("/roster", async (req, res) => {
       } catch (assignErr) {
         req.log.warn({ err: assignErr }, "roster GET division assignments load failed");
       }
-      res.json(result.rows.map((row: Record<string, unknown> & { id: number; division_rank: string | null; division_name: string | null }) => {
+      const sortedRows = sortDepartmentPersonnel(
+        result.rows,
+        (row) => Number(row.group_sort_order ?? 999),
+        (row) => Number(row.rank_sort_order ?? 999),
+        (row) => (row.callsign as string | null | undefined) ?? null,
+        (row) => String(row.username ?? ""),
+      );
+      res.json(sortedRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null; division_name: string | null }) => {
         const assignments = assignmentMap.get(row.id) ?? [];
         // Prefer multi-assignment primary; fall back to legacy single join fields
         const primary = assignments[0];
@@ -2959,7 +2968,7 @@ async function loadDivisionRankMembers(divisionId: number | null, rankName: stri
      ORDER BY COALESCE(d.username, p.username)`,
     [rankName, divisionId]
   );
-  return result.rows;
+  return sortByCallsignThenUsername(result.rows);
 }
 
 /** Sync callsigns for officers assigned to a division rank (writes dps_users.callsign). */
