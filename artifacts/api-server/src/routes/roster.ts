@@ -4,6 +4,7 @@ import { writeLog } from "../lib/audit-log.js";
 import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 import { sortByCallsignThenUsername, sortDepartmentPersonnel } from "../lib/roster-sort.js";
+import { buildLinkedRankByRoleId, pickHighestLinkedDiscordRole } from "../lib/discord-rank-pick.js";
 
 const router = Router();
 
@@ -502,17 +503,12 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
     );
     if (ranksRes.rows.length === 0) return { assigned: 0, skipped: 0, removed: 0, errors: [] };
 
-    const groupsRes = await pool.query<{ id: number; name: string }>(
-      `SELECT id, name FROM dps_rank_groups`,
+    const groupsRes = await pool.query<{ id: number; name: string; sort_order: number }>(
+      `SELECT id, name, sort_order FROM dps_rank_groups`,
     );
     const groupNameById = new Map(groupsRes.rows.map(g => [g.id, g.name]));
-    const rankMap = new Map<string, { rankName: string; groupName: string | null; sortOrder: number }>();
-    for (const rank of ranksRes.rows) {
-      const roleId = rank.discord_role_id?.trim();
-      if (!roleId) continue;
-      const groupName = rank.group_id != null ? (groupNameById.get(rank.group_id) ?? null) : null;
-      rankMap.set(roleId, { rankName: rank.name, groupName, sortOrder: rank.sort_order });
-    }
+    const groupSortById = new Map(groupsRes.rows.map(g => [g.id, Number(g.sort_order ?? 999_999)]));
+    const rankMap = buildLinkedRankByRoleId(ranksRes.rows, groupSortById, groupNameById);
     const linkedRoleIds = [...rankMap.keys()];
 
     // 3. Assign DPS ranks to matching CAD profiles
@@ -522,14 +518,11 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
     const activeDiscordIds = new Set<string>();
 
     for (const m of allMembers) {
-      // Prefer the highest-ranked linked role (lowest sort_order) when several match.
+      // Prefer the highest hierarchy match (group order, then rank order) when several match.
       const matchingRids = m.roles.filter(r => linkedRoleIds.includes(r));
       if (matchingRids.length === 0) continue;
-      const rid = matchingRids.reduce((best, r) => {
-        const bOrder = rankMap.get(best)!.sortOrder;
-        const rOrder = rankMap.get(r)!.sortOrder;
-        return rOrder < bOrder ? r : best;
-      });
+      const rid = pickHighestLinkedDiscordRole(matchingRids, rankMap);
+      if (!rid) continue;
       activeDiscordIds.add(m.user.id);
       const { rankName, groupName } = rankMap.get(rid)!;
       try {
@@ -693,12 +686,13 @@ async function syncDivisionDiscordRoles(
 
     const rankByRole = new Map<string, { division_id: number; division_rank: string; sort_order: number }>();
     for (const r of rankLinks.rows) {
+      const sortOrder = Number(r.sort_order ?? 999_999);
       const existing = rankByRole.get(r.discord_role_id);
-      if (!existing || r.sort_order < existing.sort_order) {
+      if (!existing || sortOrder < existing.sort_order) {
         rankByRole.set(r.discord_role_id, {
           division_id: r.division_id,
           division_rank: r.name,
-          sort_order: r.sort_order,
+          sort_order: sortOrder,
         });
       }
     }
