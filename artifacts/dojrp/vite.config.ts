@@ -14,17 +14,22 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH ?? '/';
 const apiPort = process.env.API_PORT ?? '8080';
+/** When set (e.g. https://cad.dojrblx.com), preview uses the deployed VPS API + Mongo instead of local SQLite. */
+const previewApiUrl = (process.env.PREVIEW_API_URL ?? '').trim().replace(/\/$/, '');
+const apiTarget = previewApiUrl || `http://127.0.0.1:${apiPort}`;
 
 const workspaceRoot = path.resolve(import.meta.dirname, '..', '..');
 
 /** Forward the browser host to the API so Discord OAuth uses the Vite port (5173/4173), not 8080. */
 function apiProxyOptions() {
   return {
-    target: `http://127.0.0.1:${apiPort}`,
+    target: apiTarget,
     changeOrigin: true,
+    secure: previewApiUrl.startsWith('https://'),
     timeout: 120_000,
     proxyTimeout: 120_000,
     configure: (proxy: { on: (event: string, fn: (...args: unknown[]) => void) => void }) => {
+      if (previewApiUrl) return;
       proxy.on('proxyReq', (proxyReq: { setHeader: (name: string, value: string) => void }, req: { headers: { host?: string } }) => {
         const browserHost = req.headers.host;
         if (browserHost) {

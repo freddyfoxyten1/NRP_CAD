@@ -207,7 +207,7 @@ export function buildPersonnelTitleGroups<
     }));
 }
 
-/** Title label for the public index roster — always resolves so every member can render. */
+/** Title label for the public index roster — title groups only (never rank names as headings). */
 function publicPersonnelTitleLabel<
   T extends PersonnelRosterMember,
 >(
@@ -215,17 +215,19 @@ function publicPersonnelTitleLabel<
   ranks: TitleRank[],
   groups: TitleGroup[],
   getRankName: (member: T) => string | null | undefined,
-): string {
+): string | null {
   const fromDisplay = personnelGroupLabelForDisplay(member, ranks, groups, getRankName);
   if (fromDisplay) return fromDisplay;
 
-  const rankName = (getRankName(member) ?? "").trim();
-  if (rankName) return rankName;
+  const fromApi = personnelGroupLabel(member);
+  if (fromApi) return fromApi;
 
-  return "Unassigned";
+  return null;
 }
 
-/** Public roster grouping — includes all personnel (no title-link visibility filter). */
+const PUBLIC_UNASSIGNED_TITLE = "Unassigned";
+
+/** Public roster grouping — includes all personnel under title headings only. */
 export function buildPublicPersonnelTitleGroups<
   T extends PersonnelRosterMember & { username?: string | null; callsign?: string | null },
 >(
@@ -237,23 +239,20 @@ export function buildPublicPersonnelTitleGroups<
   const eligible = dedupeRosterMembersById(members);
   const safeGroups = groups.filter(g => !isCommunityTitle(g.name));
 
+  const resolveLabel = (m: T): string =>
+    publicPersonnelTitleLabel(m, ranks, groups, getRankName) ?? PUBLIC_UNASSIGNED_TITLE;
+
   const titleOrder = new Map<string, { id: number | null; sort: number }>();
   for (const g of safeGroups) {
     titleOrder.set(g.name, { id: g.id, sort: g.sort_order });
   }
+  if (eligible.some(m => publicPersonnelTitleLabel(m, ranks, groups, getRankName) == null)) {
+    titleOrder.set(PUBLIC_UNASSIGNED_TITLE, { id: null, sort: 999_999 });
+  }
   for (const m of eligible) {
-    const label = publicPersonnelTitleLabel(m, ranks, groups, getRankName);
+    const label = resolveLabel(m);
     if (titleOrder.has(label)) continue;
-    const rankName = (getRankName(m) ?? "").trim();
-    const rankMeta = ranks.find(r => r.name.toLowerCase() === rankName.toLowerCase());
-    const rankGroupId = normalizeId(rankMeta?.group_id);
-    const rankGroup = rankGroupId == null
-      ? null
-      : safeGroups.find(g => normalizeId(g.id) === rankGroupId);
-    titleOrder.set(label, {
-      id: rankGroup?.id ?? null,
-      sort: rankGroup?.sort_order ?? rankSortOrder(rankName, ranks),
-    });
+    titleOrder.set(label, { id: null, sort: 999 });
   }
 
   return [...titleOrder.entries()]
@@ -262,7 +261,7 @@ export function buildPublicPersonnelTitleGroups<
       id: meta.id,
       label,
       members: sortByRankThenCallsign(
-        eligible.filter(m => publicPersonnelTitleLabel(m, ranks, groups, getRankName) === label),
+        eligible.filter(m => resolveLabel(m) === label),
         ranks,
         getRankName,
       ),
