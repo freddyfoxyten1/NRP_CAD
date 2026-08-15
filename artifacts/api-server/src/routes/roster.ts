@@ -5,6 +5,11 @@ import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-g
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 import { sortByCallsignThenUsername, sortDepartmentPersonnel } from "../lib/roster-sort.js";
 import { buildLinkedRankByRoleId, pickHighestLinkedDiscordRole } from "../lib/discord-rank-pick.js";
+import {
+  clearAllDpsPermissionGrants,
+  dpsRosterRowExists,
+  resetDpsMemberPermissionGrants,
+} from "../lib/department-permissions.js";
 
 const router = Router();
 
@@ -533,6 +538,7 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
           `SELECT dps_rank, dps_role, username FROM dps_users WHERE profile_id = $1 LIMIT 1`,
           [profileId]
         );
+        const isNewRosterMember = existing.rows.length === 0;
         if (
           existing.rows.length > 0
           && existing.rows[0].dps_rank === rankName
@@ -578,6 +584,9 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
            WHERE id = $1`,
           newCallsign ? [profileId, rankName, groupName, newCallsign] : [profileId, rankName, groupName]
         );
+        if (isNewRosterMember) {
+          await resetDpsMemberPermissionGrants(pool, profileId);
+        }
         assigned++;
       } catch (e) { errors.push(`discord_id ${m.user.id}: ${String(e)}`); }
     }
@@ -759,6 +768,7 @@ async function syncDivisionDiscordRoles(
       processedProfiles.add(profileId);
 
       if (displayName) {
+        const isNewRosterMember = !(await dpsRosterRowExists(pool, profileId));
         await pool.query(
           `INSERT INTO dps_users (profile_id, username, status)
            VALUES ($1, $2, 'Active')
@@ -768,6 +778,9 @@ async function syncDivisionDiscordRoles(
              updated_at = NOW()`,
           [profileId, displayName]
         );
+        if (isNewRosterMember) {
+          await resetDpsMemberPermissionGrants(pool, profileId);
+        }
       }
 
       const existingMap = await loadDivisionAssignments([profileId]);
@@ -1280,6 +1293,26 @@ router.get("/roster", async (req, res) => {
   }
 });
 
+// ── POST /roster/permissions/clear-all — revoke all individual permission grants ─
+router.post("/roster/permissions/clear-all", async (req, res) => {
+  try {
+    const counts = await clearAllDpsPermissionGrants(pool);
+    const actor = (req.body as Record<string, unknown>).actor as string
+      || (req.headers["x-actor"] as string)
+      || "Admin";
+    await writeLog(
+      "dps_personnel",
+      actor,
+      "Cleared all individual permission grants",
+      `resources=${counts.resources} iab=${counts.iab} divisionEditors=${counts.divisionEditors}`,
+    );
+    res.json({ ok: true, ...counts });
+  } catch (err) {
+    req.log.error({ err }, "roster permissions clear-all error");
+    res.status(500).json({ error: "Unable to clear permission grants." });
+  }
+});
+
 // ── PATCH /roster/:id/resource-access — toggle view-all-normal-resources ──────
 router.patch("/roster/:id/resource-access", async (req, res) => {
   const id = Number(req.params.id);
@@ -1620,6 +1653,8 @@ router.post("/roster", async (req, res) => {
       );
       const canonicalUsername = profileRow.rows[0]?.username ?? username.trim();
 
+      const isNewRosterMember = !(await dpsRosterRowExists(pool, profileId));
+
       // Upsert the dps_users row (stores username directly).
       // Two-step (not INSERT…RETURNING CTE) so local SQLite works the same as Postgres.
       await pool.query(
@@ -1635,6 +1670,9 @@ router.post("/roster", async (req, res) => {
            updated_at     = NOW()`,
         [profileId, canonicalUsername, dps_rank, dps_role.trim(), callsign.trim(), status, appointed_date || null]
       );
+      if (isNewRosterMember) {
+        await resetDpsMemberPermissionGrants(pool, profileId);
+      }
       const result = await pool.query(
         `SELECT p.id, COALESCE(u.username, p.username) AS username,
                 p.discord_username, p.discord_id,
@@ -1667,6 +1705,7 @@ router.post("/roster", async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6, $7::date)`,
         [profileId, username.trim(), dps_rank, dps_role.trim(), callsign.trim(), status, appointed_date || null]
       );
+      await resetDpsMemberPermissionGrants(pool, profileId);
       const result = await pool.query(
         `SELECT p.id, COALESCE(u.username, p.username) AS username,
                 p.discord_username, p.discord_id,
@@ -2680,6 +2719,8 @@ router.post("/roster/divisions/:id/members", async (req, res) => {
       }
     }
 
+    const isNewRosterMember = !(await dpsRosterRowExists(pool, profileId));
+
     await pool.query(
       `INSERT INTO dps_users (profile_id, username, status)
        VALUES ($1, $2, 'Active')
@@ -2689,6 +2730,9 @@ router.post("/roster/divisions/:id/members", async (req, res) => {
          updated_at = NOW()`,
       [profileId, username?.trim() || null]
     );
+    if (isNewRosterMember) {
+      await resetDpsMemberPermissionGrants(pool, profileId);
+    }
 
     const existing = await loadDivisionAssignments([profileId]);
     const current = (existing.get(profileId) ?? [])
