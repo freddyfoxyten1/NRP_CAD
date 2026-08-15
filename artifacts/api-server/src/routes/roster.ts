@@ -23,7 +23,11 @@ import {
   listDpsRankGroupsMongo,
   listDpsRanksMongo,
   getDpsContentMongo,
+  getDpsDivisionInfoMongo,
+  getDpsDivisionRankDetailMongo,
+  getDpsRankDetailMongo,
   loadDpsDivisionAssignmentsMongo,
+  searchDpsMembersMongo,
 } from "../lib/dps-roster-mongo.js";
 import { normalizeGroupRow, normalizeRankGroupId, normalizeRankRow } from "../lib/roster-normalize.js";
 
@@ -1483,6 +1487,33 @@ router.get("/roster/member-search", async (req, res) => {
   try {
     const cached = await ensureDpsMembersCache();
     const guildDiscordIds = cached.map(m => m.id);
+
+    if (isMongoStore()) {
+      const hits = await searchDpsMembersMongo(q, guildDiscordIds) as SearchHit[];
+      const seenDiscordIds = new Set(hits.map(h => h.discord_id).filter(Boolean) as string[]);
+      const remaining = 20 - hits.length;
+      if (remaining > 0) {
+        const discordHits = cached.filter(m => {
+          if (seenDiscordIds.has(m.id)) return false;
+          const display = (m.nick ?? m.username).toLowerCase();
+          return m.username.toLowerCase().includes(q)
+            || display.includes(q)
+            || m.id.includes(q);
+        });
+        for (const m of discordHits.slice(0, remaining)) {
+          hits.push({
+            id: null,
+            username: m.nick ?? m.username,
+            discord_username: m.username,
+            discord_id: m.id,
+            rank: null,
+          });
+        }
+      }
+      res.json(hits.slice(0, 20));
+      return;
+    }
+
     const hits: SearchHit[] = [];
     const seenDiscordIds = new Set<string>();
 
@@ -1907,6 +1938,12 @@ router.get("/roster/ranks/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    if (isMongoStore()) {
+      const detail = await getDpsRankDetailMongo(id);
+      if (!detail) { res.status(404).json({ error: "Rank not found." }); return; }
+      res.json(detail);
+      return;
+    }
     const rankRes = await pool.query(
       `SELECT id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url, discord_role_id,
               callsign_type, callsign_static, callsign_min, callsign_max
@@ -2977,6 +3014,12 @@ router.get("/roster/divisions/:id/info", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    if (isMongoStore()) {
+      const info = await getDpsDivisionInfoMongo(id);
+      if (!info) { res.status(404).json({ error: "Division not found." }); return; }
+      res.json(info);
+      return;
+    }
     const result = await pool.query<{ id: number; name: string; info_content: unknown }>(
       `SELECT id, name, COALESCE(info_content, '{"sections":[]}') AS info_content
          FROM dps_divisions WHERE id = $1`,
@@ -3198,6 +3241,12 @@ router.get("/roster/division-ranks/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    if (isMongoStore()) {
+      const detail = await getDpsDivisionRankDetailMongo(id);
+      if (!detail) { res.status(404).json({ error: "Division rank not found." }); return; }
+      res.json(detail);
+      return;
+    }
     const rankRes = await pool.query(
       `SELECT ${DIVISION_RANK_SELECT} FROM dps_division_ranks WHERE id = $1`, [id]
     );

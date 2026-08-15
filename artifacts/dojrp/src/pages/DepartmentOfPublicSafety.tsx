@@ -708,9 +708,8 @@ const RankEditModal = ({
 
   useEffect(() => {
     setLoading(true);
-    fetch(`/api/roster/ranks/${rankId}`, { headers: { accept: 'application/json' } })
-      .then(r => r.json())
-      .then((d: RankDetail & { discord_role_id?: string | null; callsign_type?: string | null; callsign_static?: string | null; callsign_min?: number | null; callsign_max?: number | null }) => {
+    fetchRosterJson<RankDetail & { discord_role_id?: string | null; callsign_type?: string | null; callsign_static?: string | null; callsign_min?: number | null; callsign_max?: number | null }>(`/api/roster/ranks/${rankId}`, 'rank')
+      .then((d) => {
         setDetail(d);
         setForm({
           name:            d.name,
@@ -1345,11 +1344,10 @@ const AddOfficerModal = ({
     if (!val.trim()) { setSuggestions([]); setShowSugg(false); return; }
     debounceRef.current = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/roster/member-search?q=${encodeURIComponent(val.trim())}`,
-          { headers: { accept: 'application/json' } });
-        if (!r.ok) { setSuggestions([]); setShowSugg(false); return; }
-        const rows = await r.json();
-        const list = Array.isArray(rows) ? rows as UserHit[] : [];
+        const list = await fetchRosterArray<UserHit>(
+          `/api/roster/member-search?q=${encodeURIComponent(val.trim())}`,
+          'members',
+        );
         setSuggestions(list);
         setShowSugg(list.length > 0);
       } catch { /* ignore */ }
@@ -1931,9 +1929,8 @@ const DepartmentOfPublicSafety = () => {
 
   const fetchPageInfo = () => {
     setInfoLoading(true);
-    fetch('/api/roster/content/page_info')
-      .then(r => r.json())
-      .then((d: { sections?: (PageBlock | Record<string,unknown>)[] }) => {
+    fetchRosterJson<{ sections?: (PageBlock | Record<string, unknown>)[] }>('/api/roster/content/page_info', 'page info')
+      .then((d) => {
         if (d.sections?.length) {
           // Migrate old heading+body format to new block format
           const sections: PageBlock[] = (d.sections as any[]).map((s: any): PageBlock => {
@@ -1953,9 +1950,11 @@ const DepartmentOfPublicSafety = () => {
   };
 
   const fetchIndexInfo = () => {
-    fetch('/api/roster/content/index_info')
-      .then(r => r.json())
-      .then((d: { description?: string; divisions?: string[]; sub_departments?: { name: string; description: string }[] }) => {
+    fetchRosterJson<{ description?: string; divisions?: string[]; sub_departments?: { name: string; description: string }[] }>(
+      '/api/roster/content/index_info',
+      'index info',
+    )
+      .then((d) => {
         if (d.description) {
           setIndexInfoForm({
             description: d.description,

@@ -35,7 +35,9 @@ module.exports = {
       instances: 1,
       // Restart if it exceeds ~500MB or crashes repeatedly.
       max_memory_restart: "500M",
-      max_restarts: 10,
+      max_restarts: 15,
+      min_uptime: "10s",
+      restart_delay: 5000,
       env: {
         NODE_ENV: "production",
         // Port the API listens on. nginx proxies /api here.
