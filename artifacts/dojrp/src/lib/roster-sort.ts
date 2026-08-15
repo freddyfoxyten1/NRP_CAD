@@ -207,68 +207,6 @@ export function buildPersonnelTitleGroups<
     }));
 }
 
-/** Title label for the public index roster — title groups only (never rank names as headings). */
-function publicPersonnelTitleLabel<
-  T extends PersonnelRosterMember,
->(
-  member: T,
-  ranks: TitleRank[],
-  groups: TitleGroup[],
-  getRankName: (member: T) => string | null | undefined,
-): string | null {
-  const fromDisplay = personnelGroupLabelForDisplay(member, ranks, groups, getRankName);
-  if (fromDisplay) return fromDisplay;
-
-  const fromApi = personnelGroupLabel(member);
-  if (fromApi) return fromApi;
-
-  return null;
-}
-
-const PUBLIC_UNASSIGNED_TITLE = "Unassigned";
-
-/** Public roster grouping — includes all personnel under title headings only. */
-export function buildPublicPersonnelTitleGroups<
-  T extends PersonnelRosterMember & { username?: string | null; callsign?: string | null },
->(
-  members: T[],
-  groups: TitleGroup[],
-  ranks: TitleRank[],
-  getRankName: (member: T) => string | null | undefined,
-): Array<{ id: number | null; label: string; members: T[] }> {
-  const eligible = dedupeRosterMembersById(members);
-  const safeGroups = groups.filter(g => !isCommunityTitle(g.name));
-
-  const resolveLabel = (m: T): string =>
-    publicPersonnelTitleLabel(m, ranks, groups, getRankName) ?? PUBLIC_UNASSIGNED_TITLE;
-
-  const titleOrder = new Map<string, { id: number | null; sort: number }>();
-  for (const g of safeGroups) {
-    titleOrder.set(g.name, { id: g.id, sort: g.sort_order });
-  }
-  if (eligible.some(m => publicPersonnelTitleLabel(m, ranks, groups, getRankName) == null)) {
-    titleOrder.set(PUBLIC_UNASSIGNED_TITLE, { id: null, sort: 999_999 });
-  }
-  for (const m of eligible) {
-    const label = resolveLabel(m);
-    if (titleOrder.has(label)) continue;
-    titleOrder.set(label, { id: null, sort: 999 });
-  }
-
-  return [...titleOrder.entries()]
-    .sort((a, b) => a[1].sort - b[1].sort || a[0].localeCompare(b[0]))
-    .map(([label, meta]) => ({
-      id: meta.id,
-      label,
-      members: sortByRankThenCallsign(
-        eligible.filter(m => resolveLabel(m) === label),
-        ranks,
-        getRankName,
-      ),
-    }))
-    .filter(g => g.members.length > 0);
-}
-
 export type RankSection<T> = {
   label: string;
   sort: number;
