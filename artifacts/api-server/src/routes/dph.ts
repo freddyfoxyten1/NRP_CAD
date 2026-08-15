@@ -22,6 +22,11 @@ import {
   type DphDivisionAssignment,
 } from "../lib/dph-divisions.js";
 import { syncDphDivisionDiscordRoles } from "./dph-divisions.js";
+import {
+  clearAllDphPermissionGrants,
+  dphRosterRowExists,
+  resetDphMemberPermissionGrants,
+} from "../lib/department-permissions.js";
 
 const router = Router();
 
@@ -400,6 +405,7 @@ async function syncDphDiscordRoles(
           `SELECT dph_rank, dph_role, username FROM dph_users WHERE profile_id = $1 LIMIT 1`,
           [profileId],
         );
+        const isNewRosterMember = existing.rows.length === 0;
         if (
           existing.rows.length > 0
           && existing.rows[0].dph_rank === rankName
@@ -436,6 +442,9 @@ async function syncDphDiscordRoles(
                updated_at = NOW()`,
             [profileId, displayName, rankName, groupName],
           );
+        }
+        if (isNewRosterMember) {
+          await resetDphMemberPermissionGrants(pool, profileId);
         }
         assigned++;
       } catch (e) { errors.push(`discord_id ${m.user.id}: ${String(e)}`); }
@@ -612,6 +621,26 @@ router.get("/dph", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "dph GET error");
     res.status(500).json({ error: "Unable to load roster." });
+  }
+});
+
+// ── POST /dph/permissions/clear-all — revoke all individual permission grants ─
+router.post("/dph/permissions/clear-all", async (req, res) => {
+  try {
+    const counts = await clearAllDphPermissionGrants(pool);
+    const actor = (req.body as Record<string, unknown>).actor as string
+      || (req.headers["x-actor"] as string)
+      || "Admin";
+    await writeLog(
+      "dph_personnel",
+      actor,
+      "Cleared all individual permission grants",
+      `resources=${counts.resources} iab=${counts.iab} divisionEditors=${counts.divisionEditors}`,
+    );
+    res.json({ ok: true, ...counts });
+  } catch (err) {
+    req.log.error({ err }, "dph permissions clear-all error");
+    res.status(500).json({ error: "Unable to clear permission grants." });
   }
 });
 
@@ -833,6 +862,8 @@ router.post("/dph", async (req, res) => {
       );
       const canonicalUsername = profileRow.rows[0]?.username ?? username.trim();
 
+      const isNewRosterMember = !(await dphRosterRowExists(pool, profileId));
+
       await pool.query(
         `INSERT INTO dph_users (profile_id, username, dph_rank, dph_role, callsign, status, appointed_date)
          VALUES ($1, $2, $3, $4, $5, $6, $7::date)
@@ -846,6 +877,9 @@ router.post("/dph", async (req, res) => {
            updated_at     = NOW()`,
         [profileId, canonicalUsername, dph_rank, dph_role.trim(), callsign.trim(), status, appointed_date || null]
       );
+      if (isNewRosterMember) {
+        await resetDphMemberPermissionGrants(pool, profileId);
+      }
       const result = await pool.query(
         `SELECT p.id, COALESCE(u.username, p.username) AS username,
                 p.discord_username, p.discord_id,
@@ -876,6 +910,7 @@ router.post("/dph", async (req, res) => {
          VALUES ($1, $2, $3, $4, $5, $6, $7::date)`,
         [profileId, username.trim(), dph_rank, dph_role.trim(), callsign.trim(), status, appointed_date || null]
       );
+      await resetDphMemberPermissionGrants(pool, profileId);
       const result = await pool.query(
         `SELECT p.id, COALESCE(u.username, p.username) AS username,
                 p.discord_username, p.discord_id,

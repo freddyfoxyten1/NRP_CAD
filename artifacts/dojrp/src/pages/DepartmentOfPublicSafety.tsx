@@ -2295,6 +2295,47 @@ const DepartmentOfPublicSafety = () => {
   };
 
   const [resourceAccessSavingId, setResourceAccessSavingId] = useState<number | null>(null);
+  const [clearingPermissionGrants, setClearingPermissionGrants] = useState(false);
+
+  const handleClearAllPermissionGrants = async () => {
+    if (!confirm(
+      'Remove all individual permission grants for every roster member?\n\n'
+      + 'This clears All Resources access, IAB access, and division editor access. '
+      + 'Title-based Department Panel access from rank groups is not changed.',
+    )) return;
+    setClearingPermissionGrants(true);
+    try {
+      const res = await fetch('/api/roster/permissions/clear-all', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-actor': session?.username ?? 'DPS Panel',
+        },
+        body: JSON.stringify({ actor: session?.username ?? 'DPS Panel' }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        toast.error(err.error ?? 'Failed to clear permission grants.');
+        return;
+      }
+      toast.success('All individual permission grants were removed.');
+      fetchPanelMembers({ silent: true });
+      if (roster.length > 0) {
+        fetch('/api/roster', { headers: { accept: 'application/json' } })
+          .then(r => r.json())
+          .then((rows) => {
+            if (Array.isArray(rows)) {
+              setRoster(dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)));
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {
+      toast.error('Failed to clear permission grants.');
+    } finally {
+      setClearingPermissionGrants(false);
+    }
+  };
 
   const handleToggleViewAllResources = async (member: RosterMember, enabled: boolean) => {
     setResourceAccessSavingId(member.id);
@@ -5505,16 +5546,27 @@ const DepartmentOfPublicSafety = () => {
                           <h3 className="text-sm font-black uppercase tracking-[0.2em] text-[#34d399]">Resources</h3>
                           <p className="mt-1 text-xs text-[#526179]">Publish guides, reference documents, and department materials for members.</p>
                         </div>
-                        <button type="button"
-                          onClick={() => {
-                            resetAddResourceDialog();
-                            setResourceTargetDivisionId(null);
-                            setAddResourceStep(1);
-                          }}
-                          className="flex items-center gap-1.5 rounded-lg border border-[#34d399]/30 bg-[#34d399]/8 px-3 py-2 text-xs font-black text-[#34d399] hover:bg-[#34d399]/15 transition-colors">
-                          <Plus className="h-3.5 w-3.5" />
-                          Add Resource
-                        </button>
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void handleClearAllPermissionGrants()}
+                            disabled={clearingPermissionGrants}
+                            className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
+                          >
+                            <Lock className="h-3.5 w-3.5" />
+                            {clearingPermissionGrants ? 'Clearing…' : 'Clear All Permissions'}
+                          </button>
+                          <button type="button"
+                            onClick={() => {
+                              resetAddResourceDialog();
+                              setResourceTargetDivisionId(null);
+                              setAddResourceStep(1);
+                            }}
+                            className="flex items-center gap-1.5 rounded-lg border border-[#34d399]/30 bg-[#34d399]/8 px-3 py-2 text-xs font-black text-[#34d399] hover:bg-[#34d399]/15 transition-colors">
+                            <Plus className="h-3.5 w-3.5" />
+                            Add Resource
+                          </button>
+                        </div>
                       </div>
 
                       {resources.length === 0 ? (
