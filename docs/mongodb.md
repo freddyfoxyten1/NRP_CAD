@@ -103,5 +103,6 @@ When `DATA_STORE=mongo`, request handlers use Mongo repositories + the SQL bridg
 |---------|--------|
 | API exits on boot | `DATA_STORE=mongo` but bad/missing `MONGODB_URI` |
 | Cache always MISS | `REDIS_URL` missing/unreachable (app still works) |
+| `[redis] error: getaddrinfo ENOTFOUND` | `REDIS_URL` hostname invalid — leave empty if no Redis, or fix the URL; API works without cache |
 | Image 404 after cutover | Run ETL for `dps_images` / confirm GridFS files |
 | Bridge SQL error | Log shows unsupported SQL — migrate that path to a repository |
