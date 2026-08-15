@@ -42,9 +42,16 @@ else
 fi
 
 echo "==> 6/6 Verifying API + database..."
-sleep 2
-if ! curl -sf "http://127.0.0.1:8080/api/healthz" >/dev/null; then
-  echo "ERROR: API health check failed. Run: bm2 logs $API_NAME --lines 50"
+HEALTH_OK=0
+for i in $(seq 1 30); do
+  if curl -sf "http://127.0.0.1:8080/api/healthz" >/dev/null; then
+    HEALTH_OK=1
+    break
+  fi
+  sleep 2
+done
+if [ "$HEALTH_OK" -ne 1 ]; then
+  echo "ERROR: API health check failed after 60s. Run: bm2 logs $API_NAME --lines 50"
   exit 1
 fi
 
