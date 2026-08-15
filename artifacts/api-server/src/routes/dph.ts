@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { isUniqueViolation, pool } from "@workspace/db";
+import { isUniqueViolation, isMongoStore, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
 import { wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import {
@@ -34,6 +34,7 @@ const router = Router();
 
 // ── One-time migration: create dph tables ─────────────────────────────────────
 (async () => {
+  if (isMongoStore()) return;
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS dph_rank_groups (

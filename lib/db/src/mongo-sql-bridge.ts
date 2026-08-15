@@ -601,6 +601,7 @@ export async function mongoSqlQuery<T = Document>(
 
   if (
     upper.startsWith("CREATE TABLE")
+    || upper.startsWith("CREATE UNIQUE INDEX")
     || upper.startsWith("CREATE INDEX")
     || upper.startsWith("ALTER TABLE")
     || upper.startsWith("DROP TABLE")
