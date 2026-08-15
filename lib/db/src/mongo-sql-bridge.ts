@@ -664,6 +664,15 @@ export async function mongoSqlQuery<T = Document>(
     }
     if (table === "media") delete doc.data;
 
+    if (table === "dps_rank_groups" || table === "dph_rank_groups" || table === "doc_rank_groups" || table === "staff_rank_groups") {
+      if (doc.panel_access == null) doc.panel_access = false;
+      if (doc.division_oversight == null) doc.division_oversight = false;
+    }
+    if (table.endsWith("_ranks") && doc.group_id != null) {
+      const gid = Number(doc.group_id);
+      doc.group_id = Number.isFinite(gid) ? gid : null;
+    }
+
     const col = await getCollection(table);
 
     // ON CONFLICT (key) / (id) / (profile_id)
@@ -696,6 +705,11 @@ export async function mongoSqlQuery<T = Document>(
     }
 
     await col.insertOne(doc);
+    const returning = m[4]?.trim();
+    if (returning) {
+      const projected = projectSelect(`SELECT ${returning}`, doc);
+      return { rows: [projected as T], rowCount: 1 };
+    }
     return { rows: [doc as T], rowCount: 1 };
   }
 

@@ -33,6 +33,7 @@ import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
 import { buildPersonnelTitleGroups, dedupeRosterMembersById, sortByRankThenCallsign } from '@/lib/roster-sort';
+import { fetchRosterArray, normalizeRankGroupId, rankBelongsToGroup } from '@/lib/roster-fetch';
 import { collectDepartmentPermissions } from '@/lib/permission-access';
 import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
 
@@ -1837,7 +1838,9 @@ const DepartmentOfPublicSafety = () => {
           setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
         }
         if (Array.isArray(grps)) setGroups(grps);
+        else toast.error('Failed to load groups.');
         if (Array.isArray(rnks)) setRanks(rnks);
+        else toast.error('Failed to load ranks.');
         if (Array.isArray(divRanks)) setDivisionRanksForEdit(divRanks);
         if (Array.isArray(divs)) {
           setRosterDivisions(divs);
@@ -1859,25 +1862,23 @@ const DepartmentOfPublicSafety = () => {
   // ── Department panel fetch (all members including inactive) ───────────────────
   const fetchPanelMembers = (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setPanelLoading(true);
-    fetch('/api/roster?all=1', { headers: { accept: 'application/json' } })
-      .then(r => r.json())
-      .then((rows) => setPanelMembers(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : []))
-      .catch(() => {
+    fetchRosterArray<RosterMember>('/api/roster?all=1', 'members')
+      .then((rows) => setPanelMembers(dedupeRosterMembersById(rows.map(normalizeRosterMember))))
+      .catch((err) => {
         if (!opts?.silent) {
           setPanelMembers([]);
-          toast.error('Failed to load members.');
+          toast.error(err instanceof Error ? err.message : 'Failed to load members.');
         }
       })
       .finally(() => { if (!opts?.silent) setPanelLoading(false); });
   };
   const fetchRanks = () => {
     setRanksLoading(true);
-    fetch('/api/roster/ranks', { headers: { accept: 'application/json' } })
-      .then(r => r.json())
-      .then((rows) => setRanks(Array.isArray(rows) ? rows : []))
-      .catch(() => {
+    fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks')
+      .then(setRanks)
+      .catch((err) => {
         setRanks([]);
-        toast.error('Failed to load ranks.');
+        toast.error(err instanceof Error ? err.message : 'Failed to load ranks.');
       })
       .finally(() => setRanksLoading(false));
   };
@@ -1931,12 +1932,11 @@ const DepartmentOfPublicSafety = () => {
   };
   const fetchGroups = () => {
     setGroupsLoading(true);
-    fetch('/api/roster/groups', { headers: { accept: 'application/json' } })
-      .then(r => r.json())
-      .then((rows) => setGroups(Array.isArray(rows) ? rows : []))
-      .catch(() => {
+    fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups')
+      .then(setGroups)
+      .catch((err) => {
         setGroups([]);
-        toast.error('Failed to load groups.');
+        toast.error(err instanceof Error ? err.message : 'Failed to load groups.');
       })
       .finally(() => setGroupsLoading(false));
   };
@@ -2465,12 +2465,13 @@ const DepartmentOfPublicSafety = () => {
     if (!draggedRank) return;
     if (draggedId === targetId) return;
 
-    const sourceGroupId = draggedRank.group_id;
-    const isCrossGroup  = sourceGroupId !== targetGroupId;
+    const sourceGroupId = normalizeRankGroupId(draggedRank.group_id);
+    const targetGroup = normalizeRankGroupId(targetGroupId);
+    const isCrossGroup  = sourceGroupId !== targetGroup;
 
     // Build the new ordered list for the target group (excluding the dragged rank)
     const targetGroupRanks = ranks
-      .filter(r => r.group_id === targetGroupId && r.id !== draggedId)
+      .filter(r => normalizeRankGroupId(r.group_id) === targetGroup && r.id !== draggedId)
       .sort((a, b) => a.sort_order - b.sort_order);
 
     let newOrder: typeof ranks;
@@ -2486,7 +2487,7 @@ const DepartmentOfPublicSafety = () => {
 
     // Optimistic update: remove dragged from old position, insert into target group
     setRanks(prev => [
-      ...prev.filter(r => r.id !== draggedId && r.group_id !== targetGroupId),
+      ...prev.filter(r => r.id !== draggedId && normalizeRankGroupId(r.group_id) !== targetGroup),
       ...newOrder.map((r, i) => ({ ...r, group_id: targetGroupId, sort_order: i })),
     ]);
 
@@ -2677,7 +2678,11 @@ const DepartmentOfPublicSafety = () => {
       const data = await res.json() as { error?: string };
       if (!res.ok) { toast.error(data.error ?? 'Failed to add group.'); return; }
       setNewGroupName('');
+      setAddTitleOpen(false);
       fetchGroups();
+      toast.success('Title added.');
+    } catch {
+      toast.error('Failed to add title.');
     } finally { setAddingGroup(false); }
   };
 
@@ -4083,7 +4088,7 @@ const DepartmentOfPublicSafety = () => {
                                             if (dragRankId !== null && dragOverRankId === null) handleRankReorder(g.id, dragRankId, null, 'after');
                                             clearDrag();
                                           }}>
-                                          {ranks.filter(r => r.group_id === g.id).sort((a, b) => a.sort_order - b.sort_order).map(r => {
+                                          {ranks.filter(r => rankBelongsToGroup(r, g)).sort((a, b) => a.sort_order - b.sort_order).map(r => {
                                             const chipColor = r.color_hex ?? null;
                                             const isDragging   = dragRankId === r.id;
                                             const isDropTarget = dragOverRankId === r.id && !isDragging;
@@ -4145,7 +4150,7 @@ const DepartmentOfPublicSafety = () => {
                                             );
                                           })}
                                           {/* Empty-group drop hint */}
-                                          {ranks.filter(r => r.group_id === g.id).length === 0 && dragRankId !== null && (
+                                          {ranks.filter(r => rankBelongsToGroup(r, g)).length === 0 && dragRankId !== null && (
                                             <span className="rounded border border-dashed border-[#4384ff]/40 px-2 py-0.5 text-[9px] text-[#4384ff]/60 select-none">Drop here</span>
                                           )}
                                         </div>
