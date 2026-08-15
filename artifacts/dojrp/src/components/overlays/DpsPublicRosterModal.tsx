@@ -240,7 +240,16 @@ export default function DpsPublicRosterModal({
             sort_order: Number(row.sort_order ?? 999),
           })),
         );
-        setRanks(Array.isArray(rankRows) ? rankRows as RankMeta[] : []);
+        setRanks(
+          (Array.isArray(rankRows) ? rankRows : []).map((row: Record<string, unknown>) => ({
+            id: Number(row.id),
+            name: String(row.name ?? ""),
+            color_hex: row.color_hex == null ? null : String(row.color_hex),
+            insignia_url: row.insignia_url == null ? null : String(row.insignia_url),
+            group_id: row.group_id == null || row.group_id === "" ? null : Number(row.group_id),
+            sort_order: Number(row.sort_order ?? 999),
+          })),
+        );
         setVehicles(
           (Array.isArray(vehicleRows) ? vehicleRows : []).map((row: Record<string, unknown>) => ({
             id: Number(row.id),
