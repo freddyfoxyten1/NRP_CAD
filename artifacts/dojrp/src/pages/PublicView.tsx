@@ -22,6 +22,7 @@ import DocumentEditor from "@/components/editor/DocumentEditor";
 import PdfViewer from "@/components/shared/PdfViewer";
 import { getCadSession } from "@/lib/cad-session";
 import { sortByRankThenUsername } from "@/lib/roster-sort";
+import { formatInGameCount } from "@/lib/in-game-count";
 
 // -- Types ----
 interface Stats {
@@ -692,7 +693,7 @@ const PublicView = () => {
                 {statsLoading
                   ? "…"
                   : <>
-                      {stats?.erlc_players ?? 0}/{stats?.erlc_max_players && stats.erlc_max_players > 0 ? stats.erlc_max_players : "—"}
+                      {formatInGameCount(stats?.erlc_players, stats?.erlc_max_players)}
                       <span className="hidden sm:inline"> In-Game</span>
                     </>
                 }
@@ -731,7 +732,7 @@ const PublicView = () => {
               <StatCard
                 icon={Gamepad2}
                 label="In-Game"
-                value={statsLoading ? " - " : `${stats?.erlc_players ?? 0}/${stats?.erlc_max_players && stats.erlc_max_players > 0 ? stats.erlc_max_players : " - "}`}
+                value={statsLoading ? "—" : formatInGameCount(stats?.erlc_players, stats?.erlc_max_players)}
                 sub="ERLC players"
                 color="border-[#1b3320] text-[#3ecf8e]"
               />

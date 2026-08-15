@@ -13,7 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { pool, isMongoStore, contentRepo } from "@workspace/db";
-import { fetchInGameStats } from "./stats";
+import { fetchInGameStats } from "../lib/erlc-stats";
 import { writeLog } from "../lib/audit-log";
 
 const router = Router();
@@ -113,6 +113,7 @@ type PublicStats = {
 
 let _statsRefreshRunning = false;
 async function refreshPublicStats(): Promise<PublicStats> {
+  const previous = fromCacheAllowStale<PublicStats>("stats")?.data;
   const [erlc, discordResult] = await Promise.allSettled([
     fetchInGameStats(),
     DISCORD_BOT
@@ -123,16 +124,18 @@ async function refreshPublicStats(): Promise<PublicStats> {
       : Promise.resolve(null),
   ]);
 
-  const { inGame, maxPlayers } = erlc.status === "fulfilled" ? erlc.value : { inGame: 0, maxPlayers: 0 };
+  const erlcStats = erlc.status === "fulfilled"
+    ? erlc.value
+    : { inGame: previous?.erlc_players ?? 0, maxPlayers: previous?.erlc_max_players ?? 0 };
   const discordGuild = discordResult.status === "fulfilled" && discordResult.value != null
     ? discordResult.value as { approximate_member_count?: number; approximate_presence_count?: number }
     : {};
 
   return toCache("stats", {
-    erlc_players:     inGame,
-    erlc_max_players: maxPlayers,
-    discord_members:  discordGuild.approximate_member_count  ?? 0,
-    discord_online:   discordGuild.approximate_presence_count ?? 0,
+    erlc_players:     erlcStats.inGame,
+    erlc_max_players: erlcStats.maxPlayers,
+    discord_members:  discordGuild.approximate_member_count  ?? previous?.discord_members  ?? 0,
+    discord_online:   discordGuild.approximate_presence_count ?? previous?.discord_online ?? 0,
   });
 }
 

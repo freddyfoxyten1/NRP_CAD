@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import type { IncomingCall } from '@/components/overlays/IncomingCallOverlay';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
+import { formatInGameCount } from '@/lib/in-game-count';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { getMemberDisplayRank, getMemberDisplayRole } from '@/lib/display-rank';
 import { useCadStatus } from '@/hooks/useCadStatus';
@@ -109,7 +110,7 @@ const fetchStats = async (): Promise<PortalData['stats']> => {
       totalMembers: data.totalMembers,
       totalPlayTime: 'Coming Soon!',
       totalOnlineMembers: data.totalOnlineMembers,
-      inGameCount: `${data.inGameCount ?? 0}/${max > 0 ? max : '—'}`,
+      inGameCount: formatInGameCount(data.inGameCount, max),
     };
   } catch {
     return defaultStats;
