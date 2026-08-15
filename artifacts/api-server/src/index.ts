@@ -2,11 +2,29 @@
 //
 // Starts the HTTP server on API_PORT (fallback PORT, default 8080).
 // The Express app itself (middleware, routes) is configured in app.ts.
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import "./bootstrap-env";
 import { initDataStores, shutdownDataStores, isMongoStore, pingMongo, pingRedis } from "@workspace/db";
 import app from "./app";
 import { startDiscordGateway, stopDiscordGateway } from "./lib/discord-realtime-sync";
 import { logger } from "./lib/logger";
+
+function loadBuildInfo(): { commit: string; short: string; builtAt: string } {
+  try {
+    const distDir = path.dirname(fileURLToPath(import.meta.url));
+    const raw = readFileSync(path.join(distDir, "build-info.json"), "utf8");
+    const parsed = JSON.parse(raw) as { commit?: string; short?: string; builtAt?: string };
+    return {
+      commit: parsed.commit ?? "unknown",
+      short: parsed.short ?? "unknown",
+      builtAt: parsed.builtAt ?? "unknown",
+    };
+  } catch {
+    return { commit: "unknown", short: "unknown", builtAt: "unknown" };
+  }
+}
 
 const rawPort = process.env.API_PORT ?? process.env.PORT ?? "8080";
 
@@ -37,6 +55,10 @@ async function start() {
       redis,
       ok: isMongoStore() ? Boolean(mongo) : true,
     });
+  });
+
+  app.get("/api/health/version", (_req, res) => {
+    res.json(loadBuildInfo());
   });
 
   app.listen(port, (err) => {
