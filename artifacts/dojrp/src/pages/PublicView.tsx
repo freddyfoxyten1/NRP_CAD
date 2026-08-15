@@ -414,12 +414,10 @@ const PublicView = () => {
   const [gallery,       setGallery]       = useState<GalleryImage[]>([]);
   const [press,         setPress]         = useState<PressItem[]>([]);
   const [lightbox,      setLightbox]      = useState<GalleryImage | null>(null);
-  const galleryFirstCopyRef = useRef<HTMLDivElement | null>(null);
   const galleryPausedRef = useRef(false);
   const galleryResumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const galleryIgnoreScrollRef = useRef(false);
   const [galleryScrollerEl, setGalleryScrollerEl] = useState<HTMLDivElement | null>(null);
-  const [galleryCopies, setGalleryCopies] = useState(2);
   const setGalleryScrollerNode = useCallback((node: HTMLDivElement | null) => {
     setGalleryScrollerEl(node);
   }, []);
@@ -468,38 +466,18 @@ const PublicView = () => {
     return () => clearInterval(id);
   }, []);
 
-  // Enough duplicated sets so the strip never shows empty space before looping
-  useEffect(() => {
-    if (tab !== "home" || gallery.length === 0) return;
-    const scroller = galleryScrollerEl;
-    const firstCopy = galleryFirstCopyRef.current;
-    if (!scroller || !firstCopy) return;
-
-    const updateCopies = () => {
-      const setWidth = firstCopy.offsetWidth;
-      if (setWidth <= 0) return;
-      const needed = Math.max(2, Math.ceil((scroller.clientWidth * 2) / setWidth) + 1);
-      setGalleryCopies(prev => (prev === needed ? prev : needed));
-    };
-
-    updateCopies();
-    const ro = new ResizeObserver(updateCopies);
-    ro.observe(scroller);
-    ro.observe(firstCopy);
-    return () => ro.disconnect();
-  }, [tab, gallery.length, galleryScrollerEl]);
-
   // Home Gallery ONLY: auto-scroll with scrollbar; pause on interaction, resume after 20s idle
   useEffect(() => {
     if (tab !== "home") return;
     const el = galleryScrollerEl;
-    const firstCopy = galleryFirstCopyRef.current;
-    if (!el || !firstCopy || gallery.length === 0) return;
+    if (!el || gallery.length === 0) return;
 
     let raf = 0;
     let last = performance.now();
     const speedPxPerSec = 32;
     let running = true;
+
+    const maxScrollLeft = () => Math.max(0, el.scrollWidth - el.clientWidth);
 
     const markProgrammaticScroll = () => {
       galleryIgnoreScrollRef.current = true;
@@ -522,13 +500,13 @@ const PublicView = () => {
       const dt = Math.min(now - last, 64);
       last = now;
       if (!galleryPausedRef.current && !document.hidden) {
-        const loopAt = firstCopy.offsetWidth;
-        if (loopAt > 0) {
+        const end = maxScrollLeft();
+        if (end > 0) {
           markProgrammaticScroll();
-          el.scrollLeft += (speedPxPerSec * dt) / 1000;
-          if (el.scrollLeft >= loopAt) {
-            markProgrammaticScroll();
-            el.scrollLeft -= loopAt;
+          if (el.scrollLeft >= end - 1) {
+            el.scrollLeft = 0;
+          } else {
+            el.scrollLeft += (speedPxPerSec * dt) / 1000;
           }
         }
       }
@@ -554,7 +532,7 @@ const PublicView = () => {
       }
       galleryPausedRef.current = false;
     };
-  }, [tab, galleryScrollerEl, gallery.length, galleryCopies, pauseGalleryAutoScroll]);
+  }, [tab, galleryScrollerEl, gallery.length, pauseGalleryAutoScroll]);
 
   // Tab bar: map mouse wheel to horizontal scroll so Store / Press stay reachable
   useEffect(() => {
@@ -926,40 +904,30 @@ const PublicView = () => {
                   ref={setGalleryScrollerNode}
                   className="home-gallery-scroller -mx-1 overflow-x-auto overscroll-x-contain px-1 pb-2"
                 >
-                  <div className="flex w-max">
-                    {Array.from({ length: galleryCopies }, (_, copy) => (
-                      <div
-                        key={copy}
-                        ref={copy === 0 ? galleryFirstCopyRef : undefined}
-                        className="flex gap-3 pr-3"
-                        aria-hidden={copy > 0 ? true : undefined}
+                  <div className="flex w-max gap-3 pr-1">
+                    {gallery.map(img => (
+                      <button
+                        key={img.id}
+                        type="button"
+                        onClick={() => {
+                          pauseGalleryAutoScroll();
+                          setLightbox(img);
+                        }}
+                        className="group relative aspect-video w-[min(78vw,280px)] shrink-0 overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16] text-left transition-all hover:border-[#2f70ff]/50 hover:shadow-[0_0_30px_rgba(47,112,255,0.10)] sm:w-[300px]"
                       >
-                        {gallery.map(img => (
-                          <button
-                            key={`${copy}-${img.id}`}
-                            type="button"
-                            tabIndex={copy > 0 ? -1 : undefined}
-                            onClick={() => {
-                              pauseGalleryAutoScroll();
-                              setLightbox(img);
-                            }}
-                            className="group relative aspect-video w-[min(78vw,280px)] shrink-0 overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16] text-left transition-all hover:border-[#2f70ff]/50 hover:shadow-[0_0_30px_rgba(47,112,255,0.10)] sm:w-[300px]"
-                          >
-                            <img
-                              src={img.image_url}
-                              alt={img.title || "Gallery image"}
-                              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                              onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
-                            />
-                            {(img.title || img.caption) && (
-                              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 py-3">
-                                {img.title && <p className="text-xs font-black text-white">{img.title}</p>}
-                                {img.caption && <p className="mt-0.5 text-[10px] text-[#a8b7cd]">{img.caption}</p>}
-                              </div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
+                        <img
+                          src={img.image_url}
+                          alt={img.title || "Gallery image"}
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                        {(img.title || img.caption) && (
+                          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 py-3">
+                            {img.title && <p className="text-xs font-black text-white">{img.title}</p>}
+                            {img.caption && <p className="mt-0.5 text-[10px] text-[#a8b7cd]">{img.caption}</p>}
+                          </div>
+                        )}
+                      </button>
                     ))}
                   </div>
                 </div>

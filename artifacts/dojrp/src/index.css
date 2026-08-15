@@ -394,17 +394,21 @@
 .home-gallery-scroller {
   touch-action: pan-x;
   scrollbar-width: thin;
-  scrollbar-color: #1b2738 transparent;
+  scrollbar-color: #1b2738 #070d16;
 }
 .home-gallery-scroller::-webkit-scrollbar {
   height: 6px;
 }
 .home-gallery-scroller::-webkit-scrollbar-track {
-  background: transparent;
+  background: #070d16;
+  border-radius: 999px;
 }
 .home-gallery-scroller::-webkit-scrollbar-thumb {
   background: #1b2738;
   border-radius: 999px;
+}
+.home-gallery-scroller::-webkit-scrollbar-thumb:hover {
+  background: #2a3a50;
 }
 
 /* Index tab buttons: sideways scroll without a visible scrollbar

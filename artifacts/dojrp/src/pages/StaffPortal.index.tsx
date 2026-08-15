@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePortalSection } from '@/hooks/usePortalSection';
-import { BookOpen, CalendarDays, ChevronDown, ChevronRight, FileText, LayoutDashboard, LogOut, MapPin, Monitor, Pencil, Plus, Search, Shield, Trash2, Users, X } from 'lucide-react';
+import { BookOpen, CalendarDays, ChevronDown, ChevronRight, FileText, LayoutDashboard, LogOut, MapPin, Pencil, Plus, Search, Shield, Trash2, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
 import DojrpShield from '@/components/shared/DojrpShield';
@@ -452,26 +452,6 @@ const StaffPortalIndex = () => {
               <CalendarDays className="h-4 w-4 shrink-0" />
               Events
             </button>
-            {(isSuperAdminSession(session) || session?.can_access_doc_dps_cad) && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => navigate('/dps_personnel-roster')}
-                  className="flex items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm font-semibold text-[#8392aa] transition-colors hover:bg-[#070d16] hover:text-[#4384ff]"
-                >
-                  <Monitor className="h-4 w-4 shrink-0" />
-                  DPS CAD
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate('/doc_personnel-roster')}
-                  className="flex items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm font-semibold text-[#8392aa] transition-colors hover:bg-[#070d16] hover:text-[#3ecf8e]"
-                >
-                  <Monitor className="h-4 w-4 shrink-0" />
-                  DOC CAD
-                </button>
-              </>
-            )}
           </nav>
 
           <div className="mt-6 flex flex-col gap-2 border-t border-[#131f30] pt-6">

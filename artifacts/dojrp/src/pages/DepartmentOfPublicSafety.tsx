@@ -9,7 +9,7 @@ import {
   AlertCircle, BookOpen, CalendarDays, Car, ChevronDown, ChevronRight, ChevronUp,
   Clock, FileText, Globe, GripVertical, Info, LayoutDashboard, Layers, Lock, LogOut, MapPin, Package,
   Pencil, Phone, Plus, Radio, RefreshCw, Scale, Search, Settings,
-  Shield, Trash2, Users, X,
+  Shield, Trash2, Users, X, Monitor,
 } from 'lucide-react';
 import DocumentEditor from '@/components/editor/DocumentEditor';
 import PdfViewer from '@/components/shared/PdfViewer';
@@ -27,6 +27,7 @@ import {
   DivisionsInformationView,
 } from '@/components/dps/DivisionRoster';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
+import { canAccessDpsCad } from '@/lib/cad-access';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
@@ -2991,6 +2992,14 @@ const DepartmentOfPublicSafety = () => {
                   }`}>
                   <Settings className="h-4 w-4" />
                   Department Panel
+                </button>
+              )}
+
+              {session && canAccessDpsCad(session) && (
+                <button type="button" onClick={() => navigate('/dps_cad')}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#4384ff]">
+                  <Monitor className="h-4 w-4" />
+                  DPS CAD
                 </button>
               )}
 

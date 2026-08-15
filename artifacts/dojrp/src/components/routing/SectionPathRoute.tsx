@@ -11,6 +11,8 @@ import DphInternalAffairs from "@/pages/DphInternalAffairs";
 import StaffPortal from "@/pages/StaffPortal";
 import PublicView from "@/pages/PublicView";
 import NotFound from "@/pages/NotFound";
+import CadPage from "@/pages/CadPage";
+import DocCadPage from "@/pages/DocCadPage";
 
 const BASES = new Set([
   "public",
@@ -57,13 +59,21 @@ export default function SectionPathRoute() {
     );
   }
   if (base === "dps" && section === "cad") {
-    return <Navigate to="/dps_personnel-roster" replace />;
+    return (
+      <RequireAuth>
+        <CadPage />
+      </RequireAuth>
+    );
   }
   if (base === "dph" && section === "cad") {
     return <Navigate to="/dph_personnel-roster" replace />;
   }
   if (base === "doc" && section === "cad") {
-    return <Navigate to="/doc_personnel-roster" replace />;
+    return (
+      <RequireAuth>
+        <DocCadPage />
+      </RequireAuth>
+    );
   }
 
   switch (base) {
