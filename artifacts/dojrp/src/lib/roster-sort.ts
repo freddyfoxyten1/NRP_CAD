@@ -100,6 +100,12 @@ function isCommunityTitle(name: string): boolean {
   return name.trim().toLowerCase() === "community members";
 }
 
+function normalizeId(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Title group from the member's configured department rank only (not staff role). */
 export function personnelGroupLabelFromRank<
   T extends PersonnelRosterMember,
@@ -114,10 +120,35 @@ export function personnelGroupLabelFromRank<
   const rankMeta = ranks.find(
     (r) => r.name.toLowerCase() === rankName.toLowerCase(),
   );
-  if (rankMeta?.group_id == null) return null;
-  const group = groups.find((g) => g.id === rankMeta.group_id);
+  const rankGroupId = normalizeId(rankMeta?.group_id);
+  if (rankGroupId == null) return null;
+  const group = groups.find((g) => normalizeId(g.id) === rankGroupId);
   if (!group || isCommunityTitle(group.name)) return null;
   return group.name;
+}
+
+/** Resolve roster title from API group_name or linked department rank metadata. */
+export function personnelGroupLabelForDisplay<
+  T extends PersonnelRosterMember,
+>(
+  member: T,
+  ranks: TitleRank[],
+  groups: TitleGroup[],
+  getRankName: (member: T) => string | null | undefined,
+): string | null {
+  const fromRank = personnelGroupLabelFromRank(member, ranks, groups, getRankName);
+  if (fromRank) return fromRank;
+
+  const fromApi = personnelGroupLabel(member);
+  if (!fromApi) return null;
+
+  const safeGroups = groups.filter(g => !isCommunityTitle(g.name));
+  if (safeGroups.length === 0) return fromApi;
+
+  const matched = safeGroups.find(
+    g => g.name.trim().toLowerCase() === fromApi.toLowerCase(),
+  );
+  return matched?.name ?? null;
 }
 
 /** Whether a member should appear on the department personnel roster display. */
@@ -129,7 +160,7 @@ export function isPersonnelRosterMemberVisible<
   groups: TitleGroup[],
   getRankName: (member: T) => string | null | undefined,
 ): boolean {
-  return personnelGroupLabelFromRank(member, ranks, groups, getRankName) != null;
+  return personnelGroupLabelForDisplay(member, ranks, groups, getRankName) != null;
 }
 
 /** @deprecated Prefer personnelGroupLabelFromRank for roster display grouping. */
@@ -152,13 +183,24 @@ export function buildPersonnelTitleGroups<
     isPersonnelRosterMemberVisible(m, ranks, groups, getRankName),
   );
   const safeGroups = groups.filter(g => !isCommunityTitle(g.name));
-  return safeGroups
-    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
-    .map(g => ({
-      id: g.id as number | null,
-      label: g.name,
+
+  const titleOrder = new Map<string, { id: number | null; sort: number }>();
+  for (const g of safeGroups) {
+    titleOrder.set(g.name, { id: g.id, sort: g.sort_order });
+  }
+  for (const m of eligible) {
+    const label = personnelGroupLabelForDisplay(m, ranks, groups, getRankName);
+    if (!label || titleOrder.has(label)) continue;
+    titleOrder.set(label, { id: null, sort: 999 });
+  }
+
+  return [...titleOrder.entries()]
+    .sort((a, b) => a[1].sort - b[1].sort || a[0].localeCompare(b[0]))
+    .map(([label, meta]) => ({
+      id: meta.id,
+      label,
       members: sortByRankThenCallsign(
-        eligible.filter(m => personnelGroupLabelFromRank(m, ranks, groups, getRankName) === g.name),
+        eligible.filter(m => personnelGroupLabelForDisplay(m, ranks, groups, getRankName) === label),
         ranks,
         getRankName,
       ),
