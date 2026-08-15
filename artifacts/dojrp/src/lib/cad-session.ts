@@ -24,6 +24,7 @@ export type CadSession = {
   status: string;
   dps_rank:   string | null;
   dps_role:   string | null;
+  doc_rank:   string | null;
   staff_rank: string | null;
   staff_role: string | null;
   discord_id:  string | null;

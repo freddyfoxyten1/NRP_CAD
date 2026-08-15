@@ -9,7 +9,7 @@ import {
   AlertCircle, CalendarDays, Car, ChevronDown, ChevronRight, ChevronUp,
   GripVertical, LayoutDashboard, LogOut, Package,
   Pencil, Phone, Plus, Radio, Search, Settings,
-  Shield, Trash2, Users, X,
+  Shield, Trash2, Users, X, Monitor,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
@@ -18,6 +18,7 @@ import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
 import PhonePanel from '@/components/overlays/PhonePanel';
 import IncomingCallOverlay, { type IncomingCall } from '@/components/overlays/IncomingCallOverlay';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
+import { canAccessDocCad } from '@/lib/cad-access';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
@@ -1192,6 +1193,14 @@ const DepartmentOfCommunications = () => {
                   }`}>
                   <Settings className="h-4 w-4" />
                   Department Panel
+                </button>
+              )}
+
+              {session && canAccessDocCad(session, myDocRank) && (
+                <button type="button" onClick={() => navigate('/doc_cad')}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase tracking-[0.08em] text-[#8392aa] transition-colors hover:text-[#3ecf8e]">
+                  <Monitor className="h-4 w-4" />
+                  DOC CAD
                 </button>
               )}
 

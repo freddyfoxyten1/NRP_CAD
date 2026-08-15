@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getCadSession, clearCadSession } from '@/lib/cad-session';
+import { getCadSession, clearCadSession, setCadSession } from '@/lib/cad-session';
+import { canAccessDocCad } from '@/lib/cad-access';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { useSelfDispatch } from '@/hooks/useSelfDispatch';
 import { useCadData, type CadCall, type CadGroup } from '@/hooks/useCadData';
@@ -11,6 +12,7 @@ import {
   User, Car, Crosshair, X, ClipboardList, AlertTriangle, History, Gavel, Library,
   PlusCircle, MinusCircle, ArrowRightLeft, FilePlus, Trash2, UserPlus, Check, XCircle,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type UnitStatus = 'Available' | 'Unavailable' | 'Busy' | 'Enroute' | 'On-Scene';
@@ -3465,9 +3467,33 @@ export default function DocCadPage() {
         if (!data.active || !data.account) {
           clearCadSession();
           navigate('/', { replace: true });
-        } else if (isMounted.current) {
-          setSession(data.account);
-          setCadSession(data.account);
+          return;
+        }
+
+        let docRank: string | null = data.account.doc_rank ?? null;
+        if (!docRank && data.account.username) {
+          try {
+            const meRes = await fetch(
+              `/api/doc/me?username=${encodeURIComponent(data.account.username)}`,
+              { headers: { accept: 'application/json' } },
+            );
+            if (meRes.ok) {
+              const me = await meRes.json() as { doc_rank?: string | null } | null;
+              docRank = me?.doc_rank ?? null;
+            }
+          } catch { /* non-fatal */ }
+        }
+
+        if (!canAccessDocCad(data.account, docRank)) {
+          toast.error('You do not have access to the DOC CAD terminal.');
+          navigate('/portal_dashboard', { replace: true });
+          return;
+        }
+
+        const account = { ...data.account, doc_rank: docRank };
+        if (isMounted.current) {
+          setSession(account);
+          setCadSession(account);
         }
       } catch { /* keep existing session on network error */ }
     };

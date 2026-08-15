@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getCadSession, clearCadSession } from '@/lib/cad-session';
+import { getCadSession, clearCadSession, setCadSession } from '@/lib/cad-session';
+import { canAccessDpsCad } from '@/lib/cad-access';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { useSelfDispatch } from '@/hooks/useSelfDispatch';
 import { useCadData, type CadCall, type CadGroup } from '@/hooks/useCadData';
@@ -11,6 +12,7 @@ import {
   User, Car, Crosshair, X, ClipboardList, AlertTriangle, History, Gavel, Library,
   PlusCircle, MinusCircle, ArrowRightLeft, FilePlus, Trash2, UserPlus, Check, XCircle,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type UnitStatus = 'Available' | 'Unavailable' | 'Busy' | 'Enroute' | 'On-Scene';
@@ -3376,6 +3378,9 @@ export default function CadPage() {
         if (!data.active || !data.account) {
           clearCadSession();
           navigate('/', { replace: true });
+        } else if (!canAccessDpsCad(data.account)) {
+          toast.error('You do not have access to the DPS CAD terminal.');
+          navigate('/portal_dashboard', { replace: true });
         } else if (isMounted.current) {
           setSession(data.account);
           setCadSession(data.account);
