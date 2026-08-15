@@ -8,6 +8,7 @@ import { buildLinkedRankByRoleId, pickHighestLinkedDiscordRole } from "../lib/di
 import {
   clearAllDpsPermissionGrants,
   dpsRosterRowExists,
+  resetDpsMemberAccessPermissions,
   resetDpsMemberPermissionGrants,
 } from "../lib/department-permissions.js";
 
@@ -1290,6 +1291,30 @@ router.get("/roster", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "roster GET error");
     res.status(500).json({ error: "Unable to load roster." });
+  }
+});
+
+// ── POST /roster/:id/permissions/clear — revoke Access Permissions for one member ─
+router.post("/roster/:id/permissions/clear", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
+  try {
+    const exists = await dpsRosterRowExists(pool, id);
+    if (!exists) { res.status(404).json({ error: "Member not found." }); return; }
+    await resetDpsMemberAccessPermissions(pool, id);
+    const actor = (req.body as Record<string, unknown>).actor as string
+      || (req.headers["x-actor"] as string)
+      || "Admin";
+    await writeLog(
+      "dps_personnel",
+      actor,
+      "Cleared access permissions",
+      `Profile id: ${id}`,
+    );
+    res.json({ ok: true, id, can_view_all_resources: false, can_access_iab: false });
+  } catch (err) {
+    req.log.error({ err }, "roster permissions clear error");
+    res.status(500).json({ error: "Unable to clear access permissions." });
   }
 });
 

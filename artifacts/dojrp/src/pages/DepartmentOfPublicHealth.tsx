@@ -571,17 +571,21 @@ const RosterAccessPermissionsModal = ({
   iabLabel,
   resourceSaving,
   iabSaving,
+  clearing,
   onClose,
   onToggleResources,
   onToggleIab,
+  onClearAll,
 }: {
   member: RosterMember;
   iabLabel: string;
   resourceSaving: boolean;
   iabSaving: boolean;
+  clearing: boolean;
   onClose: () => void;
   onToggleResources: (enabled: boolean) => void;
   onToggleIab: (enabled: boolean) => void;
+  onClearAll: () => void;
 }) => {
   const rows = [
     {
@@ -611,14 +615,26 @@ const RosterAccessPermissionsModal = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
       <div className="relative w-full max-w-md rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <h3 className="text-base font-black text-white">Access Permissions</h3>
             <p className="mt-0.5 text-xs text-[#526179]">{member.username}</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={onClearAll}
+              disabled={clearing || resourceSaving || iabSaving}
+              title="Remove all access permissions for this member"
+              className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-2.5 py-1.5 text-[10px] font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
+            >
+              <Lock className="h-3 w-3" />
+              {clearing ? 'Clearing…' : 'Clear All'}
+            </button>
+            <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
           {rows.map(row => (
@@ -2296,6 +2312,7 @@ const DepartmentOfPublicHealth = () => {
 
   const [resourceAccessSavingId, setResourceAccessSavingId] = useState<number | null>(null);
   const [clearingPermissionGrants, setClearingPermissionGrants] = useState(false);
+  const [clearingMemberPermissionId, setClearingMemberPermissionId] = useState<number | null>(null);
 
   const handleClearAllPermissionGrants = async () => {
     if (!confirm(
@@ -2404,6 +2421,34 @@ const DepartmentOfPublicHealth = () => {
       toast.error('Failed to update Internal Affairs access.');
     } finally {
       setIabAccessSavingId(null);
+    }
+  };
+
+  const handleClearMemberAccessPermissions = async (member: RosterMember) => {
+    if (!confirm(`Remove all access permissions for ${member.username}?`)) return;
+    setClearingMemberPermissionId(member.id);
+    try {
+      const res = await fetch(`/api/dph/${member.id}/permissions/clear`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-actor': session?.username ?? 'DPH Panel',
+        },
+        body: JSON.stringify({ actor: session?.username ?? 'DPH Panel' }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        toast.error(err.error ?? 'Failed to clear access permissions.');
+        return;
+      }
+      setPanelMembers(prev => prev.map(m =>
+        m.id === member.id ? { ...m, can_view_all_resources: false, can_access_iab: false } : m
+      ));
+      toast.success(`Access permissions cleared for ${member.username}.`);
+    } catch {
+      toast.error('Failed to clear access permissions.');
+    } finally {
+      setClearingMemberPermissionId(null);
     }
   };
 
@@ -2863,9 +2908,11 @@ const DepartmentOfPublicHealth = () => {
             iabLabel="DPH Internal Affairs access"
             resourceSaving={resourceAccessSavingId === accessMember.id}
             iabSaving={iabAccessSavingId === accessMember.id}
+            clearing={clearingMemberPermissionId === accessMember.id}
             onClose={() => setAccessMemberId(null)}
             onToggleResources={enabled => void handleToggleViewAllResources(accessMember, enabled)}
             onToggleIab={enabled => void handleToggleIabAccess(accessMember, enabled)}
+            onClearAll={() => void handleClearMemberAccessPermissions(accessMember)}
           />
         );
       })()}
@@ -3930,6 +3977,15 @@ const DepartmentOfPublicHealth = () => {
                             className="flex items-center gap-2 rounded-lg border border-[#f4c542]/30 bg-[#f4c542]/5 px-4 py-2 text-xs font-black text-[#f4c542] hover:bg-[#f4c542]/10 transition-colors">
                             <Plus className="h-3.5 w-3.5" />
                             Add Title
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleClearAllPermissionGrants()}
+                            disabled={clearingPermissionGrants}
+                            className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
+                          >
+                            <Lock className="h-3.5 w-3.5" />
+                            {clearingPermissionGrants ? 'Clearing…' : 'Clear All Permissions'}
                           </button>
                         </div>
                       </div>

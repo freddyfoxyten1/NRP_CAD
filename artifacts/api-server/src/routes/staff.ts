@@ -6,6 +6,10 @@ import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-g
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 import { sortStaffByRank } from "../lib/roster-sort.js";
 import { buildLinkedRankByRoleId, pickHighestLinkedDiscordRole } from "../lib/discord-rank-pick.js";
+import {
+  clearAllStaffAccessPermissions,
+  resetStaffMemberAccessPermissions,
+} from "../lib/department-permissions.js";
 
 const router = Router();
 
@@ -532,6 +536,65 @@ router.get("/staff/roster", async (req, res) => {
   } catch (err) {
     req.log?.error?.({ err }, "staff/roster GET error");
     res.status(500).json({ error: "Unable to load staff roster." });
+  }
+});
+
+// ── POST /staff/roster/:id/permissions/clear — revoke Access Permissions for one member
+router.post("/staff/roster/:id/permissions/clear", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Invalid id." }); return;
+  }
+  try {
+    const check = await pool.query(
+      `SELECT id FROM cad_user_profiles WHERE id = $1 LIMIT 1`,
+      [id],
+    );
+    if (!check.rows.length) {
+      res.status(404).json({ error: "Member not found." }); return;
+    }
+    await resetStaffMemberAccessPermissions(pool, id);
+    const actor = (req.body as Record<string, unknown>).actor as string
+      || (req.headers["x-actor"] as string)
+      || "Admin";
+    void writeLog(
+      "staff",
+      actor,
+      "Cleared access permissions",
+      String(id),
+    );
+    res.json({
+      ok: true,
+      id,
+      can_access_iab: false,
+      can_access_system_logs: false,
+      can_access_terms_privacy: false,
+      can_access_terminal_offline: false,
+      can_access_doc_dps_cad: false,
+    });
+  } catch (err) {
+    req.log.error({ err }, "staff permissions clear error");
+    res.status(500).json({ error: "Unable to clear access permissions." });
+  }
+});
+
+// ── POST /staff/permissions/clear-all — revoke all individual Access Permissions grants
+router.post("/staff/permissions/clear-all", async (req, res) => {
+  try {
+    const cleared = await clearAllStaffAccessPermissions(pool);
+    const actor = (req.body as Record<string, unknown>).actor as string
+      || (req.headers["x-actor"] as string)
+      || "Admin";
+    void writeLog(
+      "staff",
+      actor,
+      "Cleared all individual access permissions",
+      `members=${cleared}`,
+    );
+    res.json({ ok: true, members: cleared });
+  } catch (err) {
+    req.log.error({ err }, "staff permissions clear-all error");
+    res.status(500).json({ error: "Unable to clear permission grants." });
   }
 });
 
