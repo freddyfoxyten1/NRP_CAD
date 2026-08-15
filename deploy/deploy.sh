@@ -67,7 +67,12 @@ if [ -n "$DB_HEALTH" ]; then
   fi
 fi
 
+VERSION_JSON="$(curl -sf "http://127.0.0.1:8080/api/health/version" || true)"
 echo ""
-echo "✅ Deploy complete! ($(git rev-parse --short HEAD))"
+echo "✅ Deploy complete! (git $(git rev-parse --short HEAD))"
+if [ -n "$VERSION_JSON" ]; then
+  echo "   Running build: $VERSION_JSON"
+fi
 echo "   Frontend: https://cad.dojrblx.com/"
 echo "   API:      https://cad.dojrblx.com/api/healthz"
+echo "   Version:  https://cad.dojrblx.com/api/health/version"

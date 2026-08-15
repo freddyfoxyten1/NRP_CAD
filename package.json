@@ -16,7 +16,7 @@
     "preview": "bun ./scripts/preview-local.mjs",
     "preview:build": "bun run --cwd ./artifacts/dojrp build",
     "preview:serve": "bun run --cwd ./artifacts/dojrp serve",
-    "build": "bun run --cwd ./artifacts/api-server build && bun run --cwd ./artifacts/dojrp build",
+    "build": "bun run --cwd ./artifacts/api-server build && bun run --cwd ./artifacts/dojrp build && bun ./scripts/write-build-info.mjs",
     "migrate:mongo": "bun run --cwd ./lib/db migrate:mongo",
     "migrate:mongo:verify": "bun run --cwd ./lib/db migrate:mongo:verify",
     "typecheck:libs": "bunx tsc --build",
