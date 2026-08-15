@@ -589,9 +589,9 @@ router.post("/staff/permissions/clear-all", async (req, res) => {
       "staff",
       actor,
       "Cleared all individual access permissions",
-      `members=${cleared}`,
+      `members=${cleared.members} titleGroups=${cleared.titleGroups}`,
     );
-    res.json({ ok: true, members: cleared });
+    res.json({ ok: true, ...cleared });
   } catch (err) {
     req.log.error({ err }, "staff permissions clear-all error");
     res.status(500).json({ error: "Unable to clear permission grants." });

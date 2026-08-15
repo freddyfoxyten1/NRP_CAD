@@ -2403,9 +2403,9 @@ const AdminPortal = () => {
 
   const handleClearAllStaffPermissionGrants = async () => {
     if (!confirm(
-      'Remove all individual access permissions for every staff roster member?\n\n'
-      + 'This clears IAB, System Logs, TS&PP, Terminal Lockdown, and DOC & DPS CAD grants. '
-      + 'Title-based Staff Portal, Admin Portal, and DOC access from rank groups is not changed.',
+      'Remove everyones permissions for the entire staff roster?\n\n'
+      + 'This clears all individual access grants (IAB, System Logs, TS&PP, Terminal Lockdown, DOC & DPS CAD) '
+      + 'and turns off Staff Portal, Admin Portal, and DOC access on every non-Executive title group.',
     )) return;
     setClearingStaffPermissionGrants(true);
     try {
@@ -2419,13 +2419,13 @@ const AdminPortal = () => {
       });
       if (!res.ok) {
         const err = await res.json() as { error?: string };
-        toast.error(err.error ?? 'Failed to clear permission grants.');
+        toast.error(err.error ?? 'Failed to remove permissions.');
         return;
       }
-      toast.success('All individual access permissions were removed.');
+      toast.success('Everyones permissions were removed.');
       fetchStaffRoster();
     } catch {
-      toast.error('Failed to clear permission grants.');
+      toast.error('Failed to remove permissions.');
     } finally {
       setClearingStaffPermissionGrants(false);
     }
@@ -3298,7 +3298,7 @@ const AdminPortal = () => {
                         className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
                       >
                         <Lock className="h-3.5 w-3.5" />
-                        {clearingStaffPermissionGrants ? 'Clearing…' : 'Clear All Permissions'}
+                        {clearingStaffPermissionGrants ? 'Removing…' : 'Remove Everyones Permissions'}
                       </button>
                     </div>
                   </div>
