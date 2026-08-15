@@ -35,18 +35,19 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function start() {
-  try {
-    const stores = await initDataStores();
-    logger.info(
-      { dataStore: isMongoStore() ? "mongo" : "sql", mongo: stores.mongo, redis: stores.redis },
-      "Data stores initialized",
-    );
-  } catch (err) {
-    logger.error({ err }, "Failed to initialize data stores");
-    if (isMongoStore()) process.exit(1);
-  }
+  let storesReady = false;
 
   app.get("/api/health/db", async (_req, res) => {
+    if (!storesReady) {
+      res.status(503).json({
+        dataStore: isMongoStore() ? "mongo" : "sql",
+        mongo: null,
+        redis: null,
+        ok: false,
+        initializing: true,
+      });
+      return;
+    }
     const mongo = isMongoStore() ? await pingMongo() : null;
     const redis = (process.env.REDIS_URL ?? "").trim() ? await pingRedis() : null;
     res.json({
@@ -61,23 +62,43 @@ async function start() {
     res.json(loadBuildInfo());
   });
 
-  app.listen(port, (err) => {
-    if (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "EADDRINUSE") {
-        logger.error(
-          { err, port },
-          `Port ${port} is already in use. Stop the other API process (or free the port), then run bun dev again.`,
-        );
-      } else {
-        logger.error({ err }, "Error listening on port");
+  await new Promise<void>((resolve, reject) => {
+    app.listen(port, (err) => {
+      if (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "EADDRINUSE") {
+          logger.error(
+            { err, port },
+            `Port ${port} is already in use. Stop the other API process (or free the port), then run bun dev again.`,
+          );
+        } else {
+          logger.error({ err }, "Error listening on port");
+        }
+        reject(err);
+        return;
       }
-      process.exit(1);
-    }
-
-    logger.info({ port }, "Server listening");
-    startDiscordGateway();
+      resolve();
+    });
   });
+
+  logger.info({ port }, "Server listening");
+  startDiscordGateway();
+
+  try {
+    const stores = await initDataStores();
+    storesReady = true;
+    logger.info(
+      { dataStore: isMongoStore() ? "mongo" : "sql", mongo: stores.mongo, redis: stores.redis },
+      "Data stores initialized",
+    );
+  } catch (err) {
+    logger.error(
+      { err },
+      isMongoStore()
+        ? "Failed to initialize MongoDB — API stays up for health checks; data routes may fail until Mongo is reachable"
+        : "Failed to initialize data stores",
+    );
+  }
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -87,4 +108,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-void start();
+void start().catch((err) => {
+  logger.error({ err }, "API startup failed");
+  process.exit(1);
+});
