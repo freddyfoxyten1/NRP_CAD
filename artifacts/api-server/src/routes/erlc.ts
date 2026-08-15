@@ -16,7 +16,7 @@ async function erlcFetch<T>(path: string): Promise<T> {
   if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
 
   const res = await fetch(`${ERLC_BASE}${path}`, {
-    headers: { "Server-Key": ERLC_KEY, "Content-Type": "application/json" },
+    headers: { "server-key": ERLC_KEY, "Content-Type": "application/json" },
     signal: AbortSignal.timeout(8_000),
   });
   if (!res.ok) throw new Error(`ERLC API ${res.status}: ${path}`);
