@@ -33,7 +33,7 @@ import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
 import { buildPersonnelTitleGroups, dedupeRosterMembersById, sortByRankThenCallsign } from '@/lib/roster-sort';
-import { fetchRosterArray, normalizeRankGroupId, rankBelongsToGroup } from '@/lib/roster-fetch';
+import { fetchRosterArray, fetchRosterJson, normalizeRankGroupId, rankBelongsToGroup } from '@/lib/roster-fetch';
 import { collectDepartmentPermissions } from '@/lib/permission-access';
 import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
 
@@ -1755,10 +1755,9 @@ const DepartmentOfPublicSafety = () => {
   useEffect(() => {
     if (activeTab !== 'vehicle-roster') return;
     setFleetLoading(true);
-    fetch('/api/roster/vehicles', { headers: { accept: 'application/json' }, cache: 'no-store' })
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then((rows: unknown) => setFleet(Array.isArray(rows) ? rows as FleetVehicle[] : []))
-      .catch(() => toast.error('Failed to load vehicle roster.'))
+    fetchRosterArray<FleetVehicle>('/api/roster/vehicles', 'vehicle roster')
+      .then(setFleet)
+      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load vehicle roster.'))
       .finally(() => setFleetLoading(false));
   }, [activeTab]);
 
@@ -1766,29 +1765,27 @@ const DepartmentOfPublicSafety = () => {
   useEffect(() => {
     if (activeTab !== 'equipment-roster') return;
     setEquipmentLoading(true);
-    fetch('/api/roster/equipment', { headers: { accept: 'application/json' }, cache: 'no-store' })
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then((rows: unknown) => setEquipment(Array.isArray(rows) ? rows as EquipmentItem[] : []))
-      .catch(() => toast.error('Failed to load equipment roster.'))
+    fetchRosterArray<EquipmentItem>('/api/roster/equipment', 'equipment roster')
+      .then(setEquipment)
+      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load equipment roster.'))
       .finally(() => setEquipmentLoading(false));
   }, [activeTab]);
 
   // ── Mount: load groups + ranks so the Department Panel access check works ─────
   useEffect(() => {
     Promise.all([
-      fetch('/api/roster/groups', { headers: { accept: 'application/json' } }).then(r => r.json()),
-      fetch('/api/roster/ranks',  { headers: { accept: 'application/json' } }).then(r => r.json()),
-      fetch('/api/roster/divisions', { headers: { accept: 'application/json' } }).then(r => r.json()),
-      fetch('/api/roster/division-ranks', { headers: { accept: 'application/json' } }).then(r => r.json()),
+      fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups'),
+      fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks'),
+      fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
+      fetchRosterArray<{ id: number; name: string; division_id: number | null }>('/api/roster/division-ranks', 'division ranks'),
     ]).then(([grps, rnks, divs, divRanks]) => {
-      setGroups(Array.isArray(grps) ? grps : []);
-      setRanks(Array.isArray(rnks) ? rnks : []);
-      setDivisionRanksForEdit(Array.isArray(divRanks) ? divRanks : []);
-      const divisionRows = Array.isArray(divs) ? (divs as RosterDivision[]) : [];
-      setRosterDivisions(divisionRows);
+      setGroups(grps);
+      setRanks(rnks);
+      setDivisionRanksForEdit(divRanks);
+      setRosterDivisions(divs);
       setDivisionStats({
-        divisions: divisionRows.length,
-        ranks: Array.isArray(divRanks) ? divRanks.length : 0,
+        divisions: divs.length,
+        ranks: divRanks.length,
       });
     }).catch(() => { /* silent — button just won't show until data is available */ });
   }, []);
@@ -1797,11 +1794,8 @@ const DepartmentOfPublicSafety = () => {
   useEffect(() => {
     if (activeTab !== 'resources') return;
     if (roster.length > 0) return;
-    fetch('/api/roster', { headers: { accept: 'application/json' } })
-      .then(r => (r.ok ? r.json() : null))
-      .then((rows: unknown) => {
-        if (Array.isArray(rows)) setRoster(dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)));
-      })
+    fetchRosterArray<RosterMember>('/api/roster', 'roster')
+      .then((rows) => setRoster(dedupeRosterMembersById(rows.map(normalizeRosterMember))))
       .catch(() => { /* silent — division-only resources may stay hidden until roster loads elsewhere */ });
   }, [activeTab, roster.length]);
 
@@ -1811,45 +1805,26 @@ const DepartmentOfPublicSafety = () => {
     let cancelled = false;
     setRosterLoading(true);
 
-    const loadJson = async <T,>(url: string): Promise<T | null> => {
-      try {
-        const r = await fetch(url, { headers: { accept: 'application/json' } });
-        if (!r.ok) return null;
-        return await r.json() as T;
-      } catch {
-        return null;
-      }
-    };
-
     void (async () => {
       try {
         const [members, grps, rnks, divRanks, divs] = await Promise.all([
-          loadJson<RosterMember[]>('/api/roster'),
-          loadJson<DpsGroup[]>('/api/roster/groups'),
-          loadJson<DpsRank[]>('/api/roster/ranks'),
-          loadJson<{ id: number; name: string; division_id: number | null }[]>('/api/roster/division-ranks'),
-          loadJson<RosterDivision[]>('/api/roster/divisions'),
+          fetchRosterArray<RosterMember>('/api/roster', 'roster'),
+          fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups'),
+          fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks'),
+          fetchRosterArray<{ id: number; name: string; division_id: number | null }>('/api/roster/division-ranks', 'division ranks'),
+          fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
         ]);
         if (cancelled) return;
-        if (!Array.isArray(members)) {
-          setRoster([]);
-          toast.error('Failed to load roster.');
-        } else {
-          setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
-        }
-        if (Array.isArray(grps)) setGroups(grps);
-        else toast.error('Failed to load groups.');
-        if (Array.isArray(rnks)) setRanks(rnks);
-        else toast.error('Failed to load ranks.');
-        if (Array.isArray(divRanks)) setDivisionRanksForEdit(divRanks);
-        if (Array.isArray(divs)) {
-          setRosterDivisions(divs);
-          setDivisionStats(s => ({ ...s, divisions: divs.length, ranks: Array.isArray(divRanks) ? divRanks.length : s.ranks }));
-        }
-      } catch {
+        setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
+        setGroups(grps);
+        setRanks(rnks);
+        setDivisionRanksForEdit(divRanks);
+        setRosterDivisions(divs);
+        setDivisionStats(s => ({ ...s, divisions: divs.length, ranks: divRanks.length }));
+      } catch (err) {
         if (!cancelled) {
           setRoster([]);
-          toast.error('Failed to load roster.');
+          toast.error(err instanceof Error ? err.message : 'Failed to load roster.');
         }
       } finally {
         if (!cancelled) setRosterLoading(false);
@@ -1942,12 +1917,11 @@ const DepartmentOfPublicSafety = () => {
   };
   const fetchEvents = () => {
     setEventsLoading(true);
-    fetch('/api/roster/events', { headers: { accept: 'application/json' } })
-      .then(r => r.json())
-      .then((rows) => setEvents(Array.isArray(rows) ? rows : []))
-      .catch(() => {
+    fetchRosterArray<DpsEvent>('/api/roster/events', 'events')
+      .then(setEvents)
+      .catch((err) => {
         setEvents([]);
-        toast.error('Failed to load events.');
+        toast.error(err instanceof Error ? err.message : 'Failed to load events.');
       })
       .finally(() => setEventsLoading(false));
   };
@@ -2000,28 +1974,28 @@ const DepartmentOfPublicSafety = () => {
   const fetchFleetPanel = () => {
     setFleetLoading(true); setCategoriesLoading(true);
     Promise.all([
-      fetch('/api/roster/vehicles',         { headers: { accept: 'application/json' }, cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
-      fetch('/api/roster/fleet/categories', { headers: { accept: 'application/json' }, cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+      fetchRosterArray<FleetVehicle>('/api/roster/vehicles', 'vehicles'),
+      fetchRosterArray<{ id: number; name: string; sort_order: number }>('/api/roster/fleet/categories', 'vehicle categories'),
     ])
-      .then(([vehicles, cats]: [unknown, unknown]) => {
-        setFleet(Array.isArray(vehicles) ? vehicles as FleetVehicle[] : []);
-        setFleetCategories(Array.isArray(cats) ? cats as {id:number;name:string;sort_order:number}[] : []);
+      .then(([vehicles, cats]) => {
+        setFleet(vehicles);
+        setFleetCategories(cats);
       })
-      .catch(() => toast.error('Failed to load vehicles.'))
+      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load vehicles.'))
       .finally(() => { setFleetLoading(false); setCategoriesLoading(false); });
   };
 
   const fetchEquipmentPanel = () => {
     setEquipmentLoading(true); setEqCategoriesLoading(true);
     Promise.all([
-      fetch('/api/roster/equipment',            { headers: { accept: 'application/json' }, cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
-      fetch('/api/roster/equipment/categories', { headers: { accept: 'application/json' }, cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+      fetchRosterArray<EquipmentItem>('/api/roster/equipment', 'equipment'),
+      fetchRosterArray<{ id: number; name: string; sort_order: number }>('/api/roster/equipment/categories', 'equipment categories'),
     ])
-      .then(([items, cats]: [unknown, unknown]) => {
-        setEquipment(Array.isArray(items) ? items as EquipmentItem[] : []);
-        setEquipmentCategories(Array.isArray(cats) ? cats as {id:number;name:string;sort_order:number}[] : []);
+      .then(([items, cats]) => {
+        setEquipment(items);
+        setEquipmentCategories(cats);
       })
-      .catch(() => toast.error('Failed to load equipment.'))
+      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load equipment.'))
       .finally(() => { setEquipmentLoading(false); setEqCategoriesLoading(false); });
   };
 
@@ -2052,19 +2026,16 @@ const DepartmentOfPublicSafety = () => {
           .then(() => fetchPanelMembers({ silent: true }))
           .catch(() => { /* non-fatal */ });
       }
-      fetch('/api/roster/divisions', { headers: { accept: 'application/json' } })
-        .then(r => r.json())
-        .then(divs => {
-          const rows = Array.isArray(divs) ? (divs as RosterDivision[]) : [];
+      fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions')
+        .then((rows) => {
           setRosterDivisions(rows);
           setDivisionStats(s => ({ ...s, divisions: rows.length }));
         })
         .catch(() => {});
-      fetch('/api/roster/division-ranks', { headers: { accept: 'application/json' } })
-        .then(r => r.json())
-        .then(divRanks => {
-          setDivisionRanksForEdit(Array.isArray(divRanks) ? divRanks : []);
-          setDivisionStats(s => ({ ...s, ranks: Array.isArray(divRanks) ? divRanks.length : 0 }));
+      fetchRosterArray<{ id: number; name: string; division_id: number | null }>('/api/roster/division-ranks', 'division ranks')
+        .then((divRanks) => {
+          setDivisionRanksForEdit(divRanks);
+          setDivisionStats(s => ({ ...s, ranks: divRanks.length }));
         })
         .catch(() => {});
     }
@@ -2086,10 +2057,9 @@ const DepartmentOfPublicSafety = () => {
   // ── Resources fetch ───────────────────────────────────────────────────────────
   const fetchResources = () => {
     setResourcesLoading(true);
-    fetch('/api/resources', { headers: { accept: 'application/json' } })
-      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
-      .then((rows: DpsResource[]) => setResources(rows))
-      .catch(() => toast.error('Failed to load resources.'))
+    fetchRosterArray<DpsResource>('/api/resources', 'resources')
+      .then(setResources)
+      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load resources.'))
       .finally(() => setResourcesLoading(false));
   };
 

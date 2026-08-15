@@ -11,6 +11,20 @@ import {
   resetDpsMemberAccessPermissions,
   resetDpsMemberPermissionGrants,
 } from "../lib/department-permissions.js";
+import {
+  listDpsDivisionRanksMongo,
+  listDpsDivisionsMongo,
+  listDpsEquipmentCategoriesMongo,
+  listDpsEquipmentMongo,
+  listDpsEventsMongo,
+  listDpsFleetCategoriesMongo,
+  listDpsFleetMongo,
+  listDpsPersonnelMongo,
+  listDpsRankGroupsMongo,
+  listDpsRanksMongo,
+  getDpsContentMongo,
+  loadDpsDivisionAssignmentsMongo,
+} from "../lib/dps-roster-mongo.js";
 import { normalizeGroupRow, normalizeRankGroupId, normalizeRankRow } from "../lib/roster-normalize.js";
 
 const router = Router();
@@ -1137,21 +1151,6 @@ async function syncDivisionDiscordRoles(
     } catch (backfillErr) {
       console.warn("dps_users back-fill skipped (columns may not exist yet):", backfillErr);
     }
-
-    if (isMongoStore()) {
-      try {
-        const corrupt = await pool.query<{ id: number; group_id: unknown }>(
-          `SELECT id, group_id FROM dps_ranks WHERE group_id IS NOT NULL`,
-        );
-        for (const row of corrupt.rows) {
-          const fixed = normalizeRankGroupId(row.group_id);
-          if (fixed === row.group_id) continue;
-          await pool.query(`UPDATE dps_ranks SET group_id = $2 WHERE id = $1`, [row.id, fixed]);
-        }
-      } catch (repairErr) {
-        console.warn("[dps] rank group_id repair skipped:", repairErr);
-      }
-    }
   } catch (e) {
     console.error("dps_users migration failed:", e);
   }
@@ -1212,6 +1211,45 @@ const rankOrderSubquery = `
 router.get("/roster", async (req, res) => {
   try {
     const includeAll = req.query.all === "1";
+    if (isMongoStore()) {
+      const rows = await listDpsPersonnelMongo(includeAll);
+      const ids = rows.map(r => Number(r.id));
+      let assignmentMap = new Map<number, DivisionAssignment[]>();
+      try {
+        assignmentMap = await loadDpsDivisionAssignmentsMongo(ids) as Map<number, DivisionAssignment[]>;
+      } catch (assignErr) {
+        req.log.warn({ err: assignErr }, "roster GET division assignments load failed");
+      }
+      const sortedRows = sortDepartmentPersonnel(
+        rows,
+        (row) => Number(row.group_sort_order ?? 999),
+        (row) => Number(row.rank_sort_order ?? 999),
+        (row) => (row.callsign as string | null | undefined) ?? null,
+        (row) => String(row.username ?? ""),
+      );
+      const seenIds = new Set<number>();
+      const uniqueRows = sortedRows.filter((row) => {
+        const id = Number(row.id);
+        if (seenIds.has(id)) return false;
+        seenIds.add(id);
+        return true;
+      });
+      res.json(uniqueRows.map((row) => {
+        const id = Number(row.id);
+        const assignments = assignmentMap.get(id) ?? [];
+        const primary = assignments[0];
+        return {
+          ...row,
+          can_view_all_resources: Boolean(row.can_view_all_resources),
+          can_access_iab: Boolean(row.can_access_iab),
+          division_assignments: assignments,
+          division_rank: primary?.division_rank ?? row.division_rank ?? null,
+          division_name: primary?.division_name ?? null,
+          division_names: assignments.map(a => a.division_name),
+        };
+      }));
+      return;
+    }
     const where = includeAll ? "" : "WHERE lower(d.status) != 'inactive'";
     const orderBy = `ORDER BY COALESCE(rg.sort_order, 999), ${rankOrderSubquery},
                 d.callsign,
@@ -1848,6 +1886,10 @@ router.post("/roster/sync-division-discord-roles", async (_req, res) => {
 // ── GET ranks — ordered list ──────────────────────────────────────────────────
 router.get("/roster/ranks", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      res.json(await listDpsRanksMongo());
+      return;
+    }
     const result = await pool.query(
       `SELECT id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url, discord_role_id,
               callsign_type, callsign_static, callsign_min, callsign_max
@@ -2374,6 +2416,10 @@ router.delete("/roster/rank-callsigns/:csId", async (req, res) => {
 // ── GET groups — ordered list of roster group headings ───────────────────────
 router.get("/roster/groups", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      res.json(await listDpsRankGroupsMongo());
+      return;
+    }
     const result = await pool.query(
       `SELECT id, name, sort_order, panel_access, COALESCE(division_oversight, false) AS division_oversight
          FROM dps_rank_groups ORDER BY sort_order, id`
@@ -2547,6 +2593,10 @@ router.delete("/roster/groups/:id", async (req, res) => {
 
 router.get("/roster/divisions", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      res.json(await listDpsDivisionsMongo());
+      return;
+    }
     const result = await pool.query(
       `SELECT id, name, sort_order, discord_role_id, unit_key FROM dps_divisions ORDER BY sort_order, id`
     );
@@ -3128,6 +3178,10 @@ async function syncDivisionRankCallsigns(rankId: number): Promise<void> {
 
 router.get("/roster/division-ranks", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      res.json(await listDpsDivisionRanksMongo());
+      return;
+    }
     const result = await pool.query(
       `SELECT ${DIVISION_RANK_SELECT}
        FROM dps_division_ranks ORDER BY sort_order, id`
@@ -3597,6 +3651,11 @@ const normalizeFleetRow = (row: Record<string, unknown>) => ({
 
 router.get("/roster/vehicles", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      const rows = await listDpsFleetMongo();
+      res.json(rows.map((row) => normalizeFleetRow(row)));
+      return;
+    }
     const result = await pool.query(
       `SELECT id, name, year, category, category_sort, image_url,
               image_scale, image_position_x, image_position_y,
@@ -3695,6 +3754,10 @@ router.delete("/roster/fleet/:id", async (req, res) => {
 // ── Fleet categories ──────────────────────────────────────────────────────────
 router.get("/roster/fleet/categories", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      res.json(await listDpsFleetCategoriesMongo());
+      return;
+    }
     const r = await pool.query(`SELECT id, name, sort_order FROM dps_fleet_categories ORDER BY sort_order, id`);
     res.json(r.rows);
   } catch { res.status(500).json({ error: "Unable to load categories." }); }
@@ -3765,6 +3828,10 @@ router.post("/roster/fleet/categories/reorder", async (req, res) => {
 // ── Equipment (DPS equipment roster) ──────────────────────────────────────────
 router.get("/roster/equipment", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      res.json(await listDpsEquipmentMongo());
+      return;
+    }
     const result = await pool.query(
       `SELECT id, name, quantity, category, category_sort, image_url,
               image_scale, image_position_x, image_position_y,
@@ -3851,6 +3918,10 @@ router.delete("/roster/equipment/:id", async (req, res) => {
 // ── Equipment categories ──────────────────────────────────────────────────────
 router.get("/roster/equipment/categories", async (_req, res) => {
   try {
+    if (isMongoStore()) {
+      res.json(await listDpsEquipmentCategoriesMongo());
+      return;
+    }
     const r = await pool.query(`SELECT id, name, sort_order FROM dps_equipment_categories ORDER BY sort_order, id`);
     res.json(r.rows);
   } catch { res.status(500).json({ error: "Unable to load equipment categories." }); }
@@ -3922,6 +3993,10 @@ router.post("/roster/equipment/categories/reorder", async (req, res) => {
 router.get("/roster/events", async (req, res) => {
   try {
     const publicOnly = req.query.public === "true";
+    if (isMongoStore()) {
+      res.json(await listDpsEventsMongo(publicOnly));
+      return;
+    }
     const result = await pool.query(
       `SELECT id, title, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date,
               event_time, location, purpose, hosted_by, hosting_department,
@@ -4018,6 +4093,10 @@ router.get("/roster/content/:key", async (req, res) => {
   const allowed = ['index_info', 'page_info'];
   if (!allowed.includes(req.params.key)) { res.status(400).json({ error: "Invalid key." }); return; }
   try {
+    if (isMongoStore()) {
+      res.json(await getDpsContentMongo(req.params.key));
+      return;
+    }
     const r = await pool.query(`SELECT content FROM dps_content WHERE key=$1`, [req.params.key]);
     res.json(r.rows[0]?.content ?? {});
   } catch { res.status(500).json({ error: "Failed to load content." }); }

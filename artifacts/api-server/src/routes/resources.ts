@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { pool } from "@workspace/db";
+import { isMongoStore, pool, getCollection } from "@workspace/db";
 
 const router = Router();
 
@@ -97,6 +97,26 @@ router.get("/resources", async (req, res) => {
       req.query.public === "true"
       || req.query.public === "1"
       || req.query.scope === "public";
+
+    if (isMongoStore()) {
+      const col = await getCollection("resources");
+      let filter: Record<string, unknown> = { department: "dps" };
+      if (Number.isInteger(divisionId) && divisionId > 0) {
+        filter = { department: "dps", division_id: divisionId };
+      } else if (publicOnly) {
+        filter = {
+          department: "dps",
+          division_id: null,
+          division_only: false,
+          personnel_only: false,
+        };
+      }
+      const rows = await col.find(filter).sort({ created_at: -1 }).toArray();
+      const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>));
+      res.json(publicOnly ? normalized.filter(isPublicResource) : normalized);
+      return;
+    }
+
     const params: unknown[] = [];
     let where = "";
     if (Number.isInteger(divisionId) && divisionId > 0) {
@@ -129,6 +149,13 @@ router.get("/resources/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id." });
   try {
+    if (isMongoStore()) {
+      const col = await getCollection("resources");
+      const row = await col.findOne({ id, department: "dps" });
+      if (!row) return res.status(404).json({ error: "Not found." });
+      res.json(normalizeResourceRow(row as Record<string, unknown>));
+      return;
+    }
     const { rows } = await pool.query(
       `SELECT ${RESOURCE_DETAIL_COLS}
          FROM dps_resources WHERE id = $1`,
