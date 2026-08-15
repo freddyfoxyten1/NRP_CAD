@@ -231,3 +231,200 @@ export async function loadDpsDivisionAssignmentsMongo(
   }
   return map;
 }
+
+function parseDivisionInfoContent(raw: unknown): { sections: unknown[] } {
+  if (raw == null) return { sections: [] };
+  if (typeof raw === "object" && !Array.isArray(raw) && Array.isArray((raw as { sections?: unknown }).sections)) {
+    return { sections: (raw as { sections: unknown[] }).sections };
+  }
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object" && Array.isArray((parsed as { sections?: unknown }).sections)) {
+        return { sections: (parsed as { sections: unknown[] }).sections };
+      }
+    } catch { /* ignore */ }
+  }
+  return { sections: [] };
+}
+
+export async function searchDpsMembersMongo(
+  query: string,
+  guildDiscordIds: string[],
+): Promise<Record<string, unknown>[]> {
+  const q = query.trim().toLowerCase();
+  if (!q || guildDiscordIds.length === 0) return [];
+
+  const usersCol = await getCollection("users");
+  const cadMatches = await usersCol
+    .find({ discord_id: { $in: guildDiscordIds } })
+    .limit(200)
+    .toArray();
+
+  type SearchHit = {
+    id: number | null;
+    username: string;
+    discord_username: string | null;
+    discord_id: string | null;
+    rank: string | null;
+  };
+  const hits: SearchHit[] = [];
+  const seenDiscordIds = new Set<string>();
+
+  for (const row of cadMatches) {
+    const username = String(row.username ?? "");
+    const discordUsername = row.discord_username == null ? null : String(row.discord_username);
+    const discordId = row.discord_id == null ? null : String(row.discord_id);
+    const hay = `${username} ${discordUsername ?? ""} ${discordId ?? ""}`.toLowerCase();
+    if (!hay.includes(q)) continue;
+    hits.push({
+      id: Number(row.id),
+      username,
+      discord_username: discordUsername,
+      discord_id: discordId,
+      rank: row.rank == null ? null : String(row.rank),
+    });
+    if (discordId) seenDiscordIds.add(discordId);
+    if (hits.length >= 20) break;
+  }
+
+  return hits.slice(0, 20);
+}
+
+export async function getDpsRankDetailMongo(id: number): Promise<Record<string, unknown> | null> {
+  const ranksCol = await getCollection("dps_ranks");
+  const rankDoc = await ranksCol.findOne({ id });
+  if (!rankDoc) return null;
+  const rank = normalizeRankRow(stripMongoId(rankDoc));
+  const rankName = String(rank.name ?? "");
+
+  const [users, dpsUsers, customCallsigns] = await Promise.all([
+    getCollection("users").find({}).toArray(),
+    getCollection("dps_users").find({}).toArray(),
+    getCollection("dps_rank_custom_callsigns").find({ rank_id: id }).sort({ sort_order: 1, id: 1 }).toArray(),
+  ]);
+  const userById = new Map(users.map(u => [Number(u.id), u]));
+  const rankNameLower = rankName.trim().toLowerCase();
+
+  let members: Record<string, unknown>[] = [];
+  for (const d of dpsUsers) {
+    const dpsRank = d.dps_rank == null ? "" : String(d.dps_rank).trim().toLowerCase();
+    if (dpsRank !== rankNameLower) continue;
+    const profileId = Number(d.profile_id);
+    const p = userById.get(profileId);
+    if (!p) continue;
+    members.push({
+      id: profileId,
+      username: (d.username ?? p.username) as string,
+      discord_username: p.discord_username ?? null,
+      discord_id: p.discord_id ?? null,
+      avatar_hash: p.avatar_hash ?? null,
+      callsign: d.callsign ?? null,
+      dps_rank: d.dps_rank ?? null,
+      status: d.status ?? "Active",
+    });
+  }
+
+  if (rank.callsign_type === "dynamic") {
+    members = [...members].sort((a, b) => {
+      const nA = parseInt(String(a.callsign ?? "").split("-").pop() ?? "", 10);
+      const nB = parseInt(String(b.callsign ?? "").split("-").pop() ?? "", 10);
+      if (!Number.isNaN(nA) && !Number.isNaN(nB)) return nA - nB;
+      return String(a.callsign ?? "").localeCompare(String(b.callsign ?? ""));
+    });
+  } else {
+    members.sort((a, b) => String(a.username ?? "").localeCompare(String(b.username ?? "")));
+  }
+
+  const custom_callsigns = customCallsigns.map((cc) => {
+    const assignedId = cc.assigned_profile_id == null ? null : Number(cc.assigned_profile_id);
+    const p = assignedId == null ? null : userById.get(assignedId);
+    const d = assignedId == null ? null : dpsUsers.find(u => Number(u.profile_id) === assignedId);
+    return {
+      ...stripMongoId(cc),
+      assigned_username: (d?.username ?? p?.username ?? null) as string | null,
+    };
+  });
+
+  return { ...rank, members, custom_callsigns };
+}
+
+export async function getDpsDivisionInfoMongo(id: number): Promise<Record<string, unknown> | null> {
+  const col = await getCollection("dps_divisions");
+  const row = await col.findOne({ id });
+  if (!row) return null;
+  const doc = stripMongoId(row);
+  return {
+    id: Number(doc.id),
+    name: String(doc.name ?? ""),
+    ...parseDivisionInfoContent(doc.info_content),
+  };
+}
+
+export async function getDpsDivisionRankDetailMongo(id: number): Promise<Record<string, unknown> | null> {
+  const ranksCol = await getCollection("dps_division_ranks");
+  const rankDoc = await ranksCol.findOne({ id });
+  if (!rankDoc) return null;
+  const rank = stripMongoId(rankDoc) as {
+    id: number;
+    division_id: number | null;
+    name: string;
+    callsign_type: string | null;
+    callsign_max: number | null;
+  };
+  const divisionId = rank.division_id == null ? null : Number(rank.division_id);
+  const rankNameLower = String(rank.name ?? "").trim().toLowerCase();
+
+  const [users, dpsUsers, userDivisions, customCallsigns] = await Promise.all([
+    getCollection("users").find({}).toArray(),
+    getCollection("dps_users").find({}).toArray(),
+    getCollection("dps_user_divisions").find({}).toArray(),
+    getCollection("dps_division_rank_custom_callsigns").find({ division_rank_id: id }).sort({ sort_order: 1, id: 1 }).toArray(),
+  ]);
+  const userById = new Map(users.map(u => [Number(u.id), u]));
+  const dpsByProfile = new Map(dpsUsers.map(d => [Number(d.profile_id), d]));
+
+  let members: Record<string, unknown>[] = [];
+  for (const ud of userDivisions) {
+    const udDivId = ud.division_id == null ? null : Number(ud.division_id);
+    if (udDivId !== divisionId && !(udDivId == null && divisionId == null)) continue;
+    const udRank = String(ud.division_rank ?? "").trim().toLowerCase();
+    if (udRank !== rankNameLower) continue;
+    const profileId = Number(ud.profile_id);
+    const p = userById.get(profileId);
+    if (!p) continue;
+    const d = dpsByProfile.get(profileId);
+    members.push({
+      id: profileId,
+      username: (d?.username ?? p.username) as string,
+      discord_username: p.discord_username ?? null,
+      discord_id: p.discord_id ?? null,
+      avatar_hash: p.avatar_hash ?? null,
+      callsign: d?.callsign ?? "4D-XX",
+      status: d?.status ?? "Active",
+    });
+  }
+
+  if (rank.callsign_type === "dynamic") {
+    members = [...members].sort((a, b) => {
+      const nA = parseInt(String(a.callsign ?? "").split("-").pop() ?? "", 10);
+      const nB = parseInt(String(b.callsign ?? "").split("-").pop() ?? "", 10);
+      if (!Number.isNaN(nA) && !Number.isNaN(nB)) return nA - nB;
+      return String(a.callsign ?? "").localeCompare(String(b.callsign ?? ""));
+    });
+  } else {
+    members.sort((a, b) => String(a.username ?? "").localeCompare(String(b.username ?? "")));
+  }
+
+  const custom_callsigns = customCallsigns.map((cc) => {
+    const assignedId = cc.assigned_profile_id == null ? null : Number(cc.assigned_profile_id);
+    const p = assignedId == null ? null : userById.get(assignedId);
+    const d = assignedId == null ? null : dpsByProfile.get(assignedId);
+    return {
+      ...stripMongoId(cc),
+      assigned_username: (d?.username ?? p?.username ?? null) as string | null,
+    };
+  });
+
+  return { ...rank, members, custom_callsigns };
+}

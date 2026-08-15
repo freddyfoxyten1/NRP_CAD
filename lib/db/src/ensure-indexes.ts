@@ -80,7 +80,9 @@ export async function ensureMongoIndexes(db: Db): Promise<void> {
     "doc_rank_groups", "doc_ranks", "doc_users",
     "civilians", "vehicles", "weapons", "arrests", "citations", "warnings", "civilian_history",
     "calls", "call_history",
-    "dps_fleet", "dps_equipment", "dps_events", "dps_content", "dps_resources",
+    "dps_fleet", "dps_fleet_categories", "dps_equipment", "dps_equipment_categories",
+    "dps_events", "dps_content", "dps_resources",
+    "dps_rank_custom_callsigns", "dps_division_rank_custom_callsigns",
     "dph_fleet", "dph_equipment", "dph_events", "dph_content", "dph_resources",
     "staff_resources", "staff_events", "doc_fleet",
   ]) {
