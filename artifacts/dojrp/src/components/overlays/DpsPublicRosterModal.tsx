@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Car, ChevronDown, ChevronRight, Package, Search, Users, X } from "lucide-react";
 import { imageStyle } from "@/components/shared/ImageInput";
 import {
-  buildPublicPersonnelTitleGroups,
+  buildPersonnelTitleGroups,
   dedupeRosterMembersById,
   type TitleGroup,
 } from "@/lib/roster-sort";
@@ -314,12 +314,12 @@ export default function DpsPublicRosterModal({
   }, [members, search]);
 
   const groupedMembers = useMemo(() => {
-    return buildPublicPersonnelTitleGroups(
+    return buildPersonnelTitleGroups(
       filteredMembers,
       groups,
       ranks,
       memberRankName,
-    );
+    ).filter(g => g.members.length > 0);
   }, [filteredMembers, groups, ranks]);
 
   const visibleMemberCount = useMemo(
