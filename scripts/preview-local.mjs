@@ -1,6 +1,7 @@
 /**
  * Production-style local preview: build frontend, serve on 4173, optional API.
- * Use `bun run dev` for live reload while editing; use this before a release push.
+ * Default (preview / preview:edit): your local edits before GitHub push.
+ * preview:live: proxied VPS API for production data comparison.
  */
 import { execSync, spawn } from "node:child_process";
 import http from "node:http";
@@ -10,6 +11,9 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = process.env.API_PORT ?? "8080";
 const PREVIEW_PORT = process.env.PREVIEW_PORT ?? "4173";
+/** Live VPS API (Mongo) — set via PREVIEW_API_URL or preview:live script */
+const PREVIEW_API_URL = (process.env.PREVIEW_API_URL ?? "").trim().replace(/\/$/, "");
+const usingRemoteApi = PREVIEW_API_URL.length > 0;
 
 /** Ensure local preview/dev use the repo-root SQLite store, not api-server/cad-database. */
 const previewRedirectUri =
@@ -21,6 +25,7 @@ const previewRedirectUri =
 const repoEnv = {
   ...process.env,
   PREVIEW_PORT,
+  PREVIEW_API_URL,
   CAD_DATABASE_PATH: process.env.CAD_DATABASE_PATH ?? path.join(root, "cad-database"),
   DISCORD_REDIRECT_URI: previewRedirectUri,
 };
@@ -178,7 +183,9 @@ async function ensureApi(label = "API") {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-await ensureApi();
+await (usingRemoteApi
+  ? (console.log(`Using live VPS API (GitHub deploy data): ${PREVIEW_API_URL}`), Promise.resolve(true))
+  : ensureApi());
 
 console.log("Building frontend…");
 try {
@@ -193,7 +200,7 @@ try {
   shutdown(1);
 }
 
-if (!(await isApiHealthy())) {
+if (!usingRemoteApi && !(await isApiHealthy())) {
   console.warn("API stopped during build; restarting…");
   await ensureApi();
 }
@@ -212,13 +219,22 @@ if (ready) {
     [
       "",
       "═══════════════════════════════════════════════════════════════",
-      "  DOJCAD production preview (private — not on GitHub)",
+      usingRemoteApi
+        ? "  DOJCAD preview — live VPS data (compare with production)"
+        : "  DOJCAD edit preview — local changes before GitHub push",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site:  http://localhost:${PREVIEW_PORT}/`,
-      `  API:   http://localhost:${API_PORT}/api/healthz`,
+      usingRemoteApi
+        ? `  API:   ${PREVIEW_API_URL}/api/healthz  (proxied from VPS)`
+        : `  API:   http://localhost:${API_PORT}/api/healthz  (local build + DB)`,
       "",
-      "  Re-run after code changes (rebuilds first). For live edits use: bun run dev",
+      usingRemoteApi
+        ? "  Live production data. For pre-push edit preview use: bun run preview"
+        : "  Production build of your current edits — same as after git push + VPS deploy.",
+      "",
+      "  Live reload while editing: bun run dev",
+      "  Production data check:    bun run preview:live",
       "",
       `  Discord sign-in redirect: ${previewRedirectUri}`,
       "  Add that URI in the Discord Developer Portal if sign-in fails.",
