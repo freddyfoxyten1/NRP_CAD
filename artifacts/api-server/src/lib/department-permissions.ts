@@ -18,6 +18,34 @@ export async function dphRosterRowExists(pool: Pool, profileId: number): Promise
   return (result.rowCount ?? 0) > 0;
 }
 
+/** Clear Access Permissions modal grants (Resources + IAB) for one DPS member. */
+export async function resetDpsMemberAccessPermissions(pool: Pool, profileId: number): Promise<void> {
+  await pool.query(
+    `UPDATE dps_users
+        SET can_view_all_resources = false, updated_at = NOW()
+      WHERE profile_id = $1`,
+    [profileId],
+  );
+  await pool.query(
+    `UPDATE cad_user_profiles
+        SET can_access_iab = false, updated_at = NOW()
+      WHERE id = $1`,
+    [profileId],
+  );
+}
+
+/** Clear Access Permissions modal grants (Resources + IAB) for one DPH member. */
+export async function resetDphMemberAccessPermissions(pool: Pool, profileId: number): Promise<void> {
+  await pool.query(
+    `UPDATE dph_users
+        SET can_view_all_resources = false,
+            can_access_iab = false,
+            updated_at = NOW()
+      WHERE profile_id = $1`,
+    [profileId],
+  );
+}
+
 /** Clear individual DPS permission grants for one roster member. */
 export async function resetDpsMemberPermissionGrants(pool: Pool, profileId: number): Promise<void> {
   await pool.query(
@@ -124,4 +152,60 @@ export async function clearAllDphPermissionGrants(pool: Pool): Promise<{
     iab: Number(iab.rowCount ?? 0),
     divisionEditors: Number(divisionEditors.rowCount ?? 0),
   };
+}
+
+async function staffRosterFilterNames(pool: Pool): Promise<{ groupNames: string[]; rankNames: string[] }> {
+  const groupsRes = await pool.query<{ name: string }>(`SELECT name FROM staff_rank_groups`);
+  const ranksRes = await pool.query<{ name: string }>(`SELECT name FROM staff_ranks`);
+  return {
+    groupNames: groupsRes.rows.map(r => String(r.name).trim().toLowerCase()).filter(Boolean),
+    rankNames: ranksRes.rows.map(r => String(r.name).trim().toLowerCase()).filter(Boolean),
+  };
+}
+
+const STAFF_ROSTER_WHERE = `(
+  lower(COALESCE(staff_role, '')) = ANY($1::text[])
+  OR (
+    staff_rank IS NOT NULL AND staff_rank != ''
+    AND lower(staff_rank) = ANY($2::text[])
+  )
+)`;
+
+/** Clear Access Permissions modal grants for one staff roster member. */
+export async function resetStaffMemberAccessPermissions(pool: Pool, profileId: number): Promise<void> {
+  await pool.query(
+    `UPDATE cad_user_profiles
+        SET can_access_iab = false,
+            can_access_system_logs = false,
+            can_access_terms_privacy = false,
+            can_access_terminal_offline = false,
+            can_access_doc_dps_cad = false,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [profileId],
+  );
+}
+
+/** Revoke all individual staff Access Permissions grants for every roster member. */
+export async function clearAllStaffAccessPermissions(pool: Pool): Promise<number> {
+  const { groupNames, rankNames } = await staffRosterFilterNames(pool);
+  const result = await pool.query(
+    `UPDATE cad_user_profiles
+        SET can_access_iab = false,
+            can_access_system_logs = false,
+            can_access_terms_privacy = false,
+            can_access_terminal_offline = false,
+            can_access_doc_dps_cad = false,
+            updated_at = NOW()
+      WHERE ${STAFF_ROSTER_WHERE}
+        AND (
+          can_access_iab = true
+          OR can_access_system_logs = true
+          OR can_access_terms_privacy = true
+          OR can_access_terminal_offline = true
+          OR can_access_doc_dps_cad = true
+        )`,
+    [groupNames, rankNames],
+  );
+  return Number(result.rowCount ?? 0);
 }

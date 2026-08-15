@@ -480,12 +480,14 @@ const StaffAccessPermissionsModal = ({
   onClose,
   iabSaving,
   adminTabSaving,
+  clearing,
   onToggleIab,
   onToggleAdminTab,
   onToggleTerminalOffline,
   onToggleDocDpsCad,
   terminalSaving,
   cadSaving,
+  onClearAll,
 }: {
   member: StaffMember;
   onClose: () => void;
@@ -493,10 +495,12 @@ const StaffAccessPermissionsModal = ({
   adminTabSaving: boolean;
   terminalSaving: boolean;
   cadSaving: boolean;
+  clearing: boolean;
   onToggleIab: (enabled: boolean) => void;
   onToggleAdminTab: (field: 'can_access_system_logs' | 'can_access_terms_privacy', enabled: boolean) => void;
   onToggleTerminalOffline: (enabled: boolean) => void;
   onToggleDocDpsCad: (enabled: boolean) => void;
+  onClearAll: () => void;
 }) => {
   const rows: Array<{
     key: string;
@@ -569,14 +573,26 @@ const StaffAccessPermissionsModal = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
       <div className="relative w-full max-w-md rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <h3 className="text-base font-black text-white">Access Permissions</h3>
             <p className="mt-0.5 text-xs text-[#526179]">{member.username}</p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={onClearAll}
+              disabled={clearing || iabSaving || adminTabSaving || terminalSaving || cadSaving}
+              title="Remove all access permissions for this member"
+              className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-2.5 py-1.5 text-[10px] font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
+            >
+              <Lock className="h-3 w-3" />
+              {clearing ? 'Clearing…' : 'Clear All'}
+            </button>
+            <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="space-y-2">
           {rows.map(row => (
@@ -852,6 +868,8 @@ const AdminPortal = () => {
   const [adminTabAccessSavingId, setAdminTabAccessSavingId] = useState<number | null>(null);
   const [terminalAccessSavingId, setTerminalAccessSavingId] = useState<number | null>(null);
   const [cadAccessSavingId, setCadAccessSavingId] = useState<number | null>(null);
+  const [clearingStaffPermissionGrants, setClearingStaffPermissionGrants] = useState(false);
+  const [clearingStaffMemberPermissionId, setClearingStaffMemberPermissionId] = useState<number | null>(null);
   // Group management
   const [addStaffGroupOpen,    setAddStaffGroupOpen]    = useState(false);
   const [newStaffGroupName,    setNewStaffGroupName]    = useState('');
@@ -2383,6 +2401,75 @@ const AdminPortal = () => {
     }
   };
 
+  const handleClearAllStaffPermissionGrants = async () => {
+    if (!confirm(
+      'Remove all individual access permissions for every staff roster member?\n\n'
+      + 'This clears IAB, System Logs, TS&PP, Terminal Lockdown, and DOC & DPS CAD grants. '
+      + 'Title-based Staff Portal, Admin Portal, and DOC access from rank groups is not changed.',
+    )) return;
+    setClearingStaffPermissionGrants(true);
+    try {
+      const res = await fetch('/api/staff/permissions/clear-all', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-actor': currentAdmin?.username ?? 'Admin',
+        },
+        body: JSON.stringify({ actor: currentAdmin?.username ?? 'Admin' }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        toast.error(err.error ?? 'Failed to clear permission grants.');
+        return;
+      }
+      toast.success('All individual access permissions were removed.');
+      fetchStaffRoster();
+    } catch {
+      toast.error('Failed to clear permission grants.');
+    } finally {
+      setClearingStaffPermissionGrants(false);
+    }
+  };
+
+  const handleClearStaffMemberAccessPermissions = async (memberId: number) => {
+    const member = staffRosterMembers.find(m => m.id === memberId);
+    if (!member) return;
+    if (!confirm(`Remove all access permissions for ${member.username}?`)) return;
+    setClearingStaffMemberPermissionId(memberId);
+    try {
+      const res = await fetch(`/api/staff/roster/${memberId}/permissions/clear`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-actor': currentAdmin?.username ?? 'Admin',
+        },
+        body: JSON.stringify({ actor: currentAdmin?.username ?? 'Admin' }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        toast.error(err.error ?? 'Failed to clear access permissions.');
+        return;
+      }
+      setStaffRosterMembers(prev => prev.map(m =>
+        m.id === memberId
+          ? {
+            ...m,
+            can_access_iab: false,
+            can_access_system_logs: false,
+            can_access_terms_privacy: false,
+            can_access_terminal_offline: false,
+            can_access_doc_dps_cad: false,
+          }
+          : m
+      ));
+      toast.success(`Access permissions cleared for ${member.username}.`);
+    } catch {
+      toast.error('Failed to clear access permissions.');
+    } finally {
+      setClearingStaffMemberPermissionId(null);
+    }
+  };
+
   const handleMoveStaffGroup = async (id: number, direction: 'up' | 'down') => {
     const sorted = [...staffGroups].filter(g => !g.locked).sort((a, b) => a.sort_order - b.sort_order);
     const idx = sorted.findIndex(g => g.id === id);
@@ -3151,10 +3238,12 @@ const AdminPortal = () => {
                       adminTabSaving={adminTabAccessSavingId === accessMember.id}
                       terminalSaving={terminalAccessSavingId === accessMember.id}
                       cadSaving={cadAccessSavingId === accessMember.id}
+                      clearing={clearingStaffMemberPermissionId === accessMember.id}
                       onToggleIab={enabled => void handleToggleStaffIabAccess(accessMember.id, enabled)}
                       onToggleAdminTab={(field, enabled) => void handleToggleStaffAdminTabAccess(accessMember.id, field, enabled)}
                       onToggleTerminalOffline={enabled => void handleToggleStaffTerminalOfflineAccess(accessMember.id, enabled)}
                       onToggleDocDpsCad={enabled => void handleToggleStaffDocDpsCadAccess(accessMember.id, enabled)}
+                      onClearAll={() => void handleClearStaffMemberAccessPermissions(accessMember.id)}
                     />
                   );
                 })()}
@@ -3201,6 +3290,15 @@ const AdminPortal = () => {
                         className="flex items-center gap-2 rounded-lg border border-[#4384ff]/30 bg-[#4384ff]/5 px-3.5 py-2 text-xs font-black text-[#4384ff] hover:bg-[#4384ff]/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                         <Link className={`h-3.5 w-3.5 ${assigningDiscordRoles ? 'animate-pulse' : ''}`} />
                         {assigningDiscordRoles ? 'Assigning...' : 'Assign Roles'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleClearAllStaffPermissionGrants()}
+                        disabled={clearingStaffPermissionGrants}
+                        className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
+                      >
+                        <Lock className="h-3.5 w-3.5" />
+                        {clearingStaffPermissionGrants ? 'Clearing…' : 'Clear All Permissions'}
                       </button>
                     </div>
                   </div>
