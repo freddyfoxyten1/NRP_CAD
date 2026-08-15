@@ -36,6 +36,7 @@ const normalizeResourceRow = (row: Record<string, unknown>) => ({
 
 // ── One-time migration ────────────────────────────────────────────────────────
 (async () => {
+  if (isMongoStore()) return;
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS dps_resources (

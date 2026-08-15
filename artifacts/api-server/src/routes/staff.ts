@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { isUniqueViolation, pool } from "@workspace/db";
+import { isUniqueViolation, isMongoStore, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 import { isSuperAdminDiscordId } from "../lib/superadmin";
 import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
@@ -361,6 +361,7 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
 
 // ── One-time migrations ───────────────────────────────────────────────────────
 (async () => {
+  if (isMongoStore()) return;
   try {
     await pool.query(
       `ALTER TABLE staff_rank_groups ADD COLUMN IF NOT EXISTS staff_access boolean NOT NULL DEFAULT true`

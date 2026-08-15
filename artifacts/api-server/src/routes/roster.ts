@@ -910,6 +910,7 @@ async function syncDivisionDiscordRoles(
 
 // ── One-time migration: create dps_users, add username column, back-fill ──────
 (async () => {
+  if (isMongoStore()) return;
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS dps_users (
