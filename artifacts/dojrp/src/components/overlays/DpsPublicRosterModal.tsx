@@ -6,6 +6,7 @@ import {
   dedupeRosterMembersById,
   type TitleGroup,
 } from "@/lib/roster-sort";
+import { normalizeRankGroupId } from "@/lib/roster-fetch";
 
 type RosterTab = "personnel" | "vehicles" | "equipment";
 
@@ -246,7 +247,7 @@ export default function DpsPublicRosterModal({
             name: String(row.name ?? ""),
             color_hex: row.color_hex == null ? null : String(row.color_hex),
             insignia_url: row.insignia_url == null ? null : String(row.insignia_url),
-            group_id: row.group_id == null || row.group_id === "" ? null : Number(row.group_id),
+            group_id: normalizeRankGroupId(row.group_id),
             sort_order: Number(row.sort_order ?? 999),
           })),
         );

@@ -28,6 +28,7 @@ import {
   resetDphMemberAccessPermissions,
   resetDphMemberPermissionGrants,
 } from "../lib/department-permissions.js";
+import { normalizeGroupRow, normalizeRankRow } from "../lib/roster-normalize.js";
 
 const router = Router();
 
@@ -1015,7 +1016,7 @@ router.get("/dph/ranks", async (_req, res) => {
     const result = await pool.query(
       `SELECT ${RANK_COLS} FROM dph_ranks ORDER BY sort_order, id`
     );
-    res.json(result.rows);
+    res.json(result.rows.map(r => normalizeRankRow(r as Record<string, unknown>)));
   } catch {
     res.status(500).json({ error: "Unable to load ranks." });
   }
@@ -1273,7 +1274,7 @@ router.post("/dph/ranks", async (req, res) => {
       ]
     );
     if (discord_role_id?.trim()) void syncDphDiscordRoles().catch(console.error);
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(normalizeRankRow(result.rows[0] as Record<string, unknown>));
   } catch (err: unknown) {
     req.log.error({ err }, "dph ranks POST error");
     if (isUniqueViolation(err)) { res.status(409).json({ error: "A rank with that name already exists." }); return; }
@@ -1419,19 +1420,13 @@ router.delete("/dph/ranks/:id", async (req, res) => {
 const GROUP_COLS = `id, name, sort_order, COALESCE(panel_access, false) AS panel_access,
   COALESCE(division_oversight, false) AS division_oversight`;
 
-const normalizeGroup = (row: Record<string, unknown>) => ({
-  ...row,
-  panel_access: Boolean(row.panel_access),
-  division_oversight: Boolean(row.division_oversight),
-});
-
 // ── GET groups ────────────────────────────────────────────────────────────────
 router.get("/dph/groups", async (_req, res) => {
   try {
     const result = await pool.query(
       `SELECT ${GROUP_COLS} FROM dph_rank_groups ORDER BY sort_order, id`
     );
-    res.json(result.rows.map((r: Record<string, unknown>) => normalizeGroup(r)));
+    res.json(result.rows.map((r: Record<string, unknown>) => normalizeGroupRow(r)));
   } catch (err) {
     _req.log.error({ err }, "dph groups GET error");
     res.status(500).json({ error: "Unable to load groups." });
@@ -1449,7 +1444,7 @@ router.post("/dph/groups", async (req, res) => {
       `INSERT INTO dph_rank_groups (name, sort_order) VALUES ($1, $2) RETURNING ${GROUP_COLS}`,
       [name.trim(), nextOrder]
     );
-    res.status(201).json(normalizeGroup(result.rows[0] as Record<string, unknown>));
+    res.status(201).json(normalizeGroupRow(result.rows[0] as Record<string, unknown>));
   } catch (err: unknown) {
     const pg = err as { code?: string };
     if (pg.code === "23505") { res.status(409).json({ error: "A group with that name already exists." }); return; }
@@ -1472,7 +1467,7 @@ router.post("/dph/groups/reorder", async (req, res) => {
       `SELECT ${GROUP_COLS} FROM dph_rank_groups WHERE id = ANY($1) ORDER BY sort_order`,
       [ids]
     );
-    res.json(result.rows.map((r: Record<string, unknown>) => normalizeGroup(r)));
+    res.json(result.rows.map((r: Record<string, unknown>) => normalizeGroupRow(r)));
   } catch (err) {
     req.log.error({ err }, "dph groups reorder error");
     res.status(500).json({ error: "Unable to reorder groups." });
@@ -1504,7 +1499,7 @@ router.patch("/dph/groups/:id", async (req, res) => {
         panel_access ? 'Granted panel access' : 'Revoked panel access',
         `Group: ${groupName}`
       );
-      res.json(normalizeGroup(result.rows[0] as Record<string, unknown>)); return;
+      res.json(normalizeGroupRow(result.rows[0] as Record<string, unknown>)); return;
     }
 
     if (division_oversight !== undefined && name === undefined && direction === undefined && panel_access === undefined) {
@@ -1520,7 +1515,7 @@ router.patch("/dph/groups/:id", async (req, res) => {
         division_oversight ? 'Granted division oversight' : 'Revoked division oversight',
         `Group: ${groupName}`
       );
-      res.json(normalizeGroup(result.rows[0] as Record<string, unknown>)); return;
+      res.json(normalizeGroupRow(result.rows[0] as Record<string, unknown>)); return;
     }
 
     if (name !== undefined) {
@@ -1531,7 +1526,7 @@ router.patch("/dph/groups/:id", async (req, res) => {
         [id, name.trim()]
       );
       if (result.rowCount === 0) { res.status(404).json({ error: "Group not found." }); return; }
-      res.json(normalizeGroup(result.rows[0] as Record<string, unknown>)); return;
+      res.json(normalizeGroupRow(result.rows[0] as Record<string, unknown>)); return;
     }
 
     if (direction === "up" || direction === "down") {

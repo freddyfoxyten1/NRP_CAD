@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { isUniqueViolation, pool } from "@workspace/db";
+import { isUniqueViolation, isMongoStore, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
 import { getDiscordGuildRoles, wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
@@ -11,6 +11,7 @@ import {
   resetDpsMemberAccessPermissions,
   resetDpsMemberPermissionGrants,
 } from "../lib/department-permissions.js";
+import { normalizeGroupRow, normalizeRankGroupId, normalizeRankRow } from "../lib/roster-normalize.js";
 
 const router = Router();
 
@@ -1136,6 +1137,21 @@ async function syncDivisionDiscordRoles(
     } catch (backfillErr) {
       console.warn("dps_users back-fill skipped (columns may not exist yet):", backfillErr);
     }
+
+    if (isMongoStore()) {
+      try {
+        const corrupt = await pool.query<{ id: number; group_id: unknown }>(
+          `SELECT id, group_id FROM dps_ranks WHERE group_id IS NOT NULL`,
+        );
+        for (const row of corrupt.rows) {
+          const fixed = normalizeRankGroupId(row.group_id);
+          if (fixed === row.group_id) continue;
+          await pool.query(`UPDATE dps_ranks SET group_id = $2 WHERE id = $1`, [row.id, fixed]);
+        }
+      } catch (repairErr) {
+        console.warn("[dps] rank group_id repair skipped:", repairErr);
+      }
+    }
   } catch (e) {
     console.error("dps_users migration failed:", e);
   }
@@ -1837,7 +1853,7 @@ router.get("/roster/ranks", async (_req, res) => {
               callsign_type, callsign_static, callsign_min, callsign_max
        FROM dps_ranks ORDER BY sort_order, id`
     );
-    res.json(result.rows);
+    res.json(result.rows.map(r => normalizeRankRow(r as Record<string, unknown>)));
   } catch (err) {
     res.status(500).json({ error: "Unable to load ranks." });
   }
@@ -1884,7 +1900,11 @@ router.get("/roster/ranks/:id", async (req, res) => {
         return (a.callsign ?? '').localeCompare(b.callsign ?? '');
       });
     }
-    res.json({ ...rank, members, custom_callsigns: csRes.rows });
+    res.json({
+      ...normalizeRankRow(rank as Record<string, unknown>),
+      members,
+      custom_callsigns: csRes.rows,
+    });
   } catch (err) {
     req.log.error({ err }, "ranks/:id GET error");
     res.status(500).json({ error: "Unable to load rank." });
@@ -1909,7 +1929,7 @@ router.post("/roster/ranks/reorder", async (req, res) => {
        FROM dps_ranks WHERE id = ANY($1) ORDER BY sort_order`,
       [ids]
     );
-    res.json(result.rows);
+    res.json(result.rows.map(r => normalizeRankRow(r as Record<string, unknown>)));
   } catch (err) {
     req.log.error({ err }, "ranks reorder error");
     res.status(500).json({ error: "Unable to reorder ranks." });
@@ -1939,7 +1959,7 @@ router.post("/roster/ranks", async (req, res) => {
        insignia_url?.trim() ?? null, discord_role_id?.trim() || null,
        callsign_type?.trim() || null, callsign_static?.trim() || null, csMin, csMax]
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(normalizeRankRow(result.rows[0] as Record<string, unknown>));
     if (discord_role_id?.trim()) void syncDpsDiscordRoles().catch(console.error);
   } catch (err: unknown) {
     req.log.error({ err }, "dps ranks POST error");
@@ -2359,9 +2379,7 @@ router.get("/roster/groups", async (_req, res) => {
          FROM dps_rank_groups ORDER BY sort_order, id`
     );
     res.json(result.rows.map(r => ({
-      ...r,
-      panel_access: Boolean(r.panel_access),
-      division_oversight: Boolean(r.division_oversight),
+      ...normalizeGroupRow(r as Record<string, unknown>),
     })));
   } catch (err) {
     _req.log.error({ err }, "groups GET error");
@@ -2382,11 +2400,7 @@ router.post("/roster/groups", async (req, res) => {
       [name.trim(), nextOrder]
     );
     const row = result.rows[0] as Record<string, unknown>;
-    res.status(201).json({
-      ...row,
-      panel_access: Boolean(row.panel_access),
-      division_oversight: Boolean(row.division_oversight),
-    });
+    res.status(201).json(normalizeGroupRow(row));
   } catch (err: unknown) {
     const pg = err as { code?: string };
     if (pg.code === "23505") { res.status(409).json({ error: "A group with that name already exists." }); return; }
@@ -2431,12 +2445,6 @@ router.patch("/roster/groups/:id", async (req, res) => {
       division_oversight?: boolean;
     };
 
-  const normalizeGroup = (row: Record<string, unknown>) => ({
-    ...row,
-    panel_access: Boolean(row.panel_access),
-    division_oversight: Boolean(row.division_oversight),
-  });
-
   try {
     // Toggle panel_access flag
     if (panel_access !== undefined && name === undefined && direction === undefined && division_oversight === undefined) {
@@ -2452,7 +2460,7 @@ router.patch("/roster/groups/:id", async (req, res) => {
         panel_access ? 'Granted panel access' : 'Revoked panel access',
         `Group: ${groupName}`
       );
-      res.json(normalizeGroup(result.rows[0] as Record<string, unknown>));
+      res.json(normalizeGroupRow(result.rows[0] as Record<string, unknown>));
       return;
     }
 
@@ -2470,7 +2478,7 @@ router.patch("/roster/groups/:id", async (req, res) => {
         division_oversight ? 'Granted division oversight' : 'Revoked division oversight',
         `Group: ${groupName}`
       );
-      res.json(normalizeGroup(result.rows[0] as Record<string, unknown>));
+      res.json(normalizeGroupRow(result.rows[0] as Record<string, unknown>));
       return;
     }
 
@@ -2482,7 +2490,7 @@ router.patch("/roster/groups/:id", async (req, res) => {
         [id, name.trim()]
       );
       if (result.rowCount === 0) { res.status(404).json({ error: "Group not found." }); return; }
-      res.json(normalizeGroup(result.rows[0] as Record<string, unknown>));
+      res.json(normalizeGroupRow(result.rows[0] as Record<string, unknown>));
       return;
     }
 
