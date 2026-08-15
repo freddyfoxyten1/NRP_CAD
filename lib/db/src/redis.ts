@@ -3,6 +3,19 @@ import Redis from "ioredis";
 let client: Redis | null = null;
 let disabled = false;
 
+const UNRECOVERABLE_RE = /ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|NOAUTH|EAI_AGAIN/i;
+
+function disableRedis(reason: string): void {
+  if (disabled) return;
+  disabled = true;
+  if (client) {
+    client.removeAllListeners();
+    client.disconnect(false);
+    client = null;
+  }
+  console.warn(`[redis] cache disabled — ${reason}`);
+}
+
 export function getRedisUrl(): string {
   return (process.env.REDIS_URL ?? "").trim();
 }
@@ -17,9 +30,16 @@ export function getRedis(): Redis | null {
     maxRetriesPerRequest: 2,
     enableReadyCheck: true,
     lazyConnect: true,
+    // Optional cache — do not spam reconnects when Redis is misconfigured or down.
+    retryStrategy: () => null,
   });
   client.on("error", (err) => {
-    console.warn("[redis] error:", err.message);
+    const msg = err.message ?? String(err);
+    if (UNRECOVERABLE_RE.test(msg)) {
+      disableRedis(msg);
+      return;
+    }
+    console.warn("[redis] error:", msg);
   });
   return client;
 }
@@ -31,8 +51,9 @@ export async function connectRedis(): Promise<Redis | null> {
     if (redis.status !== "ready") {
       try {
         await redis.connect();
-      } catch {
-        /* already connecting / connected */
+      } catch (err) {
+        disableRedis(err instanceof Error ? err.message : String(err));
+        return null;
       }
     }
     return redis;
@@ -42,8 +63,7 @@ export async function connectRedis(): Promise<Redis | null> {
     console.info("[redis] Connected");
     return redis;
   } catch (err) {
-    console.warn("[redis] connect failed — cache disabled:", err instanceof Error ? err.message : err);
-    disabled = true;
+    disableRedis(err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -54,7 +74,8 @@ export async function pingRedis(): Promise<boolean> {
     if (!redis) return false;
     const pong = await redis.ping();
     return pong === "PONG";
-  } catch {
+  } catch (err) {
+    disableRedis(err instanceof Error ? err.message : String(err));
     return false;
   }
 }
