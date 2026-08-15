@@ -1329,7 +1329,7 @@ router.post("/roster/permissions/clear-all", async (req, res) => {
       "dps_personnel",
       actor,
       "Cleared all individual permission grants",
-      `resources=${counts.resources} iab=${counts.iab} divisionEditors=${counts.divisionEditors}`,
+      `resources=${counts.resources} iab=${counts.iab} divisionEditors=${counts.divisionEditors} titleGroups=${counts.titleGroups}`,
     );
     res.json({ ok: true, ...counts });
   } catch (err) {

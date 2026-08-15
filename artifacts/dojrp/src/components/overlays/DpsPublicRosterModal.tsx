@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Car, ChevronDown, ChevronRight, Package, Search, Users, X } from "lucide-react";
 import { imageStyle } from "@/components/shared/ImageInput";
 import {
-  buildPersonnelTitleGroups,
+  buildPublicPersonnelTitleGroups,
   dedupeRosterMembersById,
   type TitleGroup,
 } from "@/lib/roster-sort";
@@ -314,14 +314,13 @@ export default function DpsPublicRosterModal({
   }, [members, search]);
 
   const groupedMembers = useMemo(() => {
-    const grouped = buildPersonnelTitleGroups(
+    return buildPublicPersonnelTitleGroups(
       filteredMembers,
       groups,
       ranks,
       memberRankName,
     );
-    return grouped.filter(g => g.members.length > 0);
-  }, [filteredMembers, groups, ranks, search]);
+  }, [filteredMembers, groups, ranks]);
 
   const visibleMemberCount = useMemo(
     () => groupedMembers.reduce((sum, g) => sum + g.members.length, 0),
@@ -351,7 +350,7 @@ export default function DpsPublicRosterModal({
   if (!open) return null;
 
   const tabs: { id: RosterTab; label: string; icon: typeof Users; count: number }[] = [
-    { id: "personnel", label: "Personnel", icon: Users, count: visibleMemberCount || members.length },
+    { id: "personnel", label: "Personnel", icon: Users, count: visibleMemberCount },
     { id: "vehicles", label: "Vehicles", icon: Car, count: vehicles.length },
     { id: "equipment", label: "Equipment", icon: Package, count: equipment.length },
   ];

@@ -660,7 +660,7 @@ router.post("/dph/permissions/clear-all", async (req, res) => {
       "dph_personnel",
       actor,
       "Cleared all individual permission grants",
-      `resources=${counts.resources} iab=${counts.iab} divisionEditors=${counts.divisionEditors}`,
+      `resources=${counts.resources} iab=${counts.iab} divisionEditors=${counts.divisionEditors} titleGroups=${counts.titleGroups}`,
     );
     res.json({ ok: true, ...counts });
   } catch (err) {
