@@ -19,14 +19,12 @@ import {
   listDpsEventsMongo,
   listDpsFleetCategoriesMongo,
   listDpsFleetMongo,
-  listDpsPersonnelMongo,
   listDpsRankGroupsMongo,
   listDpsRanksMongo,
   getDpsContentMongo,
   getDpsDivisionInfoMongo,
   getDpsDivisionRankDetailMongo,
   getDpsRankDetailMongo,
-  loadDpsDivisionAssignmentsMongo,
   searchDpsMembersMongo,
 } from "../lib/dps-roster-mongo.js";
 import { normalizeGroupRow, normalizeRankGroupId, normalizeRankRow } from "../lib/roster-normalize.js";
@@ -1216,45 +1214,8 @@ const rankOrderSubquery = `
 router.get("/roster", async (req, res) => {
   try {
     const includeAll = req.query.all === "1";
-    if (isMongoStore()) {
-      const rows = await listDpsPersonnelMongo(includeAll);
-      const ids = rows.map(r => Number(r.id));
-      let assignmentMap = new Map<number, DivisionAssignment[]>();
-      try {
-        assignmentMap = await loadDpsDivisionAssignmentsMongo(ids) as Map<number, DivisionAssignment[]>;
-      } catch (assignErr) {
-        req.log.warn({ err: assignErr }, "roster GET division assignments load failed");
-      }
-      const sortedRows = sortDepartmentPersonnel(
-        rows,
-        (row) => Number(row.group_sort_order ?? 999),
-        (row) => Number(row.rank_sort_order ?? 999),
-        (row) => (row.callsign as string | null | undefined) ?? null,
-        (row) => String(row.username ?? ""),
-      );
-      const seenIds = new Set<number>();
-      const uniqueRows = sortedRows.filter((row) => {
-        const id = Number(row.id);
-        if (seenIds.has(id)) return false;
-        seenIds.add(id);
-        return true;
-      });
-      res.json(uniqueRows.map((row) => {
-        const id = Number(row.id);
-        const assignments = assignmentMap.get(id) ?? [];
-        const primary = assignments[0];
-        return {
-          ...row,
-          can_view_all_resources: Boolean(row.can_view_all_resources),
-          can_access_iab: Boolean(row.can_access_iab),
-          division_assignments: assignments,
-          division_rank: primary?.division_rank ?? row.division_rank ?? null,
-          division_name: primary?.division_name ?? null,
-          division_names: assignments.map(a => a.division_name),
-        };
-      }));
-      return;
-    }
+    // Personnel list uses the SQL bridge on Mongo (same as /api/dph). Native
+    // listDpsPersonnelMongo loads full dps_users and fails on production Atlas.
     const where = includeAll ? "" : "WHERE lower(d.status) != 'inactive'";
     const orderBy = `ORDER BY COALESCE(rg.sort_order, 999), ${rankOrderSubquery},
                 d.callsign,
@@ -1939,10 +1900,14 @@ router.get("/roster/ranks/:id", async (req, res) => {
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
     if (isMongoStore()) {
-      const detail = await getDpsRankDetailMongo(id);
-      if (!detail) { res.status(404).json({ error: "Rank not found." }); return; }
-      res.json(detail);
-      return;
+      try {
+        const detail = await getDpsRankDetailMongo(id);
+        if (!detail) { res.status(404).json({ error: "Rank not found." }); return; }
+        res.json(detail);
+        return;
+      } catch (mongoErr) {
+        req.log.warn({ err: mongoErr }, "ranks/:id mongo loader failed — falling back to SQL bridge");
+      }
     }
     const rankRes = await pool.query(
       `SELECT id, name, sort_order, group_id, color_hex, callsign_prefix, insignia_url, discord_role_id,
@@ -3242,10 +3207,14 @@ router.get("/roster/division-ranks/:id", async (req, res) => {
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
     if (isMongoStore()) {
-      const detail = await getDpsDivisionRankDetailMongo(id);
-      if (!detail) { res.status(404).json({ error: "Division rank not found." }); return; }
-      res.json(detail);
-      return;
+      try {
+        const detail = await getDpsDivisionRankDetailMongo(id);
+        if (!detail) { res.status(404).json({ error: "Division rank not found." }); return; }
+        res.json(detail);
+        return;
+      } catch (mongoErr) {
+        req.log.warn({ err: mongoErr }, "division-ranks/:id mongo loader failed — falling back to SQL bridge");
+      }
     }
     const rankRes = await pool.query(
       `SELECT ${DIVISION_RANK_SELECT} FROM dps_division_ranks WHERE id = $1`, [id]

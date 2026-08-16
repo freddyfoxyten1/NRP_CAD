@@ -1,6 +1,8 @@
 /**
- * Local private preview — API + Vite with live reload.
- * Changes stay on your machine until you push to GitHub.
+ * Local private preview — Vite with live reload.
+ * Default: local API + SQLite.
+ * With PREVIEW_API_URL (dev:live): proxied VPS API + Mongo on cad.dojrblx.com.
+ * Code changes stay on your machine until you push to GitHub.
  */
 import { spawn } from "node:child_process";
 import http from "node:http";
@@ -10,10 +12,13 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = process.env.API_PORT ?? "8080";
 const WEB_PORT = process.env.WEB_PORT ?? "5173";
+const PREVIEW_API_URL = (process.env.PREVIEW_API_URL ?? "").trim().replace(/\/$/, "");
+const usingRemoteApi = PREVIEW_API_URL.length > 0;
 
 /** Ensure local preview/dev use the repo-root SQLite store, not api-server/cad-database. */
 const repoEnv = {
   ...process.env,
+  PREVIEW_API_URL,
   CAD_DATABASE_PATH: process.env.CAD_DATABASE_PATH ?? path.join(root, "cad-database"),
 };
 
@@ -83,14 +88,20 @@ function printBanner() {
     [
       "",
       "═══════════════════════════════════════════════════════════════",
-      "  DOJCAD local preview (private — not on GitHub)",
+      usingRemoteApi
+        ? "  DOJCAD live preview — local files + VPS Mongo (cad.dojrblx.com)"
+        : "  DOJCAD local preview (private — not on GitHub)",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site (live reload):  http://localhost:${WEB_PORT}/`,
-      `  API health:          http://localhost:${API_PORT}/api/healthz`,
+      usingRemoteApi
+        ? `  API:                 ${PREVIEW_API_URL}/api/healthz  (team VPS + Mongo)`
+        : `  API health:          http://localhost:${API_PORT}/api/healthz`,
       "",
       "  Edit & save files → the browser updates automatically.",
-      "  Push to GitHub only when you are happy with what you see here.",
+      usingRemoteApi
+        ? "  Data is live from cad.dojrblx.com. Push to GitHub to update the VPS site."
+        : "  Push to GitHub only when you are happy with what you see here.",
       "",
       "  Stop with Ctrl+C",
       "",
@@ -113,14 +124,17 @@ function openBrowser(url) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
-spawnInRoot("bun", ["run", "dev:api"]);
-
-const apiReady = await waitFor(
-  `http://127.0.0.1:${API_PORT}/api/healthz`,
-  "API",
-);
-if (!apiReady) {
-  console.warn("Warning: API did not respond in time. Starting web anyway — retry in a minute.");
+if (usingRemoteApi) {
+  console.log(`Using live VPS API (Mongo on cad.dojrblx.com): ${PREVIEW_API_URL}`);
+} else {
+  spawnInRoot("bun", ["run", "dev:api"]);
+  const apiReady = await waitFor(
+    `http://127.0.0.1:${API_PORT}/api/healthz`,
+    "API",
+  );
+  if (!apiReady) {
+    console.warn("Warning: API did not respond in time. Starting web anyway — retry in a minute.");
+  }
 }
 
 spawnInRoot("bun", ["run", "dev:web"]);
