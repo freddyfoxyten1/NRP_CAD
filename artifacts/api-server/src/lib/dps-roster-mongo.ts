@@ -1,7 +1,20 @@
 import { getCollection } from "@workspace/db";
+import type { Document, Sort } from "mongodb";
 import { normalizeGroupRow, normalizeRankGroupId, normalizeRankRow } from "./roster-normalize.js";
 
 let rankGroupRepairDone = false;
+
+/** getCollection is async — always await before .find() / .findOne(). */
+async function colFind<T extends Document = Document>(
+  name: string,
+  filter: Document = {},
+  sort?: Sort,
+): Promise<T[]> {
+  const col = await getCollection<T>(name);
+  let cursor = col.find(filter);
+  if (sort) cursor = cursor.sort(sort);
+  return cursor.toArray();
+}
 
 /** One-time cleanup for corrupted rank group_id values after SQL→Mongo migration. */
 export async function ensureDpsRankGroupIdsRepaired(): Promise<void> {
@@ -46,7 +59,7 @@ function asStringArray(value: unknown): string[] {
 
 async function loadUsersByProfileIds(profileIds: number[]): Promise<Map<number, Record<string, unknown>>> {
   if (profileIds.length === 0) return new Map();
-  const users = await getCollection("users").find({ id: { $in: profileIds } }).toArray();
+  const users = await colFind("users", { id: { $in: profileIds } });
   return new Map(
     users
       .map(u => [Number(u.id), u] as const)
@@ -70,7 +83,7 @@ export async function listDpsRanksMongo(): Promise<Record<string, unknown>[]> {
 
 export async function listDpsPersonnelMongo(includeAll: boolean): Promise<Record<string, unknown>[]> {
   await ensureDpsRankGroupIdsRepaired();
-  const dpsUsers = await getCollection("dps_users").find({}).toArray();
+  const dpsUsers = await colFind("dps_users");
   const activeDpsUsers = includeAll
     ? dpsUsers
     : dpsUsers.filter(d => String(d.status ?? "Active").toLowerCase() !== "inactive");
@@ -83,8 +96,8 @@ export async function listDpsPersonnelMongo(includeAll: boolean): Promise<Record
 
   const [userById, ranks, groups] = await Promise.all([
     loadUsersByProfileIds(profileIds),
-    getCollection("dps_ranks").find({}).toArray(),
-    getCollection("dps_rank_groups").find({}).toArray(),
+    colFind("dps_ranks"),
+    colFind("dps_rank_groups"),
   ]);
   const rankByName = new Map(
     ranks.map(r => [String(r.name ?? "").trim().toLowerCase(), r]),
@@ -232,8 +245,8 @@ export async function loadDpsDivisionAssignmentsMongo(
   if (profileIds.length === 0) return map;
 
   const [userDivisions, divisions] = await Promise.all([
-    getCollection("dps_user_divisions").find({ profile_id: { $in: profileIds } }).toArray(),
-    getCollection("dps_divisions").find({}).toArray(),
+    colFind("dps_user_divisions", { profile_id: { $in: profileIds } }),
+    colFind("dps_divisions"),
   ]);
   const divisionById = new Map(divisions.map(d => [Number(d.id), d]));
   const idSet = new Set(profileIds);
@@ -335,8 +348,8 @@ export async function getDpsRankDetailMongo(id: number): Promise<Record<string, 
   const rankNamePattern = new RegExp(`^${rankName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
 
   const [matchingDpsUsers, customCallsigns] = await Promise.all([
-    getCollection("dps_users").find({ dps_rank: rankNamePattern }).toArray(),
-    getCollection("dps_rank_custom_callsigns").find({ rank_id: id }).sort({ sort_order: 1, id: 1 }).toArray(),
+    colFind("dps_users", { dps_rank: rankNamePattern }),
+    colFind("dps_rank_custom_callsigns", { rank_id: id }, { sort_order: 1, id: 1 }),
   ]);
 
   const profileIds = [...new Set(
@@ -427,8 +440,8 @@ export async function getDpsDivisionRankDetailMongo(id: number): Promise<Record<
   const rankNameLower = String(rank.name ?? "").trim().toLowerCase();
 
   const [userDivisions, customCallsigns] = await Promise.all([
-    getCollection("dps_user_divisions").find({}).toArray(),
-    getCollection("dps_division_rank_custom_callsigns").find({ division_rank_id: id }).sort({ sort_order: 1, id: 1 }).toArray(),
+    colFind("dps_user_divisions"),
+    colFind("dps_division_rank_custom_callsigns", { division_rank_id: id }, { sort_order: 1, id: 1 }),
   ]);
 
   const matchingDivisions = userDivisions.filter((ud) => {
@@ -451,7 +464,7 @@ export async function getDpsDivisionRankDetailMongo(id: number): Promise<Record<
   const [userById, dpsUsers] = await Promise.all([
     loadUsersByProfileIds(allProfileIds),
     profileIds.length > 0
-      ? getCollection("dps_users").find({ profile_id: { $in: profileIds } }).toArray()
+      ? colFind("dps_users", { profile_id: { $in: profileIds } })
       : Promise.resolve([]),
   ]);
   const dpsByProfile = new Map(
