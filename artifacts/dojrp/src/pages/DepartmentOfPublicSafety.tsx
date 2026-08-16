@@ -32,7 +32,7 @@ import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
-import { buildPersonnelTitleGroups, dedupeRosterMembersById, sortByRankThenCallsign } from '@/lib/roster-sort';
+import { buildPersonnelRosterTree, dedupeRosterMembersById, sortByRankThenCallsign } from '@/lib/roster-sort';
 import { fetchRosterArray, fetchRosterJson, normalizeRankGroupId, rankBelongsToGroup } from '@/lib/roster-fetch';
 import { collectDepartmentPermissions } from '@/lib/permission-access';
 import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
@@ -2204,13 +2204,13 @@ const DepartmentOfPublicSafety = () => {
   const sortRosterMembers = (list: RosterMember[]) =>
     sortByRankThenCallsign(list, ranks, departmentRankName);
   const groupedRoster = useMemo(() => {
-    const grouped = buildPersonnelTitleGroups(
+    return buildPersonnelRosterTree(
       filteredRoster,
       groups,
       ranks,
       departmentRankName,
+      { hideEmptyRanks: Boolean(rosterSearch.trim()) },
     );
-    return grouped.filter(g => g.members.length > 0);
   }, [filteredRoster, groups, ranks, rosterSearch]);
   const visibleRosterCount = useMemo(
     () => groupedRoster.reduce((sum, g) => sum + g.members.length, 0),
@@ -3094,11 +3094,11 @@ const DepartmentOfPublicSafety = () => {
                   </span>
                 </div>
 
-                {visibleRosterCount === 0 ? (
+                {groupedRoster.length === 0 ? (
                   <div className="flex min-h-[260px] flex-col items-center justify-center gap-2">
                     <Users className="h-8 w-8 text-[#1e2e42]" />
                     <p className="text-sm font-bold text-[#3f5470]">
-                      {rosterSearch ? 'No members match your search.' : 'No members on the roster yet.'}
+                      {rosterSearch ? 'No members match your search.' : 'No ranks or members on the roster yet.'}
                     </p>
                   </div>
                 ) : (
@@ -3142,7 +3142,95 @@ const DepartmentOfPublicSafety = () => {
                                 </td>
                               </tr>
 
-                              {!collapsed[group.label] && group.members.map(m => {
+                              {!collapsed[group.label] && (group.rankSections.length > 0
+                                ? group.rankSections.map(section => {
+                                    const rankKey = `${group.label}::${section.label}`;
+                                    const sectionRankMeta = getRankMeta(section.label);
+                                    return (
+                                      <React.Fragment key={rankKey}>
+                                        <tr
+                                          className="cursor-pointer border-b border-[#0f1b28] bg-[#08111d] hover:bg-[#0c1830] transition-colors"
+                                          onClick={() => toggleGroup(rankKey)}>
+                                          <td colSpan={8 + rosterDivisions.length} className="px-5 py-2 pl-10">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              {collapsed[rankKey]
+                                                ? <ChevronRight className="h-3.5 w-3.5 text-[#4384ff] shrink-0" />
+                                                : <ChevronDown  className="h-3.5 w-3.5 text-[#4384ff] shrink-0" />}
+                                              {sectionRankMeta?.insignia_url && (
+                                                <img src={sectionRankMeta.insignia_url} alt="" className="h-4 w-4 object-contain shrink-0"
+                                                  onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                              )}
+                                              <span className="text-xs font-black"
+                                                style={{ color: sectionRankMeta?.color_hex ?? '#ffffff' }}>
+                                                {section.label}
+                                              </span>
+                                              <span className="rounded-full bg-[#172235] px-2 py-0.5 text-[9px] font-black text-[#526179]">
+                                                {section.members.length}
+                                              </span>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                        {!collapsed[rankKey] && section.members.length === 0 && (
+                                          <tr className="border-b border-[#0f1b28]">
+                                            <td colSpan={8 + rosterDivisions.length} className="px-5 py-3 pl-16 text-[11px] text-[#3f5470]">
+                                              No officers at this rank.
+                                            </td>
+                                          </tr>
+                                        )}
+                                        {!collapsed[rankKey] && section.members.map(m => {
+                                          const memberRankMeta = getRankMeta(departmentRankName(m)) ?? sectionRankMeta;
+                                          const chipColor = memberRankMeta?.color_hex ?? null;
+                                          return (
+                                            <tr key={m.id} className="border-b border-[#0f1b28] hover:bg-[#081422] transition-colors">
+                                              <td className="px-5 py-3.5 pl-16">
+                                                <div className="flex items-center gap-2">
+                                                  <DiscordAvatar name={m.discord_username || m.username} discordId={m.discord_id} avatarHash={m.avatar_hash} />
+                                                  <span className="text-xs font-black text-white">{m.username || '—'}</span>
+                                                </div>
+                                              </td>
+                                              <td className="px-4 py-3.5">
+                                                <div className="flex items-center gap-1.5">
+                                                  {memberRankMeta?.insignia_url && (
+                                                    <img src={memberRankMeta.insignia_url} alt="" className="h-4 w-4 object-contain shrink-0"
+                                                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                                  )}
+                                                  <span className="text-[10px] font-black"
+                                                    style={{ color: chipColor ?? '#a8b7cd' }}>
+                                                    {m.dps_rank || m.rank || '—'}
+                                                  </span>
+                                                </div>
+                                              </td>
+                                              <td className="px-4 py-3.5">
+                                                <span className="inline-flex items-center rounded border border-[#1b2d44] bg-[#070d16] px-2 py-0.5 font-mono text-[10px] font-black text-[#4384ff]">
+                                                  {m.callsign || '—'}
+                                                </span>
+                                              </td>
+                                              <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                                              <td className="px-4 py-3.5 text-[#8392aa]">{formatDate(m.appointed_date)}</td>
+                                              <td className="px-4 py-3.5">
+                                                <span className="font-mono text-[11px] text-[#526179]">{m.discord_id || '—'}</span>
+                                              </td>
+                                              {rosterDivisions.map(d => (
+                                                <td key={d.id} className="px-3 py-3.5 text-center">
+                                                  <UnitDot active={memberInDivision(m, d)} />
+                                                </td>
+                                              ))}
+                                              <td className="px-4 py-3.5">
+                                                <div className="flex flex-wrap gap-1">
+                                                  {m.certifications?.length > 0
+                                                    ? m.certifications.map(c => (
+                                                        <span key={c} className="rounded border border-[#1f3050] bg-[#0a1525] px-1.5 py-0.5 text-[9px] font-black text-[#6a8aaa]">{c}</span>
+                                                      ))
+                                                    : <span className="text-[#2a3a50]">—</span>}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </React.Fragment>
+                                    );
+                                  })
+                                : group.members.map(m => {
                                 const memberRankMeta = getRankMeta(departmentRankName(m));
                                 const chipColor = memberRankMeta?.color_hex ?? null;
                                 return (
@@ -3199,7 +3287,7 @@ const DepartmentOfPublicSafety = () => {
                                     </td>
                                   </tr>
                                 );
-                              })}
+                              }))}
                           </React.Fragment>
                         ))}
                       </tbody>
