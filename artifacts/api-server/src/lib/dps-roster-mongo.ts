@@ -25,6 +25,35 @@ function stripMongoId<T extends Record<string, unknown>>(doc: T): T {
   return rest as T;
 }
 
+function asStringOrNull(value: unknown): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "object") return null;
+  return String(value);
+}
+
+function asDateStringOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "string") return value.length >= 10 ? value.slice(0, 10) : value;
+  if (typeof value === "object") return null;
+  return String(value);
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(v => (typeof v === "string" ? v : String(v ?? "")));
+}
+
+async function loadUsersByProfileIds(profileIds: number[]): Promise<Map<number, Record<string, unknown>>> {
+  if (profileIds.length === 0) return new Map();
+  const users = await getCollection("users").find({ id: { $in: profileIds } }).toArray();
+  return new Map(
+    users
+      .map(u => [Number(u.id), u] as const)
+      .filter(([id]) => Number.isInteger(id) && id > 0),
+  );
+}
+
 export async function listDpsRankGroupsMongo(): Promise<Record<string, unknown>[]> {
   await ensureDpsRankGroupIdsRepaired();
   const col = await getCollection("dps_rank_groups");
@@ -41,29 +70,35 @@ export async function listDpsRanksMongo(): Promise<Record<string, unknown>[]> {
 
 export async function listDpsPersonnelMongo(includeAll: boolean): Promise<Record<string, unknown>[]> {
   await ensureDpsRankGroupIdsRepaired();
-  const [users, dpsUsers, ranks, groups] = await Promise.all([
-    getCollection("users").find({}).toArray(),
-    getCollection("dps_users").find({}).toArray(),
+  const dpsUsers = await getCollection("dps_users").find({}).toArray();
+  const activeDpsUsers = includeAll
+    ? dpsUsers
+    : dpsUsers.filter(d => String(d.status ?? "Active").toLowerCase() !== "inactive");
+
+  const profileIds = [...new Set(
+    activeDpsUsers
+      .map(d => Number(d.profile_id))
+      .filter(id => Number.isInteger(id) && id > 0),
+  )];
+
+  const [userById, ranks, groups] = await Promise.all([
+    loadUsersByProfileIds(profileIds),
     getCollection("dps_ranks").find({}).toArray(),
     getCollection("dps_rank_groups").find({}).toArray(),
   ]);
-
-  const userById = new Map(users.map(u => [Number(u.id), u]));
   const rankByName = new Map(
     ranks.map(r => [String(r.name ?? "").trim().toLowerCase(), r]),
   );
   const groupById = new Map(groups.map(g => [Number(g.id), g]));
 
   const rows: Record<string, unknown>[] = [];
-  for (const d of dpsUsers) {
-    const status = String(d.status ?? "Active");
-    if (!includeAll && status.toLowerCase() === "inactive") continue;
-
+  for (const d of activeDpsUsers) {
     const profileId = Number(d.profile_id);
+    if (!Number.isInteger(profileId) || profileId <= 0) continue;
     const p = userById.get(profileId);
     if (!p) continue;
 
-    const rankName = d.dps_rank == null ? null : String(d.dps_rank);
+    const rankName = asStringOrNull(d.dps_rank);
     const rankMeta = rankName
       ? rankByName.get(rankName.trim().toLowerCase()) ?? null
       : null;
@@ -75,29 +110,29 @@ export async function listDpsPersonnelMongo(includeAll: boolean): Promise<Record
         : null;
 
     rows.push({
-      id: Number(p.id),
-      username: (d.username ?? p.username) as string,
-      discord_username: p.discord_username ?? null,
-      discord_id: p.discord_id ?? null,
-      avatar_hash: p.avatar_hash ?? null,
-      callsign: d.callsign ?? null,
-      dps_rank: d.dps_rank ?? null,
-      dps_role: d.dps_role ?? null,
-      division_rank: d.division_rank ?? null,
-      status: d.status ?? "Active",
-      appointed_date: d.appointed_date ?? null,
+      id: profileId,
+      username: asStringOrNull(d.username) ?? asStringOrNull(p.username) ?? "",
+      discord_username: asStringOrNull(p.discord_username),
+      discord_id: asStringOrNull(p.discord_id),
+      avatar_hash: asStringOrNull(p.avatar_hash),
+      callsign: asStringOrNull(d.callsign),
+      dps_rank: rankName,
+      dps_role: asStringOrNull(d.dps_role),
+      division_rank: asStringOrNull(d.division_rank),
+      status: asStringOrNull(d.status) ?? "Active",
+      appointed_date: asDateStringOrNull(d.appointed_date),
       pob: Boolean(d.pob),
       iab: Boolean(d.iab),
       hsu: Boolean(d.hsu),
       sru: Boolean(d.sru),
       fou: Boolean(d.fou),
-      certifications: Array.isArray(d.certifications) ? d.certifications : [],
+      certifications: asStringArray(d.certifications),
       can_view_all_resources: Boolean(d.can_view_all_resources),
       can_access_iab: Boolean(p.can_access_iab),
-      staff_role: p.staff_role ?? null,
+      staff_role: asStringOrNull(p.staff_role),
       group_name: groupName,
-      group_sort_order: group?.sort_order ?? 999,
-      rank_sort_order: rankMeta?.sort_order ?? 999,
+      group_sort_order: Number(group?.sort_order ?? 999),
+      rank_sort_order: Number(rankMeta?.sort_order ?? 999),
     });
   }
   return rows;
@@ -297,31 +332,46 @@ export async function getDpsRankDetailMongo(id: number): Promise<Record<string, 
   if (!rankDoc) return null;
   const rank = normalizeRankRow(stripMongoId(rankDoc));
   const rankName = String(rank.name ?? "");
+  const rankNameLower = rankName.trim().toLowerCase();
 
-  const [users, dpsUsers, customCallsigns] = await Promise.all([
-    getCollection("users").find({}).toArray(),
+  const [dpsUsers, customCallsigns] = await Promise.all([
     getCollection("dps_users").find({}).toArray(),
     getCollection("dps_rank_custom_callsigns").find({ rank_id: id }).sort({ sort_order: 1, id: 1 }).toArray(),
   ]);
-  const userById = new Map(users.map(u => [Number(u.id), u]));
-  const rankNameLower = rankName.trim().toLowerCase();
+
+  const matchingDpsUsers = dpsUsers.filter((d) => {
+    const dpsRank = d.dps_rank == null ? "" : String(d.dps_rank).trim().toLowerCase();
+    return dpsRank === rankNameLower;
+  });
+  const profileIds = [...new Set(
+    matchingDpsUsers
+      .map(d => Number(d.profile_id))
+      .filter(pid => Number.isInteger(pid) && pid > 0),
+  )];
+  const assignedIds = customCallsigns
+    .map(cc => (cc.assigned_profile_id == null ? null : Number(cc.assigned_profile_id)))
+    .filter((pid): pid is number => pid != null && Number.isInteger(pid) && pid > 0);
+  const userById = await loadUsersByProfileIds([...new Set([...profileIds, ...assignedIds])]);
+  const dpsByProfile = new Map(
+    dpsUsers
+      .map(d => [Number(d.profile_id), d] as const)
+      .filter(([pid]) => Number.isInteger(pid) && pid > 0),
+  );
 
   let members: Record<string, unknown>[] = [];
-  for (const d of dpsUsers) {
-    const dpsRank = d.dps_rank == null ? "" : String(d.dps_rank).trim().toLowerCase();
-    if (dpsRank !== rankNameLower) continue;
+  for (const d of matchingDpsUsers) {
     const profileId = Number(d.profile_id);
     const p = userById.get(profileId);
     if (!p) continue;
     members.push({
       id: profileId,
-      username: (d.username ?? p.username) as string,
-      discord_username: p.discord_username ?? null,
-      discord_id: p.discord_id ?? null,
-      avatar_hash: p.avatar_hash ?? null,
-      callsign: d.callsign ?? null,
-      dps_rank: d.dps_rank ?? null,
-      status: d.status ?? "Active",
+      username: asStringOrNull(d.username) ?? asStringOrNull(p.username) ?? "",
+      discord_username: asStringOrNull(p.discord_username),
+      discord_id: asStringOrNull(p.discord_id),
+      avatar_hash: asStringOrNull(p.avatar_hash),
+      callsign: asStringOrNull(d.callsign),
+      dps_rank: asStringOrNull(d.dps_rank),
+      status: asStringOrNull(d.status) ?? "Active",
     });
   }
 
@@ -339,10 +389,15 @@ export async function getDpsRankDetailMongo(id: number): Promise<Record<string, 
   const custom_callsigns = customCallsigns.map((cc) => {
     const assignedId = cc.assigned_profile_id == null ? null : Number(cc.assigned_profile_id);
     const p = assignedId == null ? null : userById.get(assignedId);
-    const d = assignedId == null ? null : dpsUsers.find(u => Number(u.profile_id) === assignedId);
+    const d = assignedId == null ? null : dpsByProfile.get(assignedId);
+    const doc = stripMongoId(cc);
     return {
-      ...stripMongoId(cc),
-      assigned_username: (d?.username ?? p?.username ?? null) as string | null,
+      id: Number(doc.id),
+      rank_id: Number(doc.rank_id),
+      callsign: asStringOrNull(doc.callsign),
+      assigned_profile_id: assignedId,
+      sort_order: Number(doc.sort_order ?? 0),
+      assigned_username: asStringOrNull(d?.username) ?? asStringOrNull(p?.username),
     };
   });
 
@@ -375,33 +430,54 @@ export async function getDpsDivisionRankDetailMongo(id: number): Promise<Record<
   const divisionId = rank.division_id == null ? null : Number(rank.division_id);
   const rankNameLower = String(rank.name ?? "").trim().toLowerCase();
 
-  const [users, dpsUsers, userDivisions, customCallsigns] = await Promise.all([
-    getCollection("users").find({}).toArray(),
-    getCollection("dps_users").find({}).toArray(),
+  const [userDivisions, customCallsigns] = await Promise.all([
     getCollection("dps_user_divisions").find({}).toArray(),
     getCollection("dps_division_rank_custom_callsigns").find({ division_rank_id: id }).sort({ sort_order: 1, id: 1 }).toArray(),
   ]);
-  const userById = new Map(users.map(u => [Number(u.id), u]));
-  const dpsByProfile = new Map(dpsUsers.map(d => [Number(d.profile_id), d]));
+
+  const matchingDivisions = userDivisions.filter((ud) => {
+    const udDivId = ud.division_id == null ? null : Number(ud.division_id);
+    if (udDivId !== divisionId && !(udDivId == null && divisionId == null)) return false;
+    const udRank = String(ud.division_rank ?? "").trim().toLowerCase();
+    return udRank === rankNameLower;
+  });
+
+  const profileIds = [...new Set(
+    matchingDivisions
+      .map(ud => Number(ud.profile_id))
+      .filter(pid => Number.isInteger(pid) && pid > 0),
+  )];
+  const assignedIds = customCallsigns
+    .map(cc => (cc.assigned_profile_id == null ? null : Number(cc.assigned_profile_id)))
+    .filter((pid): pid is number => pid != null && Number.isInteger(pid) && pid > 0);
+  const allProfileIds = [...new Set([...profileIds, ...assignedIds])];
+
+  const [userById, dpsUsers] = await Promise.all([
+    loadUsersByProfileIds(allProfileIds),
+    profileIds.length > 0
+      ? getCollection("dps_users").find({ profile_id: { $in: profileIds } }).toArray()
+      : Promise.resolve([]),
+  ]);
+  const dpsByProfile = new Map(
+    dpsUsers
+      .map(d => [Number(d.profile_id), d] as const)
+      .filter(([pid]) => Number.isInteger(pid) && pid > 0),
+  );
 
   let members: Record<string, unknown>[] = [];
-  for (const ud of userDivisions) {
-    const udDivId = ud.division_id == null ? null : Number(ud.division_id);
-    if (udDivId !== divisionId && !(udDivId == null && divisionId == null)) continue;
-    const udRank = String(ud.division_rank ?? "").trim().toLowerCase();
-    if (udRank !== rankNameLower) continue;
+  for (const ud of matchingDivisions) {
     const profileId = Number(ud.profile_id);
     const p = userById.get(profileId);
     if (!p) continue;
     const d = dpsByProfile.get(profileId);
     members.push({
       id: profileId,
-      username: (d?.username ?? p.username) as string,
-      discord_username: p.discord_username ?? null,
-      discord_id: p.discord_id ?? null,
-      avatar_hash: p.avatar_hash ?? null,
-      callsign: d?.callsign ?? "4D-XX",
-      status: d?.status ?? "Active",
+      username: asStringOrNull(d?.username) ?? asStringOrNull(p.username) ?? "",
+      discord_username: asStringOrNull(p.discord_username),
+      discord_id: asStringOrNull(p.discord_id),
+      avatar_hash: asStringOrNull(p.avatar_hash),
+      callsign: asStringOrNull(d?.callsign) ?? "4D-XX",
+      status: asStringOrNull(d?.status) ?? "Active",
     });
   }
 
@@ -420,9 +496,14 @@ export async function getDpsDivisionRankDetailMongo(id: number): Promise<Record<
     const assignedId = cc.assigned_profile_id == null ? null : Number(cc.assigned_profile_id);
     const p = assignedId == null ? null : userById.get(assignedId);
     const d = assignedId == null ? null : dpsByProfile.get(assignedId);
+    const doc = stripMongoId(cc);
     return {
-      ...stripMongoId(cc),
-      assigned_username: (d?.username ?? p?.username ?? null) as string | null,
+      id: Number(doc.id),
+      division_rank_id: Number(doc.division_rank_id),
+      callsign: asStringOrNull(doc.callsign),
+      assigned_profile_id: assignedId,
+      sort_order: Number(doc.sort_order ?? 0),
+      assigned_username: asStringOrNull(d?.username) ?? asStringOrNull(p?.username),
     };
   });
 
