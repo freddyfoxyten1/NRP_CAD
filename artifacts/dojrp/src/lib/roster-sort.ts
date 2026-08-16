@@ -207,6 +207,46 @@ export function buildPersonnelTitleGroups<
     }));
 }
 
+export type PersonnelRosterTitle<T> = {
+  id: number | null;
+  label: string;
+  members: T[];
+  rankSections: RankSection<T>[];
+};
+
+/** Title groups from Personnel Management, each with that title's Mongo ranks. */
+export function buildPersonnelRosterTree<
+  T extends PersonnelRosterMember & { username?: string | null; callsign?: string | null },
+>(
+  members: T[],
+  groups: TitleGroup[],
+  ranks: TitleRank[],
+  getRankName: (member: T) => string | null | undefined,
+  opts?: { hideEmptyRanks?: boolean },
+): PersonnelRosterTitle<T>[] {
+  const hideEmptyRanks = opts?.hideEmptyRanks ?? false;
+  const titles = buildPersonnelTitleGroups(members, groups, ranks, getRankName);
+
+  return titles
+    .map((title) => {
+      const groupRanks = ranks.filter((r) => {
+        const gid = normalizeId(r.group_id);
+        const tid = normalizeId(title.id);
+        return gid != null && tid != null && gid === tid;
+      });
+      return {
+        ...title,
+        rankSections: buildPersonnelRankSections(
+          title.members,
+          groupRanks,
+          getRankName,
+          { hideEmpty: hideEmptyRanks },
+        ),
+      };
+    })
+    .filter((title) => title.members.length > 0 || title.rankSections.length > 0);
+}
+
 export type RankSection<T> = {
   label: string;
   sort: number;
