@@ -95,9 +95,12 @@ async function start() {
     logger.error(
       { err },
       isMongoStore()
-        ? "Failed to initialize MongoDB — API stays up for health checks; data routes may fail until Mongo is reachable"
+        ? "Failed to initialize MongoDB — production cannot serve roster or CAD data without Atlas"
         : "Failed to initialize data stores",
     );
+    if (isMongoStore() && (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
+      process.exit(1);
+    }
   }
 }
 

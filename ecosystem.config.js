@@ -29,8 +29,8 @@ module.exports = {
       interpreter: "bun",
       // Absolute cwd so the daemon runs from the repo root.
       cwd: repoRoot,
-      // Fork mode, single instance. The API holds an in-process SQLite pool
-      // (or Postgres pool) — clustering would split state, so keep it at 1.
+      // Fork mode, single instance. Production uses MongoDB Atlas (DATA_STORE=mongo).
+      // Clustering would split in-process state — keep instances at 1.
       exec_mode: "fork",
       instances: 1,
       // Restart if it exceeds ~500MB or crashes repeatedly.

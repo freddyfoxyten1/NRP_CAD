@@ -19,12 +19,14 @@ import {
   listDpsEventsMongo,
   listDpsFleetCategoriesMongo,
   listDpsFleetMongo,
+  listDpsPersonnelMongo,
   listDpsRankGroupsMongo,
   listDpsRanksMongo,
   getDpsContentMongo,
   getDpsDivisionInfoMongo,
   getDpsDivisionRankDetailMongo,
   getDpsRankDetailMongo,
+  loadDpsDivisionAssignmentsMongo,
   searchDpsMembersMongo,
 } from "../lib/dps-roster-mongo.js";
 import { normalizeGroupRow, normalizeRankGroupId, normalizeRankRow } from "../lib/roster-normalize.js";
@@ -98,6 +100,11 @@ type DivisionAssignment = {
 async function loadDivisionAssignments(profileIds: number[]): Promise<Map<number, DivisionAssignment[]>> {
   const map = new Map<number, DivisionAssignment[]>();
   if (profileIds.length === 0) return map;
+
+  if (isMongoStore()) {
+    return await loadDpsDivisionAssignmentsMongo(profileIds) as Map<number, DivisionAssignment[]>;
+  }
+
   const res = await pool.query<{
     profile_id: number;
     division_id: number;
@@ -1209,13 +1216,67 @@ const rankOrderSubquery = `
   )
 `;
 
+function formatDpsPersonnelRows(
+  rows: Record<string, unknown>[],
+  assignmentMap: Map<number, DivisionAssignment[]>,
+) {
+  const sortedRows = sortDepartmentPersonnel(
+    rows,
+    (row) => Number(row.group_sort_order ?? 999),
+    (row) => Number(row.rank_sort_order ?? 999),
+    (row) => (row.callsign as string | null | undefined) ?? null,
+    (row) => String(row.username ?? ""),
+  );
+  const seenIds = new Set<number>();
+  const uniqueRows = sortedRows.filter((row) => {
+    const id = Number(row.id);
+    if (seenIds.has(id)) return false;
+    seenIds.add(id);
+    return true;
+  });
+  return uniqueRows.map((row) => {
+    const id = Number(row.id);
+    const assignments = assignmentMap.get(id) ?? [];
+    const primary = assignments[0];
+    return {
+      ...row,
+      can_view_all_resources: Boolean(row.can_view_all_resources),
+      can_access_iab: Boolean(row.can_access_iab),
+      division_assignments: assignments,
+      division_rank: primary?.division_rank ?? row.division_rank ?? null,
+      division_name: primary?.division_name ?? row.division_name ?? null,
+      division_names: assignments.map(a => a.division_name),
+    };
+  });
+}
+
+async function loadDpsPersonnelViaMongo(includeAll: boolean): Promise<Record<string, unknown>[]> {
+  const rows = await listDpsPersonnelMongo(includeAll);
+  const ids = rows.map(r => Number(r.id));
+  let assignmentMap = new Map<number, DivisionAssignment[]>();
+  try {
+    assignmentMap = await loadDivisionAssignments(ids);
+  } catch {
+    assignmentMap = new Map();
+  }
+  return formatDpsPersonnelRows(rows, assignmentMap);
+}
+
 // ── GET personnel (pass ?all=1 to include inactive) ───────────────────────────
 // Only users with a dps_users row are department personnel.
 router.get("/roster", async (req, res) => {
   try {
     const includeAll = req.query.all === "1";
-    // Personnel list uses the SQL bridge on Mongo (same as /api/dph). Native
-    // listDpsPersonnelMongo loads full dps_users and fails on production Atlas.
+
+    if (isMongoStore()) {
+      try {
+        res.json(await loadDpsPersonnelViaMongo(includeAll));
+        return;
+      } catch (mongoErr) {
+        req.log.warn({ err: mongoErr }, "roster GET native Mongo failed — falling back to SQL bridge");
+      }
+    }
+
     const where = includeAll ? "" : "WHERE lower(d.status) != 'inactive'";
     const orderBy = `ORDER BY COALESCE(rg.sort_order, 999), ${rankOrderSubquery},
                 d.callsign,
@@ -1249,33 +1310,7 @@ router.get("/roster", async (req, res) => {
       } catch (assignErr) {
         req.log.warn({ err: assignErr }, "roster GET division assignments load failed");
       }
-      const sortedRows = sortDepartmentPersonnel(
-        result.rows,
-        (row) => Number(row.group_sort_order ?? 999),
-        (row) => Number(row.rank_sort_order ?? 999),
-        (row) => (row.callsign as string | null | undefined) ?? null,
-        (row) => String(row.username ?? ""),
-      );
-      const seenIds = new Set<number>();
-      const uniqueRows = sortedRows.filter((row: { id: number }) => {
-        if (seenIds.has(row.id)) return false;
-        seenIds.add(row.id);
-        return true;
-      });
-      res.json(uniqueRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null; division_name: string | null }) => {
-        const assignments = assignmentMap.get(row.id) ?? [];
-        // Prefer multi-assignment primary; fall back to legacy single join fields
-        const primary = assignments[0];
-        return {
-          ...row,
-          can_view_all_resources: Boolean(row.can_view_all_resources),
-          can_access_iab: Boolean(row.can_access_iab),
-          division_assignments: assignments,
-          division_rank: primary?.division_rank ?? row.division_rank ?? null,
-          division_name: primary?.division_name ?? row.division_name ?? null,
-          division_names: assignments.map(a => a.division_name),
-        };
-      }));
+      res.json(formatDpsPersonnelRows(result.rows as Record<string, unknown>[], assignmentMap));
     } catch (joinErr) {
       // Fallback if division tables/columns are missing on an older DB
       req.log.warn({ err: joinErr }, "roster GET division join failed — falling back");
