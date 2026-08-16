@@ -332,17 +332,13 @@ export async function getDpsRankDetailMongo(id: number): Promise<Record<string, 
   if (!rankDoc) return null;
   const rank = normalizeRankRow(stripMongoId(rankDoc));
   const rankName = String(rank.name ?? "");
-  const rankNameLower = rankName.trim().toLowerCase();
+  const rankNamePattern = new RegExp(`^${rankName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i");
 
-  const [dpsUsers, customCallsigns] = await Promise.all([
-    getCollection("dps_users").find({}).toArray(),
+  const [matchingDpsUsers, customCallsigns] = await Promise.all([
+    getCollection("dps_users").find({ dps_rank: rankNamePattern }).toArray(),
     getCollection("dps_rank_custom_callsigns").find({ rank_id: id }).sort({ sort_order: 1, id: 1 }).toArray(),
   ]);
 
-  const matchingDpsUsers = dpsUsers.filter((d) => {
-    const dpsRank = d.dps_rank == null ? "" : String(d.dps_rank).trim().toLowerCase();
-    return dpsRank === rankNameLower;
-  });
   const profileIds = [...new Set(
     matchingDpsUsers
       .map(d => Number(d.profile_id))
@@ -353,7 +349,7 @@ export async function getDpsRankDetailMongo(id: number): Promise<Record<string, 
     .filter((pid): pid is number => pid != null && Number.isInteger(pid) && pid > 0);
   const userById = await loadUsersByProfileIds([...new Set([...profileIds, ...assignedIds])]);
   const dpsByProfile = new Map(
-    dpsUsers
+    matchingDpsUsers
       .map(d => [Number(d.profile_id), d] as const)
       .filter(([pid]) => Number.isInteger(pid) && pid > 0),
   );

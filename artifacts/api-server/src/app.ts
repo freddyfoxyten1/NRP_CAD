@@ -13,6 +13,18 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+function corsOrigin(): cors.CorsOptions["origin"] {
+  const raw = (process.env.CORS_ORIGIN ?? process.env.PUBLIC_ORIGIN ?? "").trim();
+  if (raw) {
+    const origins = raw.split(",").map(s => s.trim()).filter(Boolean);
+    return origins.length === 1 ? origins[0] : origins;
+  }
+  if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
+    return "https://cad.dojrblx.com";
+  }
+  return true;
+}
+
 app.use(
   pinoHttp({
     logger,
@@ -32,7 +44,7 @@ app.use(
     },
   }),
 );
-app.use(cors());
+app.use(cors({ origin: corsOrigin() }));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
