@@ -89,6 +89,16 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Drop the ranks first. The Discord sync runs whenever anyone opens Personnel
+  // Management and re-adds members for any rank still carrying a role link, so
+  // clearing the links up front stops a concurrent sync undoing the member pass.
+  const callsigns = doomedRankIds.length
+    ? await rankCallsignsCol.deleteMany({ rank_id: { $in: doomedRankIds } })
+    : { deletedCount: 0 };
+  const ranksDeleted = doomedRankIds.length
+    ? await ranksCol.deleteMany({ id: { $in: doomedRankIds } })
+    : { deletedCount: 0 };
+
   // Mirrors DELETE /roster/:id — MANUAL accounts exist only for the roster, so the
   // whole profile goes; real accounts keep their profile and lose DPS membership.
   let removedProfiles = 0;
@@ -106,13 +116,6 @@ async function main(): Promise<void> {
     await userDivisionsCol.deleteMany({ profile_id: profileId });
     removedRosterRows += 1;
   }
-
-  const callsigns = doomedRankIds.length
-    ? await rankCallsignsCol.deleteMany({ rank_id: { $in: doomedRankIds } })
-    : { deletedCount: 0 };
-  const ranksDeleted = doomedRankIds.length
-    ? await ranksCol.deleteMany({ id: { $in: doomedRankIds } })
-    : { deletedCount: 0 };
 
   console.log(`\nAPPLIED`);
   console.log(`  roster rows removed:     ${removedRosterRows}`);
