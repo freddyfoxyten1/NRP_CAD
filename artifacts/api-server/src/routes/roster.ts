@@ -1873,6 +1873,15 @@ router.delete("/roster/:id", async (req, res) => {
       await pool.query(`DELETE FROM cad_user_profiles WHERE id = $1`, [id]);
     } else {
       await pool.query(`DELETE FROM dps_users WHERE profile_id = $1`, [id]);
+      // Sessions fall back to the profile's own dps_rank when no roster row
+      // exists, so leaving these set would keep reporting the old rank and
+      // re-grant IAB if the member is ever added back.
+      await pool.query(
+        `UPDATE cad_user_profiles
+            SET dps_rank = NULL, dps_role = NULL, can_access_iab = false, updated_at = NOW()
+          WHERE id = $1`,
+        [id]
+      );
     }
     const actor = (req.headers['x-actor'] as string) || 'Admin';
     await writeLog('dps_personnel', actor, 'Removed officer from roster', removedName);

@@ -92,9 +92,12 @@ function bindParams(sql: string, params: unknown[]): string {
 
 function parseLiteral(raw: string): unknown {
   const v = raw.trim();
-  if (v === "NULL") return null;
-  if (v === "TRUE") return true;
-  if (v === "FALSE") return false;
+  // Keyword match must be case-insensitive: SQL written as `= false` would
+  // otherwise fall through and store the string "false", which is truthy.
+  const keyword = v.toUpperCase();
+  if (keyword === "NULL") return null;
+  if (keyword === "TRUE") return true;
+  if (keyword === "FALSE") return false;
   if (v === "CURRENT_TIMESTAMP" || /^now\(\)$/i.test(v)) return new Date().toISOString();
   if (/^'.*'$/s.test(v)) return v.slice(1, -1).replace(/''/g, "'");
   if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
