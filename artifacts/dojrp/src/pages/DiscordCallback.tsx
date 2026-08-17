@@ -51,10 +51,15 @@ const DiscordCallback = () => {
 
     (async () => {
       try {
+        const host = window.location.hostname;
+        const previewRedirect =
+          host === 'localhost' || host === '127.0.0.1'
+            ? `http://localhost:${window.location.port || '80'}/dojcad/discord-callback`
+            : undefined;
         const exchRes = await fetch('/api/discord/oauth/exchange', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ code }),
+          body: JSON.stringify({ code, redirect_uri: previewRedirect }),
         });
         const discordUser = await exchRes.json() as {
           id?: string;
