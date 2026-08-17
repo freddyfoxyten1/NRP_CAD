@@ -38,6 +38,43 @@ function stripMongoId<T extends Record<string, unknown>>(doc: T): T {
   return rest as T;
 }
 
+/**
+ * The SQL→Mongo migration left several rank docs duplicated under the same name
+ * (and members link to ranks by name, not id), so collapse them into one row.
+ * The lowest id wins for identity/order; later docs only fill blank fields, which
+ * recovers a title group configured on a duplicate.
+ */
+function dedupeRankDocsByName(rows: Document[]): Document[] {
+  const byName = new Map<string, Document[]>();
+  for (const row of rows) {
+    const key = String(row.name ?? "").trim().toLowerCase();
+    if (!key) continue;
+    const list = byName.get(key);
+    if (list) list.push(row);
+    else byName.set(key, [row]);
+  }
+
+  const merged: Document[] = [];
+  for (const docs of byName.values()) {
+    if (docs.length === 1) {
+      merged.push(docs[0]);
+      continue;
+    }
+    const ordered = [...docs].sort((a, b) => Number(a.id ?? 0) - Number(b.id ?? 0));
+    const out: Document = { ...ordered[0] };
+    for (const doc of ordered.slice(1)) {
+      for (const [field, value] of Object.entries(doc)) {
+        if (field === "_id" || field === "id") continue;
+        if (value == null || value === "") continue;
+        const current = out[field];
+        if (current == null || current === "") out[field] = value;
+      }
+    }
+    merged.push(out);
+  }
+  return merged;
+}
+
 function asStringOrNull(value: unknown): string | null {
   if (value == null || value === "") return null;
   if (typeof value === "object") return null;
@@ -78,7 +115,7 @@ export async function listDpsRanksMongo(): Promise<Record<string, unknown>[]> {
   await ensureDpsRankGroupIdsRepaired();
   const col = await getCollection("dps_ranks");
   const rows = await col.find({}).sort({ sort_order: 1, id: 1 }).toArray();
-  return rows.map(r => normalizeRankRow(stripMongoId(r)));
+  return dedupeRankDocsByName(rows).map(r => normalizeRankRow(stripMongoId(r)));
 }
 
 export async function listDpsPersonnelMongo(includeAll: boolean): Promise<Record<string, unknown>[]> {
@@ -94,11 +131,12 @@ export async function listDpsPersonnelMongo(includeAll: boolean): Promise<Record
       .filter(id => Number.isInteger(id) && id > 0),
   )];
 
-  const [userById, ranks, groups] = await Promise.all([
+  const [userById, rankDocs, groups] = await Promise.all([
     loadUsersByProfileIds(profileIds),
     colFind("dps_ranks"),
     colFind("dps_rank_groups"),
   ]);
+  const ranks = dedupeRankDocsByName(rankDocs);
   const rankByName = new Map(
     ranks.map(r => [String(r.name ?? "").trim().toLowerCase(), r]),
   );
@@ -122,7 +160,7 @@ export async function listDpsPersonnelMongo(includeAll: boolean): Promise<Record
         ? String(group.name)
         : null;
 
-    // Public roster: only members whose rank exists in current Mongo Personnel Management.
+    // Public roster: only members whose rank exists and sits under a title group.
     if (!includeAll && (!rankMeta || !groupName)) continue;
 
     rows.push({

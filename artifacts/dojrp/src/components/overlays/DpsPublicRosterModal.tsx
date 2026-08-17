@@ -38,7 +38,7 @@ type RankMeta = {
   color_hex?: string | null;
   insignia_url?: string | null;
   group_id?: number | null;
-  sort_order?: number;
+  sort_order: number;
 };
 
 type FleetVehicle = {

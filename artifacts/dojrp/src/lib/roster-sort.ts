@@ -139,7 +139,29 @@ export function personnelGroupLabelForDisplay<
   return personnelGroupLabelFromRank(member, ranks, groups, getRankName);
 }
 
-/** Whether a member should appear on the department personnel roster display. */
+/**
+ * Members link to ranks by name, so two rank rows sharing a name are the same
+ * rank. Collapse them, keeping the first row's ordering and filling in a title
+ * group from whichever duplicate has one.
+ */
+export function dedupeTitleRanksByName<T extends TitleRank>(ranks: T[]): T[] {
+  const byName = new Map<string, T>();
+  for (const rank of ranks) {
+    const key = rank.name.trim().toLowerCase();
+    if (!key) continue;
+    const existing = byName.get(key);
+    if (!existing) {
+      byName.set(key, { ...rank });
+      continue;
+    }
+    if (normalizeId(existing.group_id) == null && normalizeId(rank.group_id) != null) {
+      existing.group_id = rank.group_id;
+    }
+  }
+  return [...byName.values()];
+}
+
+/** A member belongs on the roster only when their rank sits under a title group. */
 export function isPersonnelRosterMemberVisible<
   T extends PersonnelRosterMember,
 >(
@@ -160,13 +182,18 @@ export function personnelGroupLabel(m: PersonnelRosterMember): string | null {
 
 /** Group personnel under title headings, rank order then callsign within each title. */
 export function buildPersonnelTitleGroups<
-  T extends PersonnelRosterMember & { username?: string | null; callsign?: string | null },
+  T extends PersonnelRosterMember & {
+    id: number;
+    username?: string | null;
+    callsign?: string | null;
+  },
 >(
   members: T[],
   groups: TitleGroup[],
-  ranks: TitleRank[],
+  rawRanks: TitleRank[],
   getRankName: (member: T) => string | null | undefined,
 ): Array<{ id: number | null; label: string; members: T[] }> {
+  const ranks = dedupeTitleRanksByName(rawRanks);
   const eligible = dedupeRosterMembersById(members).filter(m =>
     isPersonnelRosterMemberVisible(m, ranks, groups, getRankName),
   );
@@ -200,15 +227,20 @@ export type PersonnelRosterTitle<T> = {
 
 /** Title groups from Personnel Management, each with that title's Mongo ranks. */
 export function buildPersonnelRosterTree<
-  T extends PersonnelRosterMember & { username?: string | null; callsign?: string | null },
+  T extends PersonnelRosterMember & {
+    id: number;
+    username?: string | null;
+    callsign?: string | null;
+  },
 >(
   members: T[],
   groups: TitleGroup[],
-  ranks: TitleRank[],
+  rawRanks: TitleRank[],
   getRankName: (member: T) => string | null | undefined,
   opts?: { hideEmptyRanks?: boolean },
 ): PersonnelRosterTitle<T>[] {
   const hideEmptyRanks = opts?.hideEmptyRanks ?? false;
+  const ranks = dedupeTitleRanksByName(rawRanks);
   const titles = buildPersonnelTitleGroups(members, groups, ranks, getRankName);
 
   return titles
