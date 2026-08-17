@@ -32,7 +32,7 @@ import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
-import { buildPersonnelTitleGroups, dedupeRosterMembersById, sortByRankThenCallsign } from '@/lib/roster-sort';
+import { buildPersonnelTitleGroups, dedupeRosterMembersById, dedupeTitleRanksByName, sortByRankThenCallsign } from '@/lib/roster-sort';
 import { fetchRosterArray, fetchRosterJson, normalizeRankGroupId, rankBelongsToGroup } from '@/lib/roster-fetch';
 import { collectDepartmentPermissions } from '@/lib/permission-access';
 import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
@@ -298,7 +298,12 @@ function loadRosterMetadata() {
       fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
       fetchRosterArray<DivisionRankRow>('/api/roster/division-ranks', 'division ranks'),
     ])
-      .then(([groups, ranks, divs, divRanks]) => ({ groups, ranks, divs, divRanks }))
+      .then(([groups, ranks, divs, divRanks]) => ({
+        groups,
+        ranks: dedupeTitleRanksByName(ranks),
+        divs,
+        divRanks,
+      }))
       .catch((err) => {
         rosterMetadataPromise = null;
         throw err;
@@ -1869,15 +1874,16 @@ const DepartmentOfPublicSafety = () => {
       })
       .finally(() => { if (!opts?.silent) setPanelLoading(false); });
   };
-  const fetchRanks = () => {
-    setRanksLoading(true);
+  const fetchRanks = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setRanksLoading(true);
     fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks')
-      .then(setRanks)
+      .then((rows) => setRanks(dedupeTitleRanksByName(rows)))
       .catch((err) => {
+        if (opts?.silent) return;
         setRanks([]);
         toast.error(err instanceof Error ? err.message : 'Failed to load ranks.');
       })
-      .finally(() => setRanksLoading(false));
+      .finally(() => { if (!opts?.silent) setRanksLoading(false); });
   };
   const handleSyncAllCallsigns = async () => {
     setSyncingCallsigns(true);
@@ -1906,8 +1912,9 @@ const DepartmentOfPublicSafety = () => {
         error?: string;
       };
       if (!res.ok) throw new Error(data.error ?? 'Discord sync failed.');
-      fetchPanelMembers();
-      fetchRanks();
+      // A silent (automatic) sync must not re-trigger the panel loading screen.
+      fetchPanelMembers({ silent: opts?.silent });
+      fetchRanks({ silent: opts?.silent });
       if (!opts?.silent) {
         const assigned = (data.assigned ?? 0) + (data.divisions?.assigned ?? 0);
         const removed = (data.removed ?? 0) + (data.divisions?.removed ?? 0);
@@ -2024,20 +2031,28 @@ const DepartmentOfPublicSafety = () => {
 
   useEffect(() => {
     if (!session) return;
+    if (activeTab !== 'department-panel') return;
     if (panelMembers.length > 0 || roster.length > 0) return;
     fetchPanelMembers({ silent: true });
-  }, [session?.discord_id, session?.username, session?.id]);
+  }, [session?.discord_id, session?.username, session?.id, activeTab]);
 
   useEffect(() => {
+    // These fetches only feed the department panel; running them on the roster
+    // tabs starved the roster request of browser connections.
+    if (activeTab !== 'department-panel') return;
+    const cleanups: Array<() => void> = [];
     if (panelSection === 'personnel') {
       fetchPanelMembers(); fetchRanks(); fetchGroups();
-      // Sync linked Discord roles from the DPS guild into the roster
-      void handleSyncDiscordRoles({ silent: true });
-      // Load DPS guild roles for the Discord-role dropdown in the rank edit modal
-      fetch('/api/roster/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
-        .then(r => r.ok ? r.json() : [])
-        .then((rows: DpsDiscordRole[]) => setDpsGuildRoles(rows))
-        .catch(() => { /* non-fatal — dropdown just stays empty */ });
+      // Discord sync and guild roles are refinements — let the panel paint first.
+      const idle = window.setTimeout(() => {
+        void handleSyncDiscordRoles({ silent: true });
+        // Load DPS guild roles for the Discord-role dropdown in the rank edit modal
+        fetch('/api/roster/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
+          .then(r => r.ok ? r.json() : [])
+          .then((rows: DpsDiscordRole[]) => setDpsGuildRoles(rows))
+          .catch(() => { /* non-fatal — dropdown just stays empty */ });
+      }, 400);
+      cleanups.push(() => window.clearTimeout(idle));
     }
     if (panelSection === 'division' || panelSection === null) {
       // Silent refresh when re-entering division edit so the panel does not flicker
@@ -2067,7 +2082,8 @@ const DepartmentOfPublicSafety = () => {
     if (panelSection === 'resources') { fetchResources(); }
     if (panelSection === 'information') { fetchIndexInfo(); fetchPageInfo(); }
     if (panelSection !== 'information') setInfoSubSection(null);
-  }, [panelSection]);
+    return () => { for (const fn of cleanups) fn(); };
+  }, [panelSection, activeTab]);
 
   useEffect(() => {
     if (editRankId === null && addRankGroupId == null) return;
