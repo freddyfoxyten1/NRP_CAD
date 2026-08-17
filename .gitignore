@@ -55,7 +55,7 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Local CAD SQLite database files (folder kept via cad-database/.gitignore)
+# Local leftover SQLite files only — GitHub/VPS production uses MongoDB Atlas
 cad-database/*.sqlite
 cad-database/*.sqlite-*
 artifacts/api-server/cad-database/

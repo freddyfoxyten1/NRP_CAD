@@ -1,17 +1,17 @@
 # MongoDB Architecture (DOJCAD)
 
-MongoDB Atlas is the target authoritative database. SQL (SQLite/Postgres via `pool`) remains available until cutover.
+MongoDB Atlas is the only database on GitHub and the VPS (`cad.dojrblx.com`).
+Local SQLite (`cad-database/`) is not used in production.
 
 ## Environment variables
 
 | Variable | Purpose |
 |----------|---------|
-| `DATA_STORE` | `mongo` (preferred) or `sql`; if unset, mongo when `MONGODB_URI` is set |
-| `MONGODB_URI` | Atlas connection string |
+| `DATA_STORE` | Must be `mongo` on GitHub/VPS. Production ignores SQL. |
+| `MONGODB_URI` | Atlas connection string (required in production) |
 | `MONGODB_DATABASE` | Database name (default `dojcad`) |
 | `REDIS_URL` | Redis for admin member cache |
-| `DATABASE_URL` | Optional Postgres for SQL mode / ETL source |
-| `CAD_DATABASE_PATH` | Optional SQLite directory for SQL mode / ETL source |
+| `DATABASE_URL` | Optional Postgres for one-time ETL only — not a runtime store |
 
 Never commit production credentials.
 
@@ -68,7 +68,7 @@ bun run --cwd lib/db migrate:mongo:verify
 - Resumable via `migration_state`
 - Copies binaries into GridFS
 - Does **not** delete SQL data
-- After verify: set `DATA_STORE=mongo` in deployment
+- After verify: keep `DATA_STORE=mongo` in deployment. Do not switch production back to SQL.
 
 ## Backup / restore
 
@@ -76,26 +76,22 @@ bun run --cwd lib/db migrate:mongo:verify
 - Logical backup: `mongodump --uri="$MONGODB_URI" --db=dojcad`
 - Restore: `mongorestore --uri="$MONGODB_URI" --db=dojcad dump/dojcad`
 - Verify restore with `migrate:mongo:verify` counts (or spot-check critical collections)
-- Keep a SQL backup (`cad-database/dojcad.sqlite` or `pg_dump`) until soak period ends
+- Do not run or restore SQLite on the VPS
 
 ## Cutover checklist
 
-1. Backup SQL (`cad-database/dojcad.sqlite` or `pg_dump`)
-2. Set `MONGODB_URI` (+ optional `REDIS_URL`) in deploy env
-3. Run `bun run migrate:mongo` then `bun run migrate:mongo:verify` (exit 0)
-4. Smoke-test against Atlas with a staging `DATA_STORE=mongo` instance
-5. Set production `DATA_STORE=mongo`
-6. Keep SQL files for a soak period — do not delete until verified
+1. Set `MONGODB_URI` (+ optional `REDIS_URL`) in the VPS `.env`
+2. Keep `DATA_STORE=mongo` and `NODE_ENV=production`
+3. Confirm `GET /api/health/db` reports `"dataStore":"mongo"` and `"mongo":true`
+4. Do not create or restore `cad-database/dojcad.sqlite` on GitHub or the VPS
 
-When `DATA_STORE=mongo`, request handlers use Mongo repositories + the SQL bridge; the SQL pool is not used for requests. ETL still reads SQL as the migration source.
+When `DATA_STORE=mongo`, request handlers use Mongo repositories + the SQL bridge; the SQL pool is not opened in production.
 
 ## Local development
 
 1. Copy `.env.example` → `.env`
 2. Set `MONGODB_URI` (required) and optional `REDIS_URL`
-3. Run ETL once from existing SQLite/Postgres: `bun run migrate:mongo`
-4. Keep `DATA_STORE=mongo` — the API and website read/write Mongo (GridFS for files)
-5. Use `DATA_STORE=sql` only as an emergency fallback
+3. Keep `DATA_STORE=mongo` — the API and website read/write Atlas (GridFS for files)
 
 ## Troubleshooting
 

@@ -58,18 +58,14 @@ fi
 DB_HEALTH="$(curl -sf "http://127.0.0.1:8080/api/health/db" || true)"
 if [ -n "$DB_HEALTH" ]; then
   echo "   Database: $DB_HEALTH"
+  if echo "$DB_HEALTH" | grep -q '"dataStore":"sql"'; then
+    echo "ERROR: GitHub/VPS production must use MongoDB. Set DATA_STORE=mongo and MONGODB_URI in .env"
+    exit 1
+  fi
   if echo "$DB_HEALTH" | grep -q '"dataStore":"mongo"'; then
     if ! echo "$DB_HEALTH" | grep -q '"mongo":true'; then
       echo "ERROR: DATA_STORE=mongo but Mongo ping failed. Check MONGODB_URI in .env"
       exit 1
-    fi
-    # Roster sorting and other API changes use existing Mongo fields (sort_order, callsign).
-    # Re-run ETL only when intentionally syncing a SQL backup into Atlas:
-    #   SYNC_SQL_TO_MONGO=1 bun run migrate:mongo
-    if [ "${SYNC_SQL_TO_MONGO:-}" = "1" ] && [ -f "$REPO_DIR/cad-database/dojcad.sqlite" ]; then
-      echo "==> Syncing SQL backup → Mongo (SYNC_SQL_TO_MONGO=1)..."
-      bun run migrate:mongo
-      bun run migrate:mongo:verify
     fi
   fi
 fi

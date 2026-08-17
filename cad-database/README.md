@@ -1,10 +1,10 @@
-# CAD Database (local)
+# CAD Database (not used on GitHub / VPS)
 
-Local file-based CAD storage used when `DATABASE_URL` is not set.
+This folder is **not** the production database. GitHub and `cad.dojrblx.com`
+use MongoDB Atlas only (`DATA_STORE=mongo`).
 
-- **Engine:** SQLite (`dojcad.sqlite`) via Node's built-in `node:sqlite`
-- **Purpose:** Develop and run DOJCAD without Postgres
-- **Later:** Set `DATABASE_URL` to your real Postgres instance; the app will use that instead
+SQLite here is leftover local/ETL storage only. Do not deploy or restore
+`dojcad.sqlite` on the VPS.
 
 ## Layout
 

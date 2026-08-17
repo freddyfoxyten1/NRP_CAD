@@ -11,6 +11,9 @@ import { createMongoPoolFacade } from "./mongo-sql-bridge";
 const { Pool } = pg;
 
 function createSqlPool(): pg.Pool {
+  if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
+    throw new Error("Production cannot open a local SQL database. Use MongoDB Atlas.");
+  }
   if (process.env.DATABASE_URL) {
     console.info("[db] Using Postgres via DATABASE_URL");
     return new Pool({ connectionString: process.env.DATABASE_URL });
@@ -42,8 +45,9 @@ export type DbPool = {
 
 /**
  * Shared query pool.
- * - DATA_STORE=sql (default): SQLite or Postgres
+ * - Production (GitHub/VPS): Mongo only
  * - DATA_STORE=mongo: Mongo SQL bridge facade (same pool.query API)
+ * - DATA_STORE=sql: local laptop only (never used on GitHub or the VPS)
  */
 const sqlPool = isMongoStore() ? null : createSqlPool();
 
