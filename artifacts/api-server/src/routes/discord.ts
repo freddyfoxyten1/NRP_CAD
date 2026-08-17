@@ -4,7 +4,7 @@ import {
   canSignInForCadMode,
   createCadAccountFromDiscord,
   getCommunityGuildJoinInfo,
-  getRedirectUri,
+  resolveRedirectUri,
   isCommunityGuildMember,
   isCommunityGuildMemberViaOAuth,
   loadCadSession,
@@ -22,7 +22,8 @@ router.get("/discord/oauth/url", (req, res) => {
 
   let redirectUri: string;
   try {
-    redirectUri = getRedirectUri(req);
+    const explicit = typeof req.query.redirect_uri === "string" ? req.query.redirect_uri : undefined;
+    redirectUri = resolveRedirectUri(req, explicit);
   } catch {
     res.status(503).json({ error: "Server redirect URI is not configured." });
     return;
@@ -40,7 +41,10 @@ router.get("/discord/oauth/url", (req, res) => {
 });
 
 router.post("/discord/oauth/exchange", async (req, res) => {
-  const { code } = req.body as { code?: string };
+  const { code, redirect_uri: explicitRedirect } = req.body as {
+    code?: string;
+    redirect_uri?: string;
+  };
 
   if (!code) {
     res.status(400).json({ error: "code is required." });
@@ -56,7 +60,7 @@ router.post("/discord/oauth/exchange", async (req, res) => {
 
   let redirectUri: string;
   try {
-    redirectUri = getRedirectUri(req);
+    redirectUri = resolveRedirectUri(req, explicitRedirect);
   } catch {
     res.status(503).json({ error: "Server redirect URI is not configured." });
     return;

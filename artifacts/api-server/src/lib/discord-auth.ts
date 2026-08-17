@@ -146,7 +146,8 @@ export function getRedirectUri(req: Request): string {
       ?.split(",")[0]
       .trim();
     const isLocal = isLocalBrowserHost(host);
-    const proto = forwardedProto || (isLocal ? "http" : "https");
+    // Discord only accepts http for localhost. Ignore https from the VPS proxy.
+    const proto = isLocal ? "http" : (forwardedProto || "https");
     return `${proto}://${host}/dojcad/discord-callback`;
   }
 
@@ -155,6 +156,20 @@ export function getRedirectUri(req: Request): string {
   }
 
   throw new Error("Cannot determine host for redirect URI");
+}
+
+const PREVIEW_REDIRECT_URIS = new Set([
+  "http://localhost:4173/dojcad/discord-callback",
+  "http://localhost:5173/dojcad/discord-callback",
+]);
+
+/** Prefer an explicit preview callback when Discord has that URI registered. */
+export function resolveRedirectUri(req: Request, explicit?: string): string {
+  const trimmed = (explicit ?? "").trim();
+  if (trimmed && PREVIEW_REDIRECT_URIS.has(trimmed)) {
+    return trimmed;
+  }
+  return getRedirectUri(req);
 }
 
 export async function discordBotFetch(url: string): Promise<Response> {

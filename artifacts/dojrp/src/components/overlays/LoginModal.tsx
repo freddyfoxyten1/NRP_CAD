@@ -34,7 +34,15 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
     setError(null);
     setPending(true);
     try {
-      const res = await fetch('/api/discord/oauth/url', {
+      const host = window.location.hostname;
+      const previewRedirect =
+        host === 'localhost' || host === '127.0.0.1'
+          ? `http://${host === '127.0.0.1' ? 'localhost' : host}:${window.location.port || '80'}/dojcad/discord-callback`
+          : null;
+      const oauthUrl = previewRedirect
+        ? `/api/discord/oauth/url?redirect_uri=${encodeURIComponent(previewRedirect)}`
+        : '/api/discord/oauth/url';
+      const res = await fetch(oauthUrl, {
         headers: { accept: 'application/json' },
       });
 
