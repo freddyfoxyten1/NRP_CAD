@@ -1,18 +1,21 @@
+import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useParams } from "react-router-dom";
 import RequireAuth from "@/components/auth/RequireAuth";
-import MemberPortal from "@/pages/MemberPortal";
-import AdminPortal from "@/pages/AdminPortal";
-import DepartmentOfPublicSafety from "@/pages/DepartmentOfPublicSafety";
-import DepartmentOfCommunications from "@/pages/DepartmentOfCommunications";
-import DepartmentOfPublicHealth from "@/pages/DepartmentOfPublicHealth";
-import DpsInternalAffairs from "@/pages/DpsInternalAffairs";
-import DphInternalAffairs from "@/pages/DphInternalAffairs";
-import StaffPortal from "@/pages/StaffPortal";
 import PublicView from "@/pages/PublicView";
 import NotFound from "@/pages/NotFound";
-import CadPage from "@/pages/CadPage";
-import DocCadPage from "@/pages/DocCadPage";
+import RouteFallback from "@/components/routing/RouteFallback";
+
+const MemberPortal = lazy(() => import("@/pages/MemberPortal"));
+const AdminPortal = lazy(() => import("@/pages/AdminPortal"));
+const DepartmentOfPublicSafety = lazy(() => import("@/pages/DepartmentOfPublicSafety"));
+const DepartmentOfCommunications = lazy(() => import("@/pages/DepartmentOfCommunications"));
+const DepartmentOfPublicHealth = lazy(() => import("@/pages/DepartmentOfPublicHealth"));
+const DpsInternalAffairs = lazy(() => import("@/pages/DpsInternalAffairs"));
+const DphInternalAffairs = lazy(() => import("@/pages/DphInternalAffairs"));
+const StaffPortal = lazy(() => import("@/pages/StaffPortal"));
+const CadPage = lazy(() => import("@/pages/CadPage"));
+const DocCadPage = lazy(() => import("@/pages/DocCadPage"));
 
 const BASES = new Set([
   "public",
@@ -23,6 +26,10 @@ const BASES = new Set([
   "doc",
   "staff",
 ]);
+
+function withSuspense(node: ReactNode) {
+  return <Suspense fallback={<RouteFallback />}>{node}</Suspense>;
+}
 
 /**
  * Handles shareable `/base_section` URLs (e.g. `/dps_information`, `/public_store`).
@@ -45,34 +52,34 @@ export default function SectionPathRoute() {
   }
 
   if (base === "dps" && section === "internal-affairs") {
-    return (
+    return withSuspense(
       <RequireAuth>
         <DpsInternalAffairs />
-      </RequireAuth>
+      </RequireAuth>,
     );
   }
   if (base === "dph" && section === "internal-affairs") {
-    return (
+    return withSuspense(
       <RequireAuth>
         <DphInternalAffairs />
-      </RequireAuth>
+      </RequireAuth>,
     );
   }
   if (base === "dps" && section === "cad") {
-    return (
+    return withSuspense(
       <RequireAuth>
         <CadPage />
-      </RequireAuth>
+      </RequireAuth>,
     );
   }
   if (base === "dph" && section === "cad") {
     return <Navigate to="/dph_personnel-roster" replace />;
   }
   if (base === "doc" && section === "cad") {
-    return (
+    return withSuspense(
       <RequireAuth>
         <DocCadPage />
-      </RequireAuth>
+      </RequireAuth>,
     );
   }
 
@@ -80,40 +87,40 @@ export default function SectionPathRoute() {
     case "public":
       return <PublicView />;
     case "portal":
-      return (
+      return withSuspense(
         <RequireAuth>
           <MemberPortal />
-        </RequireAuth>
+        </RequireAuth>,
       );
     case "admin":
-      return (
+      return withSuspense(
         <RequireAuth>
           <AdminPortal />
-        </RequireAuth>
+        </RequireAuth>,
       );
     case "dps":
-      return (
+      return withSuspense(
         <RequireAuth>
           <DepartmentOfPublicSafety />
-        </RequireAuth>
+        </RequireAuth>,
       );
     case "dph":
-      return (
+      return withSuspense(
         <RequireAuth>
           <DepartmentOfPublicHealth />
-        </RequireAuth>
+        </RequireAuth>,
       );
     case "doc":
-      return (
+      return withSuspense(
         <RequireAuth>
           <DepartmentOfCommunications />
-        </RequireAuth>
+        </RequireAuth>,
       );
     case "staff":
-      return (
+      return withSuspense(
         <RequireAuth>
           <StaffPortal />
-        </RequireAuth>
+        </RequireAuth>,
       );
     default:
       return <NotFound />;

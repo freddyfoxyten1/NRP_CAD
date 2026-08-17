@@ -4,7 +4,7 @@
 // No authentication required. Displays live stats, announcements, gallery,
 // and press/news items for the DOJRP community.
 // ----
-import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment, lazy, Suspense } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { sectionFromPathname } from "@/hooks/usePortalSection";
 import {
@@ -17,9 +17,11 @@ import DojrpLogo from "@/components/shared/DojrpLogo";
 import { PageLoadingScreen } from "@/components/shared/LoadingProgress";
 import StoreProductCard, { type StoreProduct } from "@/components/shared/StoreProductCard";
 import LoginModal from "@/components/overlays/LoginModal";
-import DpsPublicRosterModal from "@/components/overlays/DpsPublicRosterModal";
-import DocumentEditor from "@/components/editor/DocumentEditor";
-import PdfViewer from "@/components/shared/PdfViewer";
+import { SimpleLoading } from "@/components/shared/LoadingProgress";
+
+const DpsPublicRosterModal = lazy(() => import("@/components/overlays/DpsPublicRosterModal"));
+const DocumentEditor = lazy(() => import("@/components/editor/DocumentEditor"));
+const PdfViewer = lazy(() => import("@/components/shared/PdfViewer"));
 import { getCadSession } from "@/lib/cad-session";
 import { sortByRankThenUsername } from "@/lib/roster-sort";
 import { formatInGameCount } from "@/lib/in-game-count";
@@ -454,7 +456,7 @@ const PublicView = () => {
   const [staffCollapsed, setStaffCollapsed] = useState<Record<string, boolean>>({});
   const [staffSearch,   setStaffSearch]   = useState("");
 
-  // Live-refresh stats every 60 s
+  // Live-refresh stats every 60 s — defer first fetch so the page paints first.
   useEffect(() => {
     const load = () => {
       setStatsLoading(true);
@@ -462,9 +464,12 @@ const PublicView = () => {
         .then(r => r.json()).then(setStats).catch(() => setStats(null))
         .finally(() => setStatsLoading(false));
     };
-    load();
+    const startId = window.setTimeout(load, 0);
     const id = setInterval(load, 60_000);
-    return () => clearInterval(id);
+    return () => {
+      window.clearTimeout(startId);
+      clearInterval(id);
+    };
   }, []);
 
   // Home Gallery ONLY: auto-scroll with scrollbar; pause on interaction, resume after 20s idle
@@ -1632,14 +1637,16 @@ const PublicView = () => {
 
       <LoginModal isOpen={isLoginOpen} onClose={() => setIsLoginOpen(false)} />
 
-      <DpsPublicRosterModal open={rosterOpen} onClose={() => setRosterOpen(false)} />
-      <DpsPublicRosterModal
-        open={dphRosterOpen}
-        onClose={() => setDphRosterOpen(false)}
-        apiBase="/api/dph"
-        title="DPH Roster"
-        accent="red"
-      />
+      <Suspense fallback={null}>
+        <DpsPublicRosterModal open={rosterOpen} onClose={() => setRosterOpen(false)} />
+        <DpsPublicRosterModal
+          open={dphRosterOpen}
+          onClose={() => setDphRosterOpen(false)}
+          apiBase="/api/dph"
+          title="DPH Roster"
+          accent="red"
+        />
+      </Suspense>
 
       {/* DPS Resources popup */}
       {resourcesOpen && (
@@ -1780,13 +1787,15 @@ const PublicView = () => {
       )}
 
       {openDocId !== null && (
-        <DocumentEditor
-          key={`${resourceApiBase}-${openDocId}`}
-          resourceId={openDocId}
-          canEdit={false}
-          apiBase={resourceApiBase}
-          onClose={() => setOpenDocId(null)}
-        />
+        <Suspense fallback={<SimpleLoading label="Opening document…" minHeightClass="min-h-screen" />}>
+          <DocumentEditor
+            key={`${resourceApiBase}-${openDocId}`}
+            resourceId={openDocId}
+            canEdit={false}
+            apiBase={resourceApiBase}
+            onClose={() => setOpenDocId(null)}
+          />
+        </Suspense>
       )}
 
       {openPdf !== null && (
@@ -1802,10 +1811,12 @@ const PublicView = () => {
               <X className="h-4 w-4" />
             </button>
           </div>
-          <PdfViewer
-            fileUrl={`${resourceApiBase}/${openPdf.id}/file`}
-            downloadName={`${openPdf.title}.pdf`}
-          />
+          <Suspense fallback={<SimpleLoading label="Loading PDF…" minHeightClass="min-h-[50vh]" />}>
+            <PdfViewer
+              fileUrl={`${resourceApiBase}/${openPdf.id}/file`}
+              downloadName={`${openPdf.title}.pdf`}
+            />
+          </Suspense>
         </div>
       )}
 

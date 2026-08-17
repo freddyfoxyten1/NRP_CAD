@@ -281,6 +281,27 @@ const DIVISION_OPTIONS = [
   { key: 'FOU', label: 'Field Operations Unit' },
 ];
 
+type DivisionRankRow = { id: number; name: string; division_id: number | null };
+
+let rosterMetadataPromise: Promise<{
+  groups: DpsGroup[];
+  ranks: DpsRank[];
+  divs: RosterDivision[];
+  divRanks: DivisionRankRow[];
+}> | null = null;
+
+function loadRosterMetadata() {
+  if (!rosterMetadataPromise) {
+    rosterMetadataPromise = Promise.all([
+      fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups'),
+      fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks'),
+      fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
+      fetchRosterArray<DivisionRankRow>('/api/roster/division-ranks', 'division ranks'),
+    ]).then(([groups, ranks, divs, divRanks]) => ({ groups, ranks, divs, divRanks }));
+  }
+  return rosterMetadataPromise;
+}
+
 // Group headings are loaded dynamically from /api/roster/groups.
 // Each RosterMember already carries a group_name field returned by the API.
 
@@ -1771,21 +1792,18 @@ const DepartmentOfPublicSafety = () => {
 
   // ── Mount: load groups + ranks so the Department Panel access check works ─────
   useEffect(() => {
-    Promise.all([
-      fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups'),
-      fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks'),
-      fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
-      fetchRosterArray<{ id: number; name: string; division_id: number | null }>('/api/roster/division-ranks', 'division ranks'),
-    ]).then(([grps, rnks, divs, divRanks]) => {
-      setGroups(grps);
-      setRanks(rnks);
-      setDivisionRanksForEdit(divRanks);
-      setRosterDivisions(divs);
-      setDivisionStats({
-        divisions: divs.length,
-        ranks: divRanks.length,
-      });
-    }).catch(() => { /* silent — button just won't show until data is available */ });
+    loadRosterMetadata()
+      .then(({ groups: grps, ranks: rnks, divs, divRanks }) => {
+        setGroups(grps);
+        setRanks(rnks);
+        setDivisionRanksForEdit(divRanks);
+        setRosterDivisions(divs);
+        setDivisionStats({
+          divisions: divs.length,
+          ranks: divRanks.length,
+        });
+      })
+      .catch(() => { /* silent — button just won't show until data is available */ });
   }, []);
 
   // ── Roster for membership checks on Resources tab ────────────────────────────
@@ -1805,20 +1823,17 @@ const DepartmentOfPublicSafety = () => {
 
     void (async () => {
       try {
-        const [members, grps, rnks, divRanks, divs] = await Promise.all([
+        const [members, meta] = await Promise.all([
           fetchRosterArray<RosterMember>('/api/roster', 'roster'),
-          fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups'),
-          fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks'),
-          fetchRosterArray<{ id: number; name: string; division_id: number | null }>('/api/roster/division-ranks', 'division ranks'),
-          fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
+          loadRosterMetadata(),
         ]);
         if (cancelled) return;
         setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
-        setGroups(grps);
-        setRanks(rnks);
-        setDivisionRanksForEdit(divRanks);
-        setRosterDivisions(divs);
-        setDivisionStats(s => ({ ...s, divisions: divs.length, ranks: divRanks.length }));
+        setGroups(meta.groups);
+        setRanks(meta.ranks);
+        setDivisionRanksForEdit(meta.divRanks);
+        setRosterDivisions(meta.divs);
+        setDivisionStats(s => ({ ...s, divisions: meta.divs.length, ranks: meta.divRanks.length }));
       } catch (err) {
         if (!cancelled) {
           setRoster([]);

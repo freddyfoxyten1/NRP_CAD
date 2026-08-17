@@ -170,15 +170,17 @@ export function useMemberPortal() {
       }
 
       try {
-        const [response, grpRes] = await Promise.all([
+        const [response, grpRes, meRes] = await Promise.all([
           fetch('/api/cad-auth/session-status', {
             method: 'POST',
             headers: { 'content-type': 'application/json', accept: 'application/json' },
             body: JSON.stringify({ id: session.id, email: session.email }),
           }),
           fetch('/api/staff/groups', { headers: { accept: 'application/json' } }),
+          fetch(`/api/dph/me?username=${encodeURIComponent(session.username)}`, {
+            headers: { accept: 'application/json' },
+          }).catch(() => null),
         ]);
-        const stats = await fetchStats();
         const contentType = response.headers.get('content-type') ?? '';
 
         if (!response.ok || !contentType.includes('application/json')) {
@@ -201,19 +203,15 @@ export function useMemberPortal() {
         setCadSession(result.account);
 
         let dphIab = false;
-        try {
-          const meRes = await fetch(
-            `/api/dph/me?username=${encodeURIComponent(result.account.username)}`,
-            { headers: { accept: 'application/json' } },
-          );
-          if (meRes.ok) {
+        if (meRes?.ok) {
+          try {
             const me = await meRes.json() as { can_access_iab?: boolean } | null;
             dphIab = Boolean(me?.can_access_iab);
-          }
-        } catch { /* non-fatal */ }
+          } catch { /* non-fatal */ }
+        }
 
         if (isMounted) {
-          setPortalData(toPortalData(result.account, stats));
+          setPortalData(toPortalData(result.account, defaultStats));
           setCanAccessDphIab(dphIab);
           if (grpRes.ok) {
             try { setStaffGroups((await grpRes.json()) as StaffGroup[]); } catch { /* keep existing */ }
@@ -221,6 +219,11 @@ export function useMemberPortal() {
           setError(null);
           setIsLoading(false);
         }
+
+        void fetchStats().then((stats) => {
+          if (!isMounted) return;
+          setPortalData((prev) => (prev ? { ...prev, stats } : prev));
+        });
       } catch {
         if (isMounted) {
           setPortalData(toPortalData(session, defaultStats));
@@ -233,9 +236,10 @@ export function useMemberPortal() {
     validateSession(true);
     fetchAnnouncements();
     const interval = window.setInterval(() => {
+      if (document.hidden) return;
       validateSession(false);
       fetchAnnouncements();
-    }, 10000);
+    }, 60_000);
 
     return () => {
       isMounted = false;
