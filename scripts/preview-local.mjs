@@ -15,12 +15,8 @@ const PREVIEW_PORT = process.env.PREVIEW_PORT ?? "4173";
 const PREVIEW_API_URL = (process.env.PREVIEW_API_URL ?? "").trim().replace(/\/$/, "");
 const usingRemoteApi = PREVIEW_API_URL.length > 0;
 
-/** Ensure local preview/dev use the repo-root SQLite store, not api-server/cad-database. */
-const previewRedirectUri =
-  process.env.DISCORD_REDIRECT_URI?.includes(":5173")
-    ? `http://localhost:${PREVIEW_PORT}/dojcad/discord-callback`
-    : (process.env.DISCORD_REDIRECT_URI ??
-      `http://localhost:${PREVIEW_PORT}/dojcad/discord-callback`);
+/** Always return to this preview, never the published cad.dojrblx.com site. */
+const previewRedirectUri = `http://localhost:${PREVIEW_PORT}/dojcad/discord-callback`;
 
 const repoEnv = {
   ...process.env,
@@ -220,18 +216,18 @@ if (ready) {
       "",
       "═══════════════════════════════════════════════════════════════",
       usingRemoteApi
-        ? "  DOJCAD preview — live VPS data (compare with production)"
-        : "  DOJCAD edit preview — local changes before GitHub push",
+        ? "  DOJCAD preview — VPS data (Discord login goes to cad.dojrblx.com)"
+        : "  DOJCAD test preview — local files before VPS release",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site:  http://localhost:${PREVIEW_PORT}/`,
       usingRemoteApi
         ? `  API:   ${PREVIEW_API_URL}/api/healthz  (proxied from VPS)`
-        : `  API:   http://localhost:${API_PORT}/api/healthz  (local build + DB)`,
+        : `  API:   http://localhost:${API_PORT}/api/healthz  (this checkout)`,
       "",
       usingRemoteApi
-        ? "  Live production data. For pre-push edit preview use: bun run preview"
-        : "  Production build of your current edits — same as after git push + VPS deploy.",
+        ? "  Sign-in leaves this preview. Use bun run preview to review unpublished changes."
+        : "  Unpublished files. Sign-in returns here, not cad.dojrblx.com.",
       "",
       "  Live reload while editing: bun run dev",
       "  Production data check:    bun run preview:live",

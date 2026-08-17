@@ -102,18 +102,29 @@ function normalizeBrowserHost(host: string): string {
   return host;
 }
 
+function isLocalBrowserHost(host: string): boolean {
+  const lower = host.toLowerCase();
+  return (
+    lower.startsWith("localhost") ||
+    lower.startsWith("127.0.0.1") ||
+    lower.startsWith("[::1]")
+  );
+}
+
 /** Discord OAuth redirect — prefer the browser-facing host (Vite/nginx), not the API port. */
 export function getRedirectUri(req: Request): string {
   const forwardedHost = (req.headers["x-forwarded-host"] as string | undefined)
     ?.split(",")[0]
     .trim();
   const host = normalizeBrowserHost(forwardedHost || (req.headers.host as string | undefined) || "");
+  const isProd = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
 
-  if (host && !isDirectApiHost(host)) {
+  // Production must stay on the published callback. Local preview uses DISCORD_REDIRECT_URI.
+  if (host && !isDirectApiHost(host) && !(isProd && isLocalBrowserHost(host))) {
     const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)
       ?.split(",")[0]
       .trim();
-    const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+    const isLocal = isLocalBrowserHost(host);
     const proto = forwardedProto || (isLocal ? "http" : "https");
     return `${proto}://${host}/dojcad/discord-callback`;
   }
