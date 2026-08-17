@@ -2636,12 +2636,30 @@ const DepartmentOfPublicSafety = () => {
 
   // ── Delete a rank ─────────────────────────────────────────────────────────────
   const handleDeleteRank = async (rankId: number, rankName: string) => {
-    if (!window.confirm(`Delete the rank "${rankName}"? This cannot be undone.`)) return;
+    const onRank = panelMembers.filter(
+      m => (m.dps_rank ?? '').trim().toLowerCase() === rankName.trim().toLowerCase()
+    ).length;
+    const confirmText = onRank > 0
+      ? `Delete the rank "${rankName}"?\n\n${onRank} member${onRank === 1 ? '' : 's'} on this rank will also be removed from the roster. This cannot be undone.`
+      : `Delete the rank "${rankName}"? This cannot be undone.`;
+    if (!window.confirm(confirmText)) return;
     try {
       const res = await fetch(`/api/roster/ranks/${rankId}`, { method: 'DELETE' });
       if (!res.ok) { toast.error('Failed to delete rank.'); return; }
+      const { removed_members = 0 } = await res.json().catch(() => ({})) as { removed_members?: number };
       setRanks(prev => prev.filter(r => r.id !== rankId));
-      toast.success(`Rank "${rankName}" deleted.`);
+      if (removed_members > 0) {
+        fetchPanelMembers({ silent: true });
+        if (roster.length > 0) {
+          fetch('/api/roster', { headers: { accept: 'application/json' } })
+            .then(r => r.json())
+            .then((rows) => setRoster(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : []))
+            .catch(() => { /* non-fatal — the panel list is already refreshed */ });
+        }
+      }
+      toast.success(removed_members > 0
+        ? `Rank "${rankName}" deleted — ${removed_members} member${removed_members === 1 ? '' : 's'} removed from the roster.`
+        : `Rank "${rankName}" deleted.`);
     } catch {
       toast.error('Failed to delete rank.');
     }
