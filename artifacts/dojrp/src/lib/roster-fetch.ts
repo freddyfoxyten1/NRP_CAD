@@ -34,8 +34,23 @@ export async function fetchRosterJson<T>(url: string, label: string): Promise<T>
   return data as T;
 }
 
-export async function fetchRosterArray<T>(url: string, label: string): Promise<T[]> {
-  const data = await fetchRosterJson<unknown>(url, label);
-  if (!Array.isArray(data)) throw new Error(`Failed to load ${label}.`);
-  return data as T[];
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export async function fetchRosterArray<T>(
+  url: string,
+  label: string,
+  retries = 2,
+): Promise<T[]> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const data = await fetchRosterJson<unknown>(url, label);
+      if (!Array.isArray(data)) throw new Error(`Failed to load ${label}.`);
+      return data as T[];
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) await sleep(400 * (attempt + 1));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`Failed to load ${label}.`);
 }
