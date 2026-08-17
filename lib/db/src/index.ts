@@ -103,8 +103,15 @@ export async function initDataStores(): Promise<{ mongo: boolean; redis: boolean
   if (wantMongo) {
     try {
       const database = await connectMongo();
-      await ensureMongoIndexes(database);
       mongoOk = await pingMongo();
+      // Index creation can take minutes on a large Atlas DB. Do not block startup or
+      // health checks — routes use getCollection directly once connectMongo succeeds.
+      void ensureMongoIndexes(database).catch((err) => {
+        console.warn(
+          "[db] Mongo index ensure failed:",
+          err instanceof Error ? err.message : err,
+        );
+      });
     } catch (err) {
       console.error("[db] MongoDB init failed:", err instanceof Error ? err.message : err);
       if (isMongoStore()) throw err;

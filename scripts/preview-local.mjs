@@ -12,8 +12,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = process.env.API_PORT ?? "8080";
 const PREVIEW_PORT = process.env.PREVIEW_PORT ?? "4173";
 /** Live VPS API (Mongo) — set via PREVIEW_API_URL or preview:live script */
-const PREVIEW_API_URL = (process.env.PREVIEW_API_URL ?? "").trim().replace(/\/$/, "");
-const usingRemoteApi = PREVIEW_API_URL.length > 0;
+let remoteApiUrl = (process.env.PREVIEW_API_URL ?? "").trim().replace(/\/$/, "");
+let usingRemoteApi = remoteApiUrl.length > 0;
 
 /** Always return to this preview, never the published cad.dojrblx.com site. */
 const previewRedirectUri = `http://localhost:${PREVIEW_PORT}/dojcad/discord-callback`;
@@ -21,7 +21,9 @@ const previewRedirectUri = `http://localhost:${PREVIEW_PORT}/dojcad/discord-call
 const repoEnv = {
   ...process.env,
   PREVIEW_PORT,
-  PREVIEW_API_URL,
+  get PREVIEW_API_URL() {
+    return remoteApiUrl;
+  },
   CAD_DATABASE_PATH: process.env.CAD_DATABASE_PATH ?? path.join(root, "cad-database"),
   DISCORD_REDIRECT_URI: previewRedirectUri,
 };
@@ -72,6 +74,45 @@ function probe(url) {
       resolve(false);
     });
   });
+}
+
+function probeDbHealth(baseUrl) {
+  return new Promise((resolve) => {
+    const req = http.get(`${baseUrl}/api/health/db`, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        try {
+          const parsed = JSON.parse(body);
+          resolve(Boolean(parsed.ok));
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    req.on("error", () => resolve(false));
+    req.setTimeout(5000, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
+async function ensureRemoteApiReady() {
+  if (!usingRemoteApi) return true;
+  console.log(`Checking VPS API (Mongo): ${remoteApiUrl}`);
+  const dbOk = await probeDbHealth(remoteApiUrl);
+  if (dbOk) return true;
+  console.warn(
+    `VPS API at ${remoteApiUrl} did not report Mongo as healthy.`,
+  );
+  console.warn("Falling back to local API + your .env MongoDB.");
+  usingRemoteApi = false;
+  remoteApiUrl = "";
+  return false;
 }
 
 async function waitFor(url, label, maxMs = 180_000) {
@@ -174,7 +215,9 @@ function spawnInRoot(command, args) {
 
 async function isApiHealthy() {
   if (!isPortListening(API_PORT)) return false;
-  return probe(`http://127.0.0.1:${API_PORT}/api/healthz`);
+  if (!(await probe(`http://127.0.0.1:${API_PORT}/api/healthz`))) return false;
+  // healthz alone is not enough — a stale API can be up while Mongo roster routes fail.
+  return probeDbHealth(`http://127.0.0.1:${API_PORT}`);
 }
 
 async function ensureApi(label = "API") {
@@ -210,8 +253,10 @@ async function ensureApi(label = "API") {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
+await ensureRemoteApiReady();
+
 await (usingRemoteApi
-  ? (console.log(`Using live VPS API (GitHub deploy data): ${PREVIEW_API_URL}`), Promise.resolve(true))
+  ? (console.log(`Using live VPS API (GitHub deploy data): ${remoteApiUrl}`), Promise.resolve(true))
   : ensureApi());
 
 const shouldBuildFrontend = needsFrontendBuild();
@@ -256,8 +301,8 @@ if (ready) {
       "",
       `  Site:  http://localhost:${PREVIEW_PORT}/`,
       usingRemoteApi
-        ? `  API:   ${PREVIEW_API_URL}/api/healthz  (VPS + Mongo)`
-        : `  API:   http://localhost:${API_PORT}/api/healthz  (this checkout)`,
+        ? `  API:   ${remoteApiUrl}/api/healthz  (VPS + Mongo)`
+        : `  API:   http://localhost:${API_PORT}/api/healthz  (local Mongo from .env)`,
       "",
       usingRemoteApi
         ? "  Unpublished UI. Live Mongo from the VPS. Sign-in returns here."

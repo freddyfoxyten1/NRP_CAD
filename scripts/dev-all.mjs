@@ -13,12 +13,38 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = process.env.API_PORT ?? "8080";
 const WEB_PORT = process.env.WEB_PORT ?? "5173";
 const PREVIEW_API_URL = (process.env.PREVIEW_API_URL ?? "").trim().replace(/\/$/, "");
-const usingRemoteApi = PREVIEW_API_URL.length > 0;
+let usingRemoteApi = PREVIEW_API_URL.length > 0;
+
+function probeDbHealth(baseUrl) {
+  return new Promise((resolve) => {
+    const req = http.get(`${baseUrl}/api/health/db`, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        body += chunk;
+      });
+      res.on("end", () => {
+        try {
+          resolve(Boolean(JSON.parse(body).ok));
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    req.on("error", () => resolve(false));
+    req.setTimeout(5000, () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
 
 /** Ensure local preview/dev use the repo-root SQLite store, not api-server/cad-database. */
 const repoEnv = {
   ...process.env,
-  PREVIEW_API_URL,
+  get PREVIEW_API_URL() {
+    return usingRemoteApi ? PREVIEW_API_URL : "";
+  },
   CAD_DATABASE_PATH: process.env.CAD_DATABASE_PATH ?? path.join(root, "cad-database"),
 };
 
@@ -126,11 +152,16 @@ process.on("SIGTERM", () => shutdown(0));
 
 if (usingRemoteApi) {
   console.log(`Using live VPS API (Mongo on cad.dojrblx.com): ${PREVIEW_API_URL}`);
+  const dbOk = await probeDbHealth(PREVIEW_API_URL);
+  if (!dbOk) {
+    console.warn("VPS Mongo is not ready — falling back to local API + .env MongoDB.");
+    usingRemoteApi = false;
+  }
 } else {
   spawnInRoot("bun", ["run", "dev:api"]);
   const apiReady = await waitFor(
-    `http://127.0.0.1:${API_PORT}/api/healthz`,
-    "API",
+    `http://127.0.0.1:${API_PORT}/api/health/db`,
+    "API (Mongo)",
   );
   if (!apiReady) {
     console.warn("Warning: API did not respond in time. Starting web anyway — retry in a minute.");

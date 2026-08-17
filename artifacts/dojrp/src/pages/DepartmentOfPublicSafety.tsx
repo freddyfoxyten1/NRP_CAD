@@ -5639,15 +5639,6 @@ const DepartmentOfPublicSafety = () => {
                           <p className="mt-1 text-xs text-[#526179]">Publish guides, reference documents, and department materials for members.</p>
                         </div>
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void handleClearAllPermissionGrants()}
-                            disabled={clearingPermissionGrants}
-                            className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
-                          >
-                            <Lock className="h-3.5 w-3.5" />
-                            {clearingPermissionGrants ? 'Removing…' : 'Remove Everyones Permissions'}
-                          </button>
                           <button type="button"
                             onClick={() => {
                               resetAddResourceDialog();

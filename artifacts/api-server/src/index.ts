@@ -35,19 +35,7 @@ if (Number.isNaN(port) || port <= 0) {
 }
 
 async function start() {
-  let storesReady = false;
-
   app.get("/api/health/db", async (_req, res) => {
-    if (!storesReady) {
-      res.status(503).json({
-        dataStore: isMongoStore() ? "mongo" : "sql",
-        mongo: null,
-        redis: null,
-        ok: false,
-        initializing: true,
-      });
-      return;
-    }
     const mongo = isMongoStore() ? await pingMongo() : null;
     const redis = (process.env.REDIS_URL ?? "").trim() ? await pingRedis() : null;
     const production = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
@@ -88,7 +76,6 @@ async function start() {
 
   try {
     const stores = await initDataStores();
-    storesReady = true;
     logger.info(
       { dataStore: isMongoStore() ? "mongo" : "sql", mongo: stores.mongo, redis: stores.redis },
       "Data stores initialized",

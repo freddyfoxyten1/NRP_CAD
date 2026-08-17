@@ -342,6 +342,77 @@ async function pruneOrphanedDpsRosterMembers(): Promise<number> {
   return removed;
 }
 
+/** Avoid hammering Mongo on parallel roster fetches from the DPS panel. */
+let _lastDpsRosterPruneMs = 0;
+const DPS_ROSTER_PRUNE_DEBOUNCE_MS = 10_000;
+
+async function pruneOrphanedDpsRosterMembersDebounced(): Promise<number> {
+  const now = Date.now();
+  if (now - _lastDpsRosterPruneMs < DPS_ROSTER_PRUNE_DEBOUNCE_MS) return 0;
+  _lastDpsRosterPruneMs = now;
+  return pruneOrphanedDpsRosterMembers();
+}
+
+type DpsGuildMember = { user: { id: string; username: string; avatar?: string | null }; nick?: string | null; roles: string[] };
+
+/**
+ * Remove roster members who sit on a Discord-linked rank but no longer hold that role.
+ * Manual roster entries (ranks without discord_role_id) are left untouched.
+ */
+async function removeDpsMembersWithoutLinkedDiscordRole(
+  allMembers: DpsGuildMember[],
+  linkedRanks: Array<{ name: string; discord_role_id: string }>,
+): Promise<number> {
+  if (linkedRanks.length === 0) return 0;
+
+  const linkedRoleIds = linkedRanks
+    .map(r => String(r.discord_role_id ?? "").trim())
+    .filter(Boolean);
+  if (linkedRoleIds.length === 0) return 0;
+
+  const activeDiscordIds = new Set<string>();
+  const activeByUsername = new Set<string>();
+  for (const m of allMembers) {
+    if (!m.roles.some(r => linkedRoleIds.includes(r))) continue;
+    activeDiscordIds.add(m.user.id);
+    activeByUsername.add(m.user.username.toLowerCase());
+  }
+
+  const linkedRankNames = linkedRanks.map(r => r.name);
+  const linkedRes = await pool.query<{
+    profile_id: number;
+    discord_id: string | null;
+    discord_username: string | null;
+    dps_rank: string;
+  }>(
+    `SELECT u.profile_id, p.discord_id, p.discord_username, u.dps_rank
+     FROM dps_users u
+     JOIN cad_user_profiles p ON p.id = u.profile_id
+     WHERE u.dps_rank = ANY($1::text[])`,
+    [linkedRankNames],
+  );
+
+  let removed = 0;
+  for (const row of linkedRes.rows) {
+    const stillHasRole =
+      (row.discord_id != null && activeDiscordIds.has(row.discord_id)) ||
+      (row.discord_id == null && row.discord_username != null &&
+        activeByUsername.has(row.discord_username.toLowerCase()));
+
+    if (stillHasRole) continue;
+    try {
+      await removeDpsRosterMember(Number(row.profile_id));
+      removed += 1;
+    } catch (e) {
+      console.warn(`[dps-sync] remove profile_id ${row.profile_id}:`, e);
+    }
+  }
+  if (removed > 0) {
+    console.info(`[dps-sync] removed ${removed} member(s) without linked Discord role`);
+  }
+  return removed;
+}
+
 /** Migrate legacy single division_rank into dps_user_divisions (idempotent). */
 async function migrateLegacyDivisionAssignments(): Promise<void> {
   try {
@@ -427,8 +498,6 @@ async function autoAssignCallsign(rankName: string, profileId: number): Promise<
 
 const DPS_MEMBERS_TTL_MS = 5 * 60 * 1000; // 5 min — used by Add Officer typeahead
 let _dpsMembersFetchRunning: Promise<DpsMemberCacheEntry[]> | null = null;
-
-type DpsGuildMember = { user: { id: string; username: string; avatar?: string | null }; nick?: string | null; roles: string[] };
 
 /** Paginate DPS guild (1469131277612486791) and refresh the in-memory member cache. */
 async function fetchDpsGuildMembers(): Promise<DpsGuildMember[]> {
@@ -618,16 +687,12 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
     // 3. Assign DPS ranks to matching CAD profiles
     let assigned = 0; let skipped = 0; let removed = 0; const errors: string[] = [];
 
-    // Track which Discord IDs currently hold any linked role (used for removal step)
-    const activeDiscordIds = new Set<string>();
-
     for (const m of allMembers) {
       // Prefer the highest hierarchy match (group order, then rank order) when several match.
       const matchingRids = m.roles.filter(r => linkedRoleIds.includes(r));
       if (matchingRids.length === 0) continue;
       const rid = pickHighestLinkedDiscordRole(matchingRids, rankMap);
       if (!rid) continue;
-      activeDiscordIds.add(m.user.id);
       const { rankName, groupName } = rankMap.get(rid)!;
       try {
         const profileId = await ensureCadProfileForDiscordMember(m);
@@ -690,46 +755,8 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
       } catch (e) { errors.push(`discord_id ${m.user.id}: ${String(e)}`); }
     }
 
-    // 4. Remove ranks from members whose linked Discord role was taken away
-    // Find all dps_users rows whose rank is tied to a Discord role
-    const linkedRankNames = ranksRes.rows.map(r => r.name);
-    const linkedRes = linkedRankNames.length === 0
-      ? { rows: [] as Array<{ profile_id: number; discord_id: string | null; discord_username: string | null; dps_rank: string }> }
-      : await pool.query<{
-          profile_id: number; discord_id: string | null; discord_username: string | null; dps_rank: string;
-        }>(
-          `SELECT u.profile_id, p.discord_id, p.discord_username, u.dps_rank
-           FROM dps_users u
-           JOIN cad_user_profiles p ON p.id = u.profile_id
-           WHERE u.dps_rank = ANY($1::text[])`,
-          [linkedRankNames],
-        );
-
-    // Build a quick lookup: discordUsername → is active (for username-matched profiles)
-    const activeByUsername = new Set<string>(
-      allMembers
-        .filter(m => m.roles.some(r => linkedRoleIds.includes(r)))
-        .map(m => m.user.username.toLowerCase())
-    );
-
-    for (const row of linkedRes.rows) {
-      const stillHasRole =
-        (row.discord_id != null && activeDiscordIds.has(row.discord_id)) ||
-        (row.discord_id == null && row.discord_username != null &&
-          activeByUsername.has(row.discord_username.toLowerCase()));
-
-      if (!stillHasRole) {
-        try {
-          await pool.query(`DELETE FROM dps_user_divisions WHERE profile_id = $1`, [row.profile_id]);
-          await pool.query(`DELETE FROM dps_users WHERE profile_id = $1`, [row.profile_id]);
-          await pool.query(
-            `UPDATE cad_user_profiles SET dps_rank = NULL, dps_role = NULL, callsign = NULL WHERE id = $1`,
-            [row.profile_id]
-          );
-          removed++;
-        } catch (e) { errors.push(`remove profile_id ${row.profile_id}: ${String(e)}`); }
-      }
-    }
+    // 4. Remove members on Discord-linked ranks who no longer hold that role
+    removed += await removeDpsMembersWithoutLinkedDiscordRole(allMembers, ranksRes.rows);
 
     await writeLog("dps_personnel", "System", "Discord role sync completed",
       `assigned=${assigned} skipped=${skipped} removed=${removed} errors=${errors.length}`);
@@ -1253,6 +1280,12 @@ async function guardedDpsSync() {
   if (_dpsSyncRunning) return;
   _dpsSyncRunning = true;
   try {
+    // Clear stranded members before Discord calls — works even when the guild fetch fails.
+    try {
+      await pruneOrphanedDpsRosterMembers();
+    } catch (pruneErr) {
+      console.warn("[dps-prune] background prune failed:", pruneErr);
+    }
     const members = await fetchDpsGuildMembers();
     await refreshCadAvatarsFromGuildMembers(members);
     await syncDpsDiscordRoles(members);
@@ -1266,6 +1299,11 @@ setTimeout(() => {
 }, 45_000);
 
 registerDiscordGuildSync(DPS_GUILD_ID, "dps-personnel", async () => {
+  try {
+    await pruneOrphanedDpsRosterMembers();
+  } catch (pruneErr) {
+    console.warn("[dps-prune] gateway prune failed:", pruneErr);
+  }
   const members = await fetchDpsGuildMembers();
   await refreshCadAvatarsFromGuildMembers(members);
   await syncDpsDiscordRoles(members);
@@ -1356,6 +1394,12 @@ async function loadDpsPersonnelViaMongoWithRetry(includeAll: boolean): Promise<R
 router.get("/roster", async (req, res) => {
   try {
     const includeAll = req.query.all === "1";
+
+    try {
+      await pruneOrphanedDpsRosterMembersDebounced();
+    } catch (pruneErr) {
+      req.log.warn({ err: pruneErr }, "roster GET orphan prune failed");
+    }
 
     if (isMongoStore()) {
       try {
