@@ -25,14 +25,10 @@ const PdfViewer = lazy(() => import("@/components/shared/PdfViewer"));
 import { getCadSession } from "@/lib/cad-session";
 import { sortByRankThenUsername } from "@/lib/roster-sort";
 import { formatInGameCount } from "@/lib/in-game-count";
+import { fetchPublicLiveStats, publicLiveStatsOrEmpty, type PublicLiveStats } from "@/lib/live-stats";
 
 // -- Types ----
-interface Stats {
-  erlc_players: number;
-  erlc_max_players: number;
-  discord_members: number;
-  discord_online: number;
-}
+interface Stats extends PublicLiveStats {}
 
 interface Announcement {
   id: number;
@@ -434,6 +430,7 @@ const PublicView = () => {
   }, []);
   const tabScrollRef = useRef<HTMLDivElement | null>(null);
   const [statsLoading,  setStatsLoading]  = useState(true);
+  const liveStats = publicLiveStatsOrEmpty(stats);
   const [indexInfo,     setIndexInfo]     = useState<IndexInfoContent | null>(null);
   const [dphIndexInfo,  setDphIndexInfo]  = useState<IndexInfoContent | null>(null);
   const [dpsDivisions,  setDpsDivisions]  = useState<PublicDivision[]>([]);
@@ -458,14 +455,21 @@ const PublicView = () => {
 
   // Live-refresh stats every 60 s — defer first fetch so the page paints first.
   useEffect(() => {
-    const load = () => {
-      setStatsLoading(true);
-      fetch("/api/public/stats")
-        .then(r => r.json()).then(setStats).catch(() => setStats(null))
-        .finally(() => setStatsLoading(false));
+    let hasLoaded = false;
+    const load = (initial: boolean) => {
+      if (initial) setStatsLoading(true);
+      void fetchPublicLiveStats()
+        .then((next) => {
+          if (next) setStats(next);
+          else if (!hasLoaded) setStats(null);
+        })
+        .finally(() => {
+          hasLoaded = true;
+          setStatsLoading(false);
+        });
     };
-    const startId = window.setTimeout(load, 0);
-    const id = setInterval(load, 60_000);
+    const startId = window.setTimeout(() => load(true), 0);
+    const id = setInterval(() => load(false), 60_000);
     return () => {
       window.clearTimeout(startId);
       clearInterval(id);
@@ -698,7 +702,7 @@ const PublicView = () => {
                 {statsLoading
                   ? "…"
                   : <>
-                      {formatInGameCount(stats?.erlc_players, stats?.erlc_max_players)}
+                      {formatInGameCount(liveStats.erlc_players, liveStats.erlc_max_players)}
                       <span className="hidden sm:inline"> In-Game</span>
                     </>
                 }
@@ -737,21 +741,21 @@ const PublicView = () => {
               <StatCard
                 icon={Gamepad2}
                 label="In-Game"
-                value={statsLoading ? "—" : formatInGameCount(stats?.erlc_players, stats?.erlc_max_players)}
+                value={statsLoading ? "…" : formatInGameCount(liveStats.erlc_players, liveStats.erlc_max_players)}
                 sub="ERLC players"
                 color="border-[#1b3320] text-[#3ecf8e]"
               />
               <StatCard
                 icon={Users}
                 label="Members"
-                value={statsLoading ? " - " : (stats?.discord_members ?? 0).toLocaleString()}
+                value={statsLoading ? "…" : liveStats.discord_members.toLocaleString()}
                 sub="Discord server"
                 color="border-[#1b2a40] text-[#4384ff]"
               />
               <StatCard
                 icon={Wifi}
                 label="Online"
-                value={statsLoading ? " - " : (stats?.discord_online ?? 0).toLocaleString()}
+                value={statsLoading ? "…" : liveStats.discord_online.toLocaleString()}
                 sub="Discord online"
                 color="border-[#2a1b20] text-[#ff7070]"
               />

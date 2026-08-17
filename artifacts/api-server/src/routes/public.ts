@@ -139,24 +139,36 @@ async function refreshPublicStats(): Promise<PublicStats> {
   });
 }
 
+const EMPTY_PUBLIC_STATS: PublicStats = {
+  erlc_players: 0,
+  erlc_max_players: 0,
+  discord_members: 0,
+  discord_online: 0,
+};
+
+function schedulePublicStatsRefresh(log: { error: (obj: unknown, msg: string) => void }) {
+  if (_statsRefreshRunning) return;
+  _statsRefreshRunning = true;
+  void refreshPublicStats()
+    .catch(err => log.error({ err }, "public/stats background refresh failed"))
+    .finally(() => { _statsRefreshRunning = false; });
+}
+
 // ── GET /public/stats ─────────────────────────────────────────────────────────
 router.get("/public/stats", async (req, res) => {
   try {
     const cached = fromCacheAllowStale<PublicStats>("stats");
     if (cached?.fresh) { res.json(cached.data); return; }
-    if (cached && !cached.fresh) {
+    if (cached) {
       // Stale-while-revalidate: return immediately, refresh in background
       res.json(cached.data);
-      if (!_statsRefreshRunning) {
-        _statsRefreshRunning = true;
-        void refreshPublicStats()
-          .catch(err => req.log.error({ err }, "public/stats background refresh failed"))
-          .finally(() => { _statsRefreshRunning = false; });
-      }
+      if (!cached.fresh) schedulePublicStatsRefresh(req.log);
       return;
     }
 
-    res.json(await refreshPublicStats());
+    // Cold start: respond immediately so the index never hangs on "—", then refresh.
+    res.json(EMPTY_PUBLIC_STATS);
+    schedulePublicStatsRefresh(req.log);
   } catch (err) {
     req.log.error({ err }, "public/stats error");
     res.status(500).json({ error: "Unable to load stats." });

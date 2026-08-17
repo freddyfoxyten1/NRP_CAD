@@ -16,8 +16,12 @@ if (Number.isNaN(port) || port <= 0) {
 
 const basePath = process.env.BASE_PATH ?? '/';
 const apiPort = process.env.API_PORT ?? '8080';
+const isVitePreview = process.argv.includes('preview');
 /** When set (e.g. https://cad.dojrblx.com), preview uses the deployed VPS API + Mongo instead of local SQLite. */
-const previewApiUrl = (process.env.PREVIEW_API_URL ?? '').trim().replace(/\/$/, '');
+const previewApiUrl = (
+  process.env.PREVIEW_API_URL ??
+  (isVitePreview ? 'https://cad.dojrblx.com' : '')
+).trim().replace(/\/$/, '');
 const apiTarget = previewApiUrl || `http://127.0.0.1:${apiPort}`;
 
 const workspaceRoot = path.resolve(import.meta.dirname, '..', '..');

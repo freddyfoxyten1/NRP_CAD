@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import type { IncomingCall } from '@/components/overlays/IncomingCallOverlay';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
 import { formatInGameCount } from '@/lib/in-game-count';
+import { fetchPublicLiveStats } from '@/lib/live-stats';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { getMemberDisplayRank, getMemberDisplayRole } from '@/lib/display-rank';
 import { useCadStatus } from '@/hooks/useCadStatus';
@@ -92,13 +93,27 @@ const defaultStats: PortalData['stats'] = {
   totalMembers: 0,
   totalPlayTime: 'Coming Soon!',
   totalOnlineMembers: 0,
-  inGameCount: '—',
+  inGameCount: '…',
 };
 
 const fetchStats = async (): Promise<PortalData['stats']> => {
+  const applyInGameFromPublic = async (base: PortalData['stats']): Promise<PortalData['stats']> => {
+    const pub = await fetchPublicLiveStats();
+    if (!pub) return base;
+    return {
+      ...base,
+      inGameCount: formatInGameCount(pub.erlc_players, pub.erlc_max_players),
+    };
+  };
+
   try {
-    const response = await fetch('/api/stats', { headers: { accept: 'application/json' } });
-    if (!response.ok) return defaultStats;
+    const response = await fetch('/api/stats', {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!response.ok) {
+      return applyInGameFromPublic(defaultStats);
+    }
     const data = (await response.json()) as {
       totalMembers: number;
       totalOnlineMembers: number;
@@ -106,14 +121,16 @@ const fetchStats = async (): Promise<PortalData['stats']> => {
       inGameMaxPlayers: number;
     };
     const max = data.inGameMaxPlayers ?? 0;
-    return {
+    const base: PortalData['stats'] = {
       totalMembers: data.totalMembers,
       totalPlayTime: 'Coming Soon!',
       totalOnlineMembers: data.totalOnlineMembers,
       inGameCount: formatInGameCount(data.inGameCount, max),
     };
+    if (max > 0 || data.inGameCount > 0) return base;
+    return applyInGameFromPublic(base);
   } catch {
-    return defaultStats;
+    return applyInGameFromPublic(defaultStats);
   }
 };
 
