@@ -268,6 +268,43 @@ async function setMemberDivisionAssignments(
   return map.get(profileId) ?? [];
 }
 
+/**
+ * Take one member off the DPS roster completely.
+ *
+ * Mongo has no foreign keys, so every dependent row has to be cleared by hand
+ * or the member lingers in divisions and keeps a custom callsign reserved.
+ * Sessions fall back to cad_user_profiles.dps_rank when no roster row exists,
+ * so the profile's DPS fields are cleared too. MANUAL accounts only exist for
+ * the roster, so the whole profile goes; real accounts keep theirs.
+ */
+async function removeDpsRosterMember(profileId: number): Promise<void> {
+  await pool.query(`DELETE FROM dps_user_divisions WHERE profile_id = $1`, [profileId]);
+  await pool.query(
+    `UPDATE dps_rank_custom_callsigns SET assigned_profile_id = NULL WHERE assigned_profile_id = $1`,
+    [profileId]
+  );
+
+  const profileRes = await pool.query<{ community_code: string }>(
+    `SELECT community_code FROM cad_user_profiles WHERE id = $1`,
+    [profileId]
+  );
+  const isManual = String(profileRes.rows[0]?.community_code ?? "") === "MANUAL";
+
+  await pool.query(`DELETE FROM dps_users WHERE profile_id = $1`, [profileId]);
+
+  if (isManual) {
+    await pool.query(`DELETE FROM cad_user_profiles WHERE id = $1`, [profileId]);
+    return;
+  }
+  await pool.query(
+    `UPDATE cad_user_profiles
+        SET dps_rank = NULL, dps_role = NULL, callsign = NULL,
+            can_access_iab = false, updated_at = NOW()
+      WHERE id = $1`,
+    [profileId]
+  );
+}
+
 /** Migrate legacy single division_rank into dps_user_divisions (idempotent). */
 async function migrateLegacyDivisionAssignments(): Promise<void> {
   try {
@@ -1858,9 +1895,8 @@ router.delete("/roster/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
-    // Check if this is a manual-only account
-    const profileRes = await pool.query<{ community_code: string }>(
-      `SELECT community_code FROM cad_user_profiles WHERE id = $1`, [id]
+    const profileRes = await pool.query(
+      `SELECT id FROM cad_user_profiles WHERE id = $1`, [id]
     );
     if ((profileRes.rowCount ?? 0) === 0) { res.status(404).json({ error: "Member not found." }); return; }
 
@@ -1869,20 +1905,7 @@ router.delete("/roster/:id", async (req, res) => {
     );
     const removedName = usernameRes.rows[0]?.username ?? String(id);
 
-    if (profileRes.rows[0].community_code === "MANUAL") {
-      await pool.query(`DELETE FROM cad_user_profiles WHERE id = $1`, [id]);
-    } else {
-      await pool.query(`DELETE FROM dps_users WHERE profile_id = $1`, [id]);
-      // Sessions fall back to the profile's own dps_rank when no roster row
-      // exists, so leaving these set would keep reporting the old rank and
-      // re-grant IAB if the member is ever added back.
-      await pool.query(
-        `UPDATE cad_user_profiles
-            SET dps_rank = NULL, dps_role = NULL, can_access_iab = false, updated_at = NOW()
-          WHERE id = $1`,
-        [id]
-      );
-    }
+    await removeDpsRosterMember(id);
     const actor = (req.headers['x-actor'] as string) || 'Admin';
     await writeLog('dps_personnel', actor, 'Removed officer from roster', removedName);
     res.json({ ok: true });
@@ -2304,8 +2327,30 @@ router.delete("/roster/ranks/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    const rankRes = await pool.query<{ name: string }>(
+      `SELECT name FROM dps_ranks WHERE id = $1`, [id]
+    );
+    if ((rankRes.rowCount ?? 0) === 0) { res.status(404).json({ error: "Rank not found." }); return; }
+    const rankName = String(rankRes.rows[0].name ?? "").trim();
+
+    // Members link to ranks by name, so anyone left behind would sit on a rank
+    // that no longer exists — invisible on the roster but still in the database.
+    // Pre-lowered: the Mongo bridge only folds case when the right-hand side of
+    // lower(col) = ... is a plain literal, not a nested lower(...) call.
+    const membersRes = await pool.query<{ profile_id: number }>(
+      `SELECT profile_id FROM dps_users WHERE lower(dps_rank) = $1`, [rankName.toLowerCase()]
+    );
+    for (const member of membersRes.rows) {
+      await removeDpsRosterMember(Number(member.profile_id));
+    }
+
+    await pool.query(`DELETE FROM dps_rank_custom_callsigns WHERE rank_id = $1`, [id]);
     await pool.query(`DELETE FROM dps_ranks WHERE id = $1`, [id]);
-    res.json({ ok: true });
+
+    const actor = (req.headers['x-actor'] as string) || 'Admin';
+    await writeLog('dps_personnel', actor, 'Deleted rank',
+      `${rankName} — removed ${membersRes.rows.length} member(s)`);
+    res.json({ ok: true, removed_members: membersRes.rows.length });
   } catch (err) {
     req.log.error({ err }, "ranks DELETE error");
     res.status(500).json({ error: "Unable to delete rank." });
