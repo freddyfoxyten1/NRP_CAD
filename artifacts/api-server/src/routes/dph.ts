@@ -247,6 +247,121 @@ const router = Router();
   }
 })();
 
+async function removeDphRosterMember(profileId: number): Promise<void> {
+  await pool.query(`DELETE FROM dph_user_divisions WHERE profile_id = $1`, [profileId]);
+  await pool.query(
+    `UPDATE dph_rank_custom_callsigns SET assigned_profile_id = NULL WHERE assigned_profile_id = $1`,
+    [profileId],
+  );
+
+  const profileRes = await pool.query<{ community_code: string }>(
+    `SELECT community_code FROM cad_user_profiles WHERE id = $1`,
+    [profileId],
+  );
+  const isManual = String(profileRes.rows[0]?.community_code ?? "") === "MANUAL";
+
+  await pool.query(`DELETE FROM dph_users WHERE profile_id = $1`, [profileId]);
+
+  if (isManual) {
+    await pool.query(`DELETE FROM cad_user_profiles WHERE id = $1`, [profileId]);
+  }
+}
+
+/**
+ * Drop roster rows that no longer point at a real rank.
+ *
+ * Members reference ranks by name, so a deleted or renamed rank leaves them
+ * stranded: they vanish from the roster but keep occupying the officers list.
+ *
+ * Skips when no ranks exist so a transient read failure cannot wipe the roster.
+ */
+async function pruneOrphanedDphRosterMembers(): Promise<number> {
+  const ranksRes = await pool.query<{ name: string }>(`SELECT name FROM dph_ranks`);
+  if (ranksRes.rows.length === 0) return 0;
+
+  const validRanks = new Set(
+    ranksRes.rows.map(r => String(r.name ?? "").trim().toLowerCase()).filter(Boolean),
+  );
+  if (validRanks.size === 0) return 0;
+
+  const membersRes = await pool.query<{ profile_id: number; dph_rank: string | null }>(
+    `SELECT profile_id, dph_rank FROM dph_users`,
+  );
+
+  let removed = 0;
+  for (const member of membersRes.rows) {
+    const rank = String(member.dph_rank ?? "").trim().toLowerCase();
+    if (rank && validRanks.has(rank)) continue;
+    await removeDphRosterMember(Number(member.profile_id));
+    removed += 1;
+  }
+  if (removed > 0) {
+    console.info(`[dph-prune] removed ${removed} member(s) with no matching rank`);
+  }
+  return removed;
+}
+
+/** Avoid hammering Mongo on parallel roster fetches from the DPH panel. */
+let _lastDphRosterPruneMs = 0;
+const DPH_ROSTER_PRUNE_DEBOUNCE_MS = 10_000;
+
+async function pruneOrphanedDphRosterMembersDebounced(): Promise<number> {
+  const now = Date.now();
+  if (now - _lastDphRosterPruneMs < DPH_ROSTER_PRUNE_DEBOUNCE_MS) return 0;
+  _lastDphRosterPruneMs = now;
+  return pruneOrphanedDphRosterMembers();
+}
+
+/**
+ * Remove roster members who sit on a Discord-linked rank but no longer hold that role.
+ * Manual roster entries (ranks without discord_role_id) are left untouched.
+ */
+async function removeDphMembersWithoutLinkedDiscordRole(
+  allMembers: DphGuildMember[],
+  linkedRanks: Array<{ name: string; discord_role_id: string }>,
+): Promise<number> {
+  if (linkedRanks.length === 0) return 0;
+
+  const linkedRoleIds = linkedRanks
+    .map(r => String(r.discord_role_id ?? "").trim())
+    .filter(Boolean);
+  if (linkedRoleIds.length === 0) return 0;
+
+  const activeDiscordIds = new Set<string>();
+  const activeByUsername = new Set<string>();
+  for (const m of allMembers) {
+    if (!m.roles.some(r => linkedRoleIds.includes(r))) continue;
+    activeDiscordIds.add(m.user.id);
+    activeByUsername.add(m.user.username.toLowerCase());
+  }
+
+  const linkedRankNames = linkedRanks.map(r => r.name);
+  const linkedRes = await pool.query<{
+    profile_id: number;
+    discord_id: string | null;
+    discord_username: string | null;
+    dph_rank: string;
+  }>(
+    `SELECT u.profile_id, p.discord_id, p.discord_username, u.dph_rank
+     FROM dph_users u
+     JOIN cad_user_profiles p ON p.id = u.profile_id
+     WHERE u.dph_rank = ANY($1::text[])`,
+    [linkedRankNames],
+  );
+
+  let removed = 0;
+  for (const row of linkedRes.rows) {
+    const stillHasRole =
+      (row.discord_id != null && activeDiscordIds.has(row.discord_id)) ||
+      (row.discord_id == null && row.discord_username != null &&
+        activeByUsername.has(row.discord_username.toLowerCase()));
+    if (stillHasRole) continue;
+    await removeDphRosterMember(Number(row.profile_id));
+    removed += 1;
+  }
+  return removed;
+}
+
 /**
  * Auto-assign a callsign from a DPH rank's callsign configuration.
  * Returns null when the rank is manual ('custom') or has nothing configured.
@@ -453,38 +568,7 @@ async function syncDphDiscordRoles(
       } catch (e) { errors.push(`discord_id ${m.user.id}: ${String(e)}`); }
     }
 
-    const linkedRankNames = ranksRes.rows.map(r => r.name);
-    const linkedRes = linkedRankNames.length === 0
-      ? { rows: [] as Array<{ profile_id: number; discord_id: string | null; discord_username: string | null; dph_rank: string }> }
-      : await pool.query<{
-          profile_id: number; discord_id: string | null; discord_username: string | null; dph_rank: string;
-        }>(
-          `SELECT u.profile_id, p.discord_id, p.discord_username, u.dph_rank
-           FROM dph_users u
-           JOIN cad_user_profiles p ON p.id = u.profile_id
-           WHERE u.dph_rank = ANY($1::text[])`,
-          [linkedRankNames],
-        );
-
-    const activeByUsername = new Set<string>(
-      allMembers
-        .filter(m => m.roles.some(r => linkedRoleIds.includes(r)))
-        .map(m => m.user.username.toLowerCase())
-    );
-
-    for (const row of linkedRes.rows) {
-      const stillHasRole =
-        (row.discord_id != null && activeDiscordIds.has(row.discord_id)) ||
-        (row.discord_id == null && row.discord_username != null &&
-          activeByUsername.has(row.discord_username.toLowerCase()));
-      if (!stillHasRole) {
-        try {
-          await pool.query(`DELETE FROM dph_user_divisions WHERE profile_id = $1`, [row.profile_id]);
-          await pool.query(`DELETE FROM dph_users WHERE profile_id = $1`, [row.profile_id]);
-          removed++;
-        } catch (e) { errors.push(`remove profile_id ${row.profile_id}: ${String(e)}`); }
-      }
-    }
+    removed += await removeDphMembersWithoutLinkedDiscordRole(allMembers, ranksRes.rows);
 
     await writeLog("dph_personnel", "System", "Discord role sync completed",
       `assigned=${assigned} skipped=${skipped} removed=${removed} errors=${errors.length}`);
@@ -505,6 +589,11 @@ async function guardedDphSync() {
   if (_dphSyncRunning) return;
   _dphSyncRunning = true;
   try {
+    try {
+      await pruneOrphanedDphRosterMembers();
+    } catch (pruneErr) {
+      console.warn("[dph-prune] background prune failed:", pruneErr);
+    }
     const members = await fetchDphGuildMembers();
     await refreshCadAvatarsFromGuildMembers(members);
     await syncDphDiscordRoles(members);
@@ -515,10 +604,17 @@ async function guardedDphSync() {
     _dphSyncRunning = false;
   }
 }
-setTimeout(() => void guardedDphSync(), 20_000);
-setInterval(() => void guardedDphSync(), DPH_SYNC_INTERVAL_MS);
+setTimeout(() => {
+  void guardedDphSync();
+  setInterval(() => void guardedDphSync(), DPH_SYNC_INTERVAL_MS);
+}, 45_000);
 
 registerDiscordGuildSync(DPH_GUILD_ID, "dph-personnel", async () => {
+  try {
+    await pruneOrphanedDphRosterMembers();
+  } catch (pruneErr) {
+    console.warn("[dph-prune] gateway prune failed:", pruneErr);
+  }
   const members = await fetchDphGuildMembers();
   await refreshCadAvatarsFromGuildMembers(members);
   await syncDphDiscordRoles(members);
@@ -550,6 +646,13 @@ const rankOrderSubquery = `
 router.get("/dph", async (req, res) => {
   try {
     const includeAll = req.query.all === "1";
+
+    try {
+      await pruneOrphanedDphRosterMembersDebounced();
+    } catch (pruneErr) {
+      req.log.warn({ err: pruneErr }, "dph GET orphan prune failed");
+    }
+
     const where = includeAll ? "" : "WHERE lower(d.status) != 'inactive'";
     const result = await pool.query(
       `SELECT p.id, COALESCE(d.username, p.username) AS username,
@@ -972,11 +1075,7 @@ router.delete("/dph/:id", async (req, res) => {
     );
     const removedName = usernameRes.rows[0]?.username ?? String(id);
 
-    if (profileRes.rows[0].community_code === "MANUAL") {
-      await pool.query(`DELETE FROM cad_user_profiles WHERE id = $1`, [id]);
-    } else {
-      await pool.query(`DELETE FROM dph_users WHERE profile_id = $1`, [id]);
-    }
+    await removeDphRosterMember(id);
     const actor = (req.headers['x-actor'] as string) || 'Admin';
     await writeLog('dph_personnel', actor, 'Removed member from roster', removedName);
     res.json({ ok: true });
@@ -999,15 +1098,21 @@ router.get("/dph/discord-roles", async (req, res) => {
 
 // ── POST /dph/sync-discord-roles — sync ranks from DPH Discord guild ──────────
 router.post("/dph/sync-discord-roles", async (_req, res) => {
+  let pruned = 0;
+  try {
+    pruned = await pruneOrphanedDphRosterMembers();
+  } catch (pruneErr) {
+    _req.log?.warn?.({ err: pruneErr }, "orphaned DPH roster member prune failed");
+  }
   try {
     const members = await fetchDphGuildMembers();
     await refreshCadAvatarsFromGuildMembers(members);
     const dph = await syncDphDiscordRoles(members);
     const divisions = await syncDphDivisionDiscordRoles(members);
-    res.json({ ...dph, divisions });
+    res.json({ ...dph, removed: dph.removed + pruned, pruned, divisions });
   } catch (err) {
     _req.log?.error?.({ err }, "dph/sync-discord-roles error");
-    res.status(500).json({ error: "Sync failed." });
+    res.status(500).json({ error: "Sync failed.", pruned });
   }
 });
 
@@ -1410,8 +1515,26 @@ router.delete("/dph/ranks/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    const rankRes = await pool.query<{ name: string }>(
+      `SELECT name FROM dph_ranks WHERE id = $1`, [id],
+    );
+    if ((rankRes.rowCount ?? 0) === 0) { res.status(404).json({ error: "Rank not found." }); return; }
+    const rankName = String(rankRes.rows[0].name ?? "").trim();
+
+    const membersRes = await pool.query<{ profile_id: number }>(
+      `SELECT profile_id FROM dph_users WHERE lower(dph_rank) = $1`, [rankName.toLowerCase()],
+    );
+    for (const member of membersRes.rows) {
+      await removeDphRosterMember(Number(member.profile_id));
+    }
+
+    await pool.query(`DELETE FROM dph_rank_custom_callsigns WHERE rank_id = $1`, [id]);
     await pool.query(`DELETE FROM dph_ranks WHERE id = $1`, [id]);
-    res.json({ ok: true });
+
+    const actor = (req.headers['x-actor'] as string) || 'Admin';
+    await writeLog('dph_personnel', actor, 'Deleted rank',
+      `${rankName} — removed ${membersRes.rows.length} member(s)`);
+    res.json({ ok: true, removed_members: membersRes.rows.length });
   } catch (err) {
     req.log.error({ err }, "dph ranks DELETE error");
     res.status(500).json({ error: "Unable to delete rank." });

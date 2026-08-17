@@ -1,4 +1,4 @@
-import { Clock3, Gamepad2, Info, LogOut, Megaphone, Shield, Users, Wifi } from 'lucide-react';
+import { Clock3, Gamepad2, Home, Info, LogOut, Megaphone, Shield, Users, Wifi } from 'lucide-react';
 import DojrpLogo from '@/components/shared/DojrpLogo';
 import DojrpShield from '@/components/shared/DojrpShield';
 import { getCadSession } from '@/lib/cad-session';
@@ -50,6 +50,7 @@ const MemberPortalClassic = () => {
     infoSections,
     infoLoading,
     handleSignOut,
+    handleGoToIndex,
     handleAdminPortal,
     cadOnline,
     cadMode,
@@ -57,8 +58,6 @@ const MemberPortalClassic = () => {
     rank,
     role,
     canAccessStaff,
-    canAccessIab,
-    canAccessDphInternalAffairs,
     canAccessAdminPortal,
   } = useMemberPortal();
 
@@ -129,22 +128,16 @@ const MemberPortalClassic = () => {
                       </span>
                     )}
                   </button>
-                  {item === 'Department of Public Safety' && canAccessIab && (
+                  {item === 'Department of Communications' && (
                     <button
                       type="button"
-                      onClick={() => navigate('/dps_internal-affairs')}
-                      className="flex w-[240px] shrink-0 items-center rounded-md border-l-2 border-transparent px-4 py-3 pl-8 text-left text-sm font-semibold leading-snug text-[#a8b7cd] transition-colors hover:bg-[#08111f] hover:text-white lg:w-full"
+                      disabled
+                      className="flex w-[240px] shrink-0 flex-col items-start justify-center gap-0.5 rounded-md border-l-2 border-transparent px-4 py-3 text-left text-sm font-semibold leading-snug transition-colors cursor-not-allowed text-[#3f5470] lg:w-full"
                     >
-                      <span className="w-full whitespace-normal break-words">DPS Internal Affairs</span>
-                    </button>
-                  )}
-                  {item === 'Department of Public Health' && canAccessDphInternalAffairs && (
-                    <button
-                      type="button"
-                      onClick={() => navigate('/dph_internal-affairs')}
-                      className="flex w-[240px] shrink-0 items-center rounded-md border-l-2 border-transparent px-4 py-3 pl-8 text-left text-sm font-semibold leading-snug text-[#a8b7cd] transition-colors hover:bg-[#08111f] hover:text-white lg:w-full"
-                    >
-                      <span className="w-full whitespace-normal break-words">DPH Internal Affairs</span>
+                      <span className="w-full whitespace-normal break-words">Department of Internal Affairs</span>
+                      <span className="text-[10px] font-normal tracking-wide text-[#526179]">
+                        Coming Soon
+                      </span>
                     </button>
                   )}
                 </div>
@@ -188,8 +181,13 @@ const MemberPortalClassic = () => {
             )}
           </div>
 
-          {/* Sign out — pinned to bottom of sidebar */}
-          <div className="hidden lg:block border-t border-[#182232] px-3 py-4">
+          {/* Index + sign out — pinned to bottom of sidebar */}
+          <div className="mt-6 border-t border-[#182232] px-3 py-4 space-y-1 lg:mt-0">
+            <button type="button" onClick={handleGoToIndex}
+              className="flex w-full items-center gap-3 rounded-md px-4 py-2.5 text-left text-sm font-bold text-[#dce7f8] transition-colors hover:bg-white/5 hover:text-[#4384ff]">
+              <Home className="h-4 w-4" />
+              Back to Index
+            </button>
             <button type="button" onClick={handleSignOut} disabled={isSigningOut}
               className="flex w-full items-center gap-3 rounded-md px-4 py-2.5 text-left text-sm font-bold text-[#dce7f8] transition-colors hover:bg-white/5 hover:text-[#4384ff] disabled:opacity-60">
               <LogOut className="h-4 w-4" />

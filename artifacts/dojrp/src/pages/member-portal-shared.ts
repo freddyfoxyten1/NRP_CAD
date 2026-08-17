@@ -131,7 +131,6 @@ export function useMemberPortal() {
   const [answeredCall, setAnsweredCall] = useState<{ phone: string; name: string; callId: string } | null>(null);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [staffGroups, setStaffGroups] = useState<StaffGroup[]>([]);
-  const [canAccessDphIab, setCanAccessDphIab] = useState(false);
   const [portalSection, setPortalSection] = usePortalSection<PortalSection>({
     base: 'portal',
     valid: PORTAL_SECTIONS,
@@ -170,16 +169,13 @@ export function useMemberPortal() {
       }
 
       try {
-        const [response, grpRes, meRes] = await Promise.all([
+        const [response, grpRes] = await Promise.all([
           fetch('/api/cad-auth/session-status', {
             method: 'POST',
             headers: { 'content-type': 'application/json', accept: 'application/json' },
             body: JSON.stringify({ id: session.id, email: session.email }),
           }),
           fetch('/api/staff/groups', { headers: { accept: 'application/json' } }),
-          fetch(`/api/dph/me?username=${encodeURIComponent(session.username)}`, {
-            headers: { accept: 'application/json' },
-          }).catch(() => null),
         ]);
         const contentType = response.headers.get('content-type') ?? '';
 
@@ -202,17 +198,8 @@ export function useMemberPortal() {
 
         setCadSession(result.account);
 
-        let dphIab = false;
-        if (meRes?.ok) {
-          try {
-            const me = await meRes.json() as { can_access_iab?: boolean } | null;
-            dphIab = Boolean(me?.can_access_iab);
-          } catch { /* non-fatal */ }
-        }
-
         if (isMounted) {
           setPortalData(toPortalData(result.account, defaultStats));
-          setCanAccessDphIab(dphIab);
           if (grpRes.ok) {
             try { setStaffGroups((await grpRes.json()) as StaffGroup[]); } catch { /* keep existing */ }
           }
@@ -283,6 +270,10 @@ export function useMemberPortal() {
     navigate('/', { replace: true });
   };
 
+  const handleGoToIndex = () => {
+    navigate('/');
+  };
+
   const handleAdminPortal = () => {
     navigate('/admin_members');
   };
@@ -296,8 +287,6 @@ export function useMemberPortal() {
   );
   const superAdmin = isSuperAdminSession(getCadSession());
   const canAccessStaff = superAdmin || (userGroup?.staff_access ?? false);
-  const canAccessIab = superAdmin || Boolean(portalData?.profile.can_access_iab);
-  const canAccessDphInternalAffairs = superAdmin || canAccessDphIab;
   const canAccessAdminPortal = superAdmin || (userGroup?.admin_access ?? false);
   const canAccessDoc = superAdmin || (userGroup?.doc_access ?? false);
 
@@ -353,6 +342,7 @@ export function useMemberPortal() {
     infoSections,
     infoLoading,
     handleSignOut,
+    handleGoToIndex,
     handleAdminPortal,
     cadOnline,
     cadMode,
@@ -360,8 +350,6 @@ export function useMemberPortal() {
     rank,
     role,
     canAccessStaff,
-    canAccessIab,
-    canAccessDphInternalAffairs,
     canAccessAdminPortal,
     canAccessDoc,
     handleAnswer,
