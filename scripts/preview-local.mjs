@@ -1,7 +1,6 @@
 /**
- * Production-style local preview: build frontend, serve on 4173, optional API.
- * Default (preview / preview:edit): your local edits before GitHub push.
- * preview:live: proxied VPS API for production data comparison.
+ * Production-style local preview: build frontend, serve on 4173.
+ * Default (preview / preview:edit / preview:live): unpublished UI + VPS Mongo.
  */
 import { execSync, spawn } from "node:child_process";
 import http from "node:http";
@@ -216,17 +215,17 @@ if (ready) {
       "",
       "═══════════════════════════════════════════════════════════════",
       usingRemoteApi
-        ? "  DOJCAD preview — VPS data (Discord login goes to cad.dojrblx.com)"
+        ? "  DOJCAD test preview — local files + VPS Mongo"
         : "  DOJCAD test preview — local files before VPS release",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site:  http://localhost:${PREVIEW_PORT}/`,
       usingRemoteApi
-        ? `  API:   ${PREVIEW_API_URL}/api/healthz  (proxied from VPS)`
+        ? `  API:   ${PREVIEW_API_URL}/api/healthz  (VPS + Mongo)`
         : `  API:   http://localhost:${API_PORT}/api/healthz  (this checkout)`,
       "",
       usingRemoteApi
-        ? "  Sign-in leaves this preview. Use bun run preview to review unpublished changes."
+        ? "  Unpublished UI. Live Mongo from the VPS. Sign-in returns here."
         : "  Unpublished files. Sign-in returns here, not cad.dojrblx.com.",
       "",
       "  Live reload while editing: bun run dev",

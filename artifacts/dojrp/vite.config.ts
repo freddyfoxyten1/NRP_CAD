@@ -29,8 +29,6 @@ function apiProxyOptions() {
     timeout: 120_000,
     proxyTimeout: 120_000,
     configure: (proxy: { on: (event: string, fn: (...args: unknown[]) => void) => void }) => {
-      // Never forward localhost to the live VPS — that would spoof Discord redirects.
-      if (previewApiUrl) return;
       proxy.on('proxyReq', (proxyReq: { setHeader: (name: string, value: string) => void }, req: { headers: { host?: string } }) => {
         const browserHost = req.headers.host;
         if (browserHost) {

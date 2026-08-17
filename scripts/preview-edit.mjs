@@ -1,9 +1,7 @@
 /**
- * Test preview — production build of your local changes + local API.
- * Sign-in returns to http://localhost:4173, not cad.dojrblx.com.
- * Use this to review unpublished files before a VPS release.
+ * Test preview — unpublished local UI + live VPS Mongo (cad.dojrblx.com).
+ * Sign-in returns to http://localhost:4173, not the published site.
  */
-delete process.env.PREVIEW_API_URL;
-process.env.PREVIEW_RESTART_API ??= "1";
+process.env.PREVIEW_API_URL ??= "https://cad.dojrblx.com";
 process.env.OPEN_BROWSER ??= "0";
 await import("./preview-local.mjs");
