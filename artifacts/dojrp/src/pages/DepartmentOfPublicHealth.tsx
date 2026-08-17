@@ -8,7 +8,7 @@ import {
 import {
   AlertCircle, BookOpen, CalendarDays, Car, ChevronDown, ChevronRight, ChevronUp,
   Clock, FileText, Globe, GripVertical, Info, LayoutDashboard, Layers, Lock, LogOut, MapPin, Package,
-  Pencil, Phone, Plus, Radio, RefreshCw, Scale, Search, Settings,
+  Pencil, Phone, Plus, Radio, RefreshCw, Search, Settings,
   Shield, Trash2, Users, X,
 } from 'lucide-react';
 import DocumentEditor from '@/components/editor/DocumentEditor';
@@ -568,23 +568,17 @@ const EditModal = ({
 // ── Roster Access Permissions Modal ───────────────────────────────────────────
 const RosterAccessPermissionsModal = ({
   member,
-  iabLabel,
   resourceSaving,
-  iabSaving,
   clearing,
   onClose,
   onToggleResources,
-  onToggleIab,
   onClearAll,
 }: {
   member: RosterMember;
-  iabLabel: string;
   resourceSaving: boolean;
-  iabSaving: boolean;
   clearing: boolean;
   onClose: () => void;
   onToggleResources: (enabled: boolean) => void;
-  onToggleIab: (enabled: boolean) => void;
   onClearAll: () => void;
 }) => {
   const rows = [
@@ -598,17 +592,6 @@ const RosterAccessPermissionsModal = ({
       on: 'border-[#a78bfa]/50 bg-[#a78bfa]/10 text-[#a78bfa]',
       off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#a78bfa]/40 hover:text-[#a78bfa]',
       onClick: () => onToggleResources(!member.can_view_all_resources),
-    },
-    {
-      key: 'iab',
-      label: 'IAB',
-      description: iabLabel,
-      enabled: Boolean(member.can_access_iab),
-      saving: iabSaving,
-      icon: <Scale className="h-3.5 w-3.5" />,
-      on: 'border-[#f4c542]/50 bg-[#f4c542]/10 text-[#f4c542]',
-      off: 'border-[#1f3050] bg-[#0a1525] text-[#a8b7cd] hover:border-[#f4c542]/40 hover:text-[#f4c542]',
-      onClick: () => onToggleIab(!member.can_access_iab),
     },
   ];
 
@@ -624,7 +607,7 @@ const RosterAccessPermissionsModal = ({
             <button
               type="button"
               onClick={onClearAll}
-              disabled={clearing || resourceSaving || iabSaving}
+              disabled={clearing || resourceSaving}
               title="Remove all access permissions for this member"
               className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-2.5 py-1.5 text-[10px] font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
             >
@@ -2389,42 +2372,6 @@ const DepartmentOfPublicHealth = () => {
     }
   };
 
-  const [iabAccessSavingId, setIabAccessSavingId] = useState<number | null>(null);
-
-  const handleToggleIabAccess = async (member: RosterMember, enabled: boolean) => {
-    setIabAccessSavingId(member.id);
-    setPanelMembers(prev => prev.map(m =>
-      m.id === member.id ? { ...m, can_access_iab: enabled } : m
-    ));
-    try {
-      const res = await fetch(`/api/dph/${member.id}/iab-access`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          can_access_iab: enabled,
-          actor: session?.username ?? 'DPH Panel',
-        }),
-      });
-      if (!res.ok) {
-        setPanelMembers(prev => prev.map(m =>
-          m.id === member.id ? { ...m, can_access_iab: !enabled } : m
-        ));
-        toast.error('Failed to update Internal Affairs access.');
-        return;
-      }
-      toast.success(enabled
-        ? `${member.username} granted DPH Internal Affairs access.`
-        : `${member.username} DPH Internal Affairs access revoked.`);
-    } catch {
-      setPanelMembers(prev => prev.map(m =>
-        m.id === member.id ? { ...m, can_access_iab: !enabled } : m
-      ));
-      toast.error('Failed to update Internal Affairs access.');
-    } finally {
-      setIabAccessSavingId(null);
-    }
-  };
-
   const handleClearMemberAccessPermissions = async (member: RosterMember) => {
     if (!confirm(`Remove all access permissions for ${member.username}?`)) return;
     setClearingMemberPermissionId(member.id);
@@ -2906,13 +2853,10 @@ const DepartmentOfPublicHealth = () => {
         return (
           <RosterAccessPermissionsModal
             member={accessMember}
-            iabLabel="DPH Internal Affairs access"
             resourceSaving={resourceAccessSavingId === accessMember.id}
-            iabSaving={iabAccessSavingId === accessMember.id}
             clearing={clearingMemberPermissionId === accessMember.id}
             onClose={() => setAccessMemberId(null)}
             onToggleResources={enabled => void handleToggleViewAllResources(accessMember, enabled)}
-            onToggleIab={enabled => void handleToggleIabAccess(accessMember, enabled)}
             onClearAll={() => void handleClearMemberAccessPermissions(accessMember)}
           />
         );
@@ -4444,7 +4388,7 @@ const DepartmentOfPublicHealth = () => {
 
                     <PermissionAccessOverview
                       title="Department Permission Access"
-                      description="Department Panel (by title), all-resources and IAB grants, plus division editor access."
+                      description="Department Panel (by title), all-resources grants, plus division editor access."
                       accentTextClass="text-[#ff7070]"
                       accentBorderClass="border-[#ff5d5d]/20"
                       rows={departmentPermissionOverviewRows}
@@ -5683,15 +5627,6 @@ const DepartmentOfPublicHealth = () => {
                           <p className="mt-1 text-xs text-[#526179]">Publish guides, reference documents, and department materials for members.</p>
                         </div>
                         <div className="flex flex-wrap items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void handleClearAllPermissionGrants()}
-                            disabled={clearingPermissionGrants}
-                            className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
-                          >
-                            <Lock className="h-3.5 w-3.5" />
-                            {clearingPermissionGrants ? 'Removing…' : 'Remove Everyones Permissions'}
-                          </button>
                           <button type="button"
                             onClick={() => {
                               resetAddResourceDialog();
@@ -5730,7 +5665,7 @@ const DepartmentOfPublicHealth = () => {
                                 {(r.personnel_only || (Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0) || r.division_only) && (
                                   <p className="mt-1 text-[10px] font-semibold text-[#7c8ba5]">
                                     {r.division_only ? 'Division only' : null}
-                                    {r.personnel_only || (Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0) ? (r.division_only ? ' · ' : '') + 'DPS personnel' : null}
+                                    {r.personnel_only || (Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0) ? (r.division_only ? ' · ' : '') + 'DPH personnel' : null}
                                     {Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0
                                       ? ` · Ranks: ${r.allowed_dph_ranks.join(', ')}`
                                       : null}

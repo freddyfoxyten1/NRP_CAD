@@ -39,7 +39,6 @@ const App = () => (
           <Route path="/discord-callback" element={<DiscordCallback />} />
           <Route path="/dojcad/discord-callback" element={<DiscordCallback />} />
           <Route path="/dps/internal-affairs" element={<Navigate to="/dps_internal-affairs" replace />} />
-          <Route path="/dph/internal-affairs" element={<Navigate to="/dph_internal-affairs" replace />} />
           <Route path="/civilian" element={<Navigate to="/portal_dashboard" replace />} />
 
           {/* Bare bases → default sections */}

@@ -12,7 +12,6 @@ const DepartmentOfPublicSafety = lazy(() => import("@/pages/DepartmentOfPublicSa
 const DepartmentOfCommunications = lazy(() => import("@/pages/DepartmentOfCommunications"));
 const DepartmentOfPublicHealth = lazy(() => import("@/pages/DepartmentOfPublicHealth"));
 const DpsInternalAffairs = lazy(() => import("@/pages/DpsInternalAffairs"));
-const DphInternalAffairs = lazy(() => import("@/pages/DphInternalAffairs"));
 const StaffPortal = lazy(() => import("@/pages/StaffPortal"));
 const CadPage = lazy(() => import("@/pages/CadPage"));
 const DocCadPage = lazy(() => import("@/pages/DocCadPage"));
@@ -55,13 +54,6 @@ export default function SectionPathRoute() {
     return withSuspense(
       <RequireAuth>
         <DpsInternalAffairs />
-      </RequireAuth>,
-    );
-  }
-  if (base === "dph" && section === "internal-affairs") {
-    return withSuspense(
-      <RequireAuth>
-        <DphInternalAffairs />
       </RequireAuth>,
     );
   }
