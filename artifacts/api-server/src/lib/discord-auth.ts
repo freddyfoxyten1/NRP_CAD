@@ -111,6 +111,28 @@ function isLocalBrowserHost(host: string): boolean {
   );
 }
 
+/** Local Vite/preview ports that may complete Discord OAuth against the VPS API. */
+const PREVIEW_OAUTH_PORTS = new Set(["4173", "5173"]);
+
+function isAllowedOAuthHost(host: string, isProd: boolean): boolean {
+  const lower = host.toLowerCase();
+  if (isLocalBrowserHost(lower)) {
+    if (!isProd) return true;
+    const port = lower.includes(":") ? lower.split(":").pop() ?? "" : "";
+    return PREVIEW_OAUTH_PORTS.has(port);
+  }
+  if (lower === "cad.dojrblx.com") return true;
+  const envUri = (process.env.DISCORD_REDIRECT_URI ?? "").trim();
+  if (envUri) {
+    try {
+      return new URL(envUri).host.toLowerCase() === lower;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 /** Discord OAuth redirect — prefer the browser-facing host (Vite/nginx), not the API port. */
 export function getRedirectUri(req: Request): string {
   const forwardedHost = (req.headers["x-forwarded-host"] as string | undefined)
@@ -119,8 +141,7 @@ export function getRedirectUri(req: Request): string {
   const host = normalizeBrowserHost(forwardedHost || (req.headers.host as string | undefined) || "");
   const isProd = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
 
-  // Production must stay on the published callback. Local preview uses DISCORD_REDIRECT_URI.
-  if (host && !isDirectApiHost(host) && !(isProd && isLocalBrowserHost(host))) {
+  if (host && !isDirectApiHost(host) && isAllowedOAuthHost(host, isProd)) {
     const forwardedProto = (req.headers["x-forwarded-proto"] as string | undefined)
       ?.split(",")[0]
       .trim();
