@@ -6,6 +6,16 @@ import { registerDiscordGuildSync } from "../lib/discord-realtime-sync.js";
 import { sortByCallsignThenUsername, sortDepartmentPersonnel } from "../lib/roster-sort.js";
 import { buildLinkedRankByRoleId, pickHighestLinkedDiscordRole } from "../lib/discord-rank-pick.js";
 import {
+  buildDivisionDiscordMembershipMap,
+  desiredDivisionAssignmentsFromRoles,
+  isDivisionUnrankedRank,
+  loadDivisionLinkConfig,
+  mergeDivisionAssignmentsFromDiscord,
+  pruneDivisionRosterAssignments,
+  validateLinkedDivisionMemberAdd,
+  type DivisionLinkConfig,
+} from "../lib/division-discord-qualify.js";
+import {
   clearAllDpsPermissionGrants,
   dpsRosterRowExists,
   resetDpsMemberAccessPermissions,
@@ -188,18 +198,22 @@ async function setMemberDivisionAssignments(
 ): Promise<DivisionAssignment[]> {
   const existingFlags = await pool.query<{
     division_id: number;
+    division_rank: string;
     is_manual: boolean | number | null;
     can_edit_resources: boolean | number | null;
     can_edit_roster: boolean | number | null;
     can_edit_info: boolean | number | null;
   }>(
-    `SELECT division_id,
+    `SELECT division_id, division_rank,
             COALESCE(is_manual, false) AS is_manual,
             COALESCE(can_edit_resources, false) AS can_edit_resources,
             COALESCE(can_edit_roster, false) AS can_edit_roster,
             COALESCE(can_edit_info, false) AS can_edit_info
      FROM dps_user_divisions WHERE profile_id = $1`,
     [profileId]
+  );
+  const previousRankByDiv = new Map(
+    existingFlags.rows.map(r => [r.division_id, String(r.division_rank ?? "").trim()]),
   );
   const flagMap = new Map(existingFlags.rows.map(r => [r.division_id, {
     is_manual: Boolean(r.is_manual),
@@ -223,12 +237,20 @@ async function setMemberDivisionAssignments(
     const rankName = String(a.division_rank ?? "").trim();
     if (!Number.isInteger(divisionId) || divisionId <= 0 || !rankName) continue;
     if (seen.has(divisionId)) continue;
-    const ok = await pool.query(
-      `SELECT 1 AS ok FROM dps_division_ranks
-       WHERE division_id = $1 AND lower(name) = lower($2) LIMIT 1`,
-      [divisionId, rankName]
-    );
-    if (!ok.rows.length) continue;
+    if (isDivisionUnrankedRank(rankName)) {
+      const divOk = await pool.query(
+        `SELECT 1 AS ok FROM dps_divisions WHERE id = $1 LIMIT 1`,
+        [divisionId],
+      );
+      if (!divOk.rows.length) continue;
+    } else {
+      const ok = await pool.query(
+        `SELECT 1 AS ok FROM dps_division_ranks
+         WHERE division_id = $1 AND lower(name) = lower($2) LIMIT 1`,
+        [divisionId, rankName]
+      );
+      if (!ok.rows.length) continue;
+    }
     seen.add(divisionId);
     const prev = flagMap.get(divisionId);
     cleaned.push({
@@ -264,8 +286,46 @@ async function setMemberDivisionAssignments(
   );
   await syncPersonnelUnitsFromAssignments(profileId);
 
+  let shouldRestorePersonnelCallsign = false;
+  for (const a of cleaned) {
+    const prevRank = previousRankByDiv.get(a.division_id) ?? "";
+    if (isDivisionUnrankedRank(a.division_rank) && !isDivisionUnrankedRank(prevRank)) {
+      shouldRestorePersonnelCallsign = true;
+      break;
+    }
+  }
+  if (shouldRestorePersonnelCallsign) {
+    await restorePersonnelCallsignFromRank(profileId);
+  }
+
   const map = await loadDivisionAssignments([profileId]);
   return map.get(profileId) ?? [];
+}
+
+async function handleDpsDivisionRankCallsignChange(
+  profileId: number,
+  _divisionId: number,
+  previousRank: string,
+  nextRank: string,
+): Promise<void> {
+  if (isDivisionUnrankedRank(nextRank) && !isDivisionUnrankedRank(previousRank)) {
+    await restorePersonnelCallsignFromRank(profileId);
+  }
+}
+
+async function refreshDpsDivisionAssignmentMirrors(profileIds: number[]): Promise<void> {
+  for (const profileId of profileIds) {
+    const remaining = await loadDivisionAssignments([profileId]);
+    const list = remaining.get(profileId) ?? [];
+    await pool.query(
+      `UPDATE dps_users SET division_rank = $2, updated_at = NOW() WHERE profile_id = $1`,
+      [profileId, list[0]?.division_rank ?? null],
+    );
+    await syncPersonnelUnitsFromAssignments(profileId);
+    if (list.some(a => isDivisionUnrankedRank(a.division_rank))) {
+      await restorePersonnelCallsignFromRank(profileId);
+    }
+  }
 }
 
 /**
@@ -353,7 +413,158 @@ async function pruneOrphanedDpsRosterMembersDebounced(): Promise<number> {
   return pruneOrphanedDpsRosterMembers();
 }
 
+let _lastDpsDivisionPruneMs = 0;
+async function pruneDpsDivisionRosterDebounced(): Promise<number> {
+  const now = Date.now();
+  if (now - _lastDpsDivisionPruneMs < DPS_ROSTER_PRUNE_DEBOUNCE_MS) return 0;
+  _lastDpsDivisionPruneMs = now;
+  if (!process.env.DISCORD_BOT_TOKEN) return 0;
+  try {
+    const linkConfig = await loadDivisionLinkConfig("dps_divisions", "dps_division_ranks");
+    const allMembers = await getDivisionGuildMembersCached();
+    const { orphaned, unqualified, updated } = await pruneDivisionRosterAssignments(
+      { userDivisionsTable: "dps_user_divisions", divisionRanksTable: "dps_division_ranks" },
+      linkConfig,
+      {
+        fetchMembers: async () => allMembers,
+        onProfilesUpdated: refreshDpsDivisionAssignmentMirrors,
+        onRankUpdated: handleDpsDivisionRankCallsignChange,
+      },
+    );
+    return orphaned + unqualified + updated;
+  } catch (err) {
+    console.warn("[dps-division-prune] debounced prune failed:", err);
+    return 0;
+  }
+}
+
 type DpsGuildMember = { user: { id: string; username: string; avatar?: string | null }; nick?: string | null; roles: string[] };
+
+const divisionGuildMembersCache: { members: DpsGuildMember[]; fetchedAt: number } = {
+  members: [],
+  fetchedAt: 0,
+};
+const DIVISION_GUILD_MEMBERS_TTL_MS = 5 * 60 * 1000;
+let _divisionGuildFetchRunning: Promise<DpsGuildMember[]> | null = null;
+
+const divisionDiscordMembershipCache: {
+  map: Map<string, number[]>;
+  linkedDivisionIds: Set<number>;
+  warm: boolean;
+  fetchedAt: number;
+} = {
+  map: new Map(),
+  linkedDivisionIds: new Set(),
+  warm: false,
+  fetchedAt: 0,
+};
+const DIVISION_MEMBERSHIP_MAP_TTL_MS = 5 * 60 * 1000;
+let _membershipCacheRefreshRunning: Promise<void> | null = null;
+
+type DivisionDiscordEnrichment = {
+  map: Map<string, number[]>;
+  warm: boolean;
+  linkedDivisionIds: Set<number>;
+};
+
+function rememberDivisionGuildMembers(members: DpsGuildMember[]): DpsGuildMember[] {
+  divisionGuildMembersCache.members = members;
+  divisionGuildMembersCache.fetchedAt = Date.now();
+  void refreshDivisionDiscordMembershipCacheFromMembers(members);
+  return members;
+}
+
+async function getDivisionGuildMembersCached(force = false): Promise<DpsGuildMember[]> {
+  const fresh =
+    !force &&
+    divisionGuildMembersCache.members.length > 0 &&
+    Date.now() - divisionGuildMembersCache.fetchedAt < DIVISION_GUILD_MEMBERS_TTL_MS;
+  if (fresh) return divisionGuildMembersCache.members;
+
+  if (!_divisionGuildFetchRunning) {
+    _divisionGuildFetchRunning = fetchDivisionGuildMembers()
+      .finally(() => { _divisionGuildFetchRunning = null; });
+  }
+  return _divisionGuildFetchRunning;
+}
+
+async function refreshDivisionDiscordMembershipCacheFromMembers(
+  members: DpsGuildMember[],
+  linkConfig?: DivisionLinkConfig,
+): Promise<void> {
+  if (!process.env.DISCORD_BOT_TOKEN) return;
+  try {
+    const config = linkConfig ?? await loadDivisionLinkConfig("dps_divisions", "dps_division_ranks");
+    if (config.membershipRoleByDiv.size === 0) return;
+    divisionDiscordMembershipCache.map = buildDivisionDiscordMembershipMap(members, config.membershipRoleByDiv);
+    divisionDiscordMembershipCache.linkedDivisionIds = config.linkedDivisionIds;
+    divisionDiscordMembershipCache.warm = true;
+    divisionDiscordMembershipCache.fetchedAt = Date.now();
+  } catch (err) {
+    console.warn("[roster] division discord membership cache refresh failed:", err);
+  }
+}
+
+async function refreshDivisionDiscordMembershipCache(force = false): Promise<void> {
+  if (!process.env.DISCORD_BOT_TOKEN) return;
+  const fresh =
+    !force &&
+    divisionDiscordMembershipCache.warm &&
+    Date.now() - divisionDiscordMembershipCache.fetchedAt < DIVISION_MEMBERSHIP_MAP_TTL_MS;
+  if (fresh) return;
+
+  if (!_membershipCacheRefreshRunning) {
+    _membershipCacheRefreshRunning = (async () => {
+      const members = await getDivisionGuildMembersCached(force);
+      await refreshDivisionDiscordMembershipCacheFromMembers(members);
+    })().finally(() => { _membershipCacheRefreshRunning = null; });
+  }
+  await _membershipCacheRefreshRunning;
+}
+
+function kickDivisionDiscordMembershipCacheRefresh(): void {
+  const stale =
+    !divisionDiscordMembershipCache.warm ||
+    Date.now() - divisionDiscordMembershipCache.fetchedAt >= DIVISION_MEMBERSHIP_MAP_TTL_MS;
+  if (!stale || _membershipCacheRefreshRunning) return;
+  void refreshDivisionDiscordMembershipCache();
+}
+
+async function getDivisionDiscordEnrichmentForRoster(): Promise<DivisionDiscordEnrichment> {
+  kickDivisionDiscordMembershipCacheRefresh();
+  let linkedDivisionIds = divisionDiscordMembershipCache.linkedDivisionIds;
+  if (!divisionDiscordMembershipCache.warm) {
+    try {
+      const linkConfig = await loadDivisionLinkConfig("dps_divisions", "dps_division_ranks");
+      linkedDivisionIds = linkConfig.linkedDivisionIds;
+    } catch {
+      linkedDivisionIds = new Set();
+    }
+  }
+  return {
+    map: divisionDiscordMembershipCache.map,
+    warm: divisionDiscordMembershipCache.warm,
+    linkedDivisionIds,
+  };
+}
+
+function divisionDiscordLinksForMember(
+  discordId: string,
+  assignments: DivisionAssignment[],
+  enrichment: DivisionDiscordEnrichment,
+): number[] {
+  if (!discordId) return [];
+  if (enrichment.warm) {
+    return enrichment.map.get(discordId) ?? [];
+  }
+  if (enrichment.map.size > 0) {
+    return enrichment.map.get(discordId) ?? [];
+  }
+  if (enrichment.linkedDivisionIds.size === 0) return [];
+  return assignments
+    .filter(a => enrichment.linkedDivisionIds.has(a.division_id))
+    .map(a => a.division_id);
+}
 
 /**
  * Remove roster members who sit on a Discord-linked rank but no longer hold that role.
@@ -496,6 +707,24 @@ async function autoAssignCallsign(rankName: string, profileId: number): Promise<
   return null;
 }
 
+/** Put a member back on their department-rank callsign after leaving a division rank slot. */
+async function restorePersonnelCallsignFromRank(profileId: number): Promise<void> {
+  try {
+    const res = await pool.query<{ dps_rank: string | null }>(
+      `SELECT dps_rank FROM dps_users WHERE profile_id = $1 LIMIT 1`,
+      [profileId],
+    );
+    const rank = res.rows[0]?.dps_rank?.trim();
+    if (!rank) return;
+    const auto = await autoAssignCallsign(rank, profileId);
+    if (!auto) return;
+    await pool.query(
+      `UPDATE dps_users SET callsign = $2, updated_at = NOW() WHERE profile_id = $1`,
+      [profileId, auto],
+    );
+  } catch { /* non-fatal */ }
+}
+
 const DPS_MEMBERS_TTL_MS = 5 * 60 * 1000; // 5 min — used by Add Officer typeahead
 let _dpsMembersFetchRunning: Promise<DpsMemberCacheEntry[]> | null = null;
 
@@ -523,6 +752,7 @@ async function fetchDpsGuildMembers(): Promise<DpsGuildMember[]> {
     nick: m.nick ?? null,
   }));
   dpsMembersCache.fetchedAt = Date.now();
+  rememberDivisionGuildMembers(allMembers);
   return allMembers;
 }
 
@@ -545,7 +775,7 @@ async function fetchDivisionGuildMembers(): Promise<DpsGuildMember[]> {
     if (batch.length < 1000) break;
     after = batch[batch.length - 1].user.id;
   }
-  return allMembers;
+  return rememberDivisionGuildMembers(allMembers);
 }
 
 /** Persist Discord avatars onto matching CAD profiles (by discord_id). Only writes when changed. */
@@ -772,102 +1002,42 @@ async function syncDpsDiscordRoles(preloadedMembers?: DpsGuildMember[]): Promise
  * Sync Division Roster assignments from Discord roles on the DPS guild.
  *
  * Membership gate: when a division has discord_role_id, the member must hold
- * that role to stay on the division roster (manual adds are preserved).
+ * that role to stay on the division roster.
  * Rank placement: linked division-rank roles pick the highest hierarchy match;
- * if they only have the division membership role, they get the junior-most rank.
+ * if they only have the division membership role, they are listed as Unranked.
+ * Linked divisions only keep members with matching Discord roles.
  */
 async function syncDivisionDiscordRoles(
   preloadedMembers?: DpsGuildMember[],
-): Promise<{ assigned: number; skipped: number; removed: number; errors: string[] }> {
+): Promise<{ assigned: number; skipped: number; removed: number; pruned: number; errors: string[] }> {
   const tok = process.env.DISCORD_BOT_TOKEN;
-  if (!tok) return { assigned: 0, skipped: 0, removed: 0, errors: ["No DISCORD_BOT_TOKEN configured"] };
+  if (!tok) return { assigned: 0, skipped: 0, removed: 0, pruned: 0, errors: ["No DISCORD_BOT_TOKEN configured"] };
 
   try {
     const allMembers = (
       preloadedMembers && DIVISION_GUILD_ID === DPS_GUILD_ID
     ) ? preloadedMembers : await fetchDivisionGuildMembers();
 
-    const membershipDivs = await pool.query<{ id: number; discord_role_id: string }>(
-      `SELECT id, discord_role_id FROM dps_divisions
-       WHERE discord_role_id IS NOT NULL AND discord_role_id != ''`
-    );
-    const membershipRoleByDiv = new Map<number, string>();
-    for (const d of membershipDivs.rows) membershipRoleByDiv.set(d.id, d.discord_role_id);
-    const membershipDivIds = new Set(membershipRoleByDiv.keys());
+    const linkConfig = await loadDivisionLinkConfig("dps_divisions", "dps_division_ranks");
+    const linkedRankNames = linkConfig.linkedRankNames;
+    const linkedDivisionIds = linkConfig.linkedDivisionIds;
 
-    const rankLinks = await pool.query<{
-      division_id: number; name: string; sort_order: number; discord_role_id: string;
-    }>(
-      `SELECT division_id, name, sort_order, discord_role_id
-       FROM dps_division_ranks
-       WHERE discord_role_id IS NOT NULL AND discord_role_id != '' AND division_id IS NOT NULL`
+    const { orphaned, unqualified, updated } = await pruneDivisionRosterAssignments(
+      { userDivisionsTable: "dps_user_divisions", divisionRanksTable: "dps_division_ranks" },
+      linkConfig,
+      {
+        fetchMembers: async () => allMembers,
+        onProfilesUpdated: refreshDpsDivisionAssignmentMirrors,
+        onRankUpdated: handleDpsDivisionRankCallsignChange,
+      },
     );
+    const pruned = orphaned + unqualified + updated;
 
-    const defaultRankByDiv = new Map<number, { name: string; sort_order: number }>();
-    const allDivRanks = await pool.query<{ division_id: number; name: string; sort_order: number }>(
-      `SELECT division_id, name, sort_order FROM dps_division_ranks
-       WHERE division_id IS NOT NULL ORDER BY sort_order DESC, id DESC`
-    );
-    for (const r of allDivRanks.rows) {
-      // First row per division (DESC sort_order) = junior-most fallback rank
-      if (!defaultRankByDiv.has(r.division_id)) {
-        defaultRankByDiv.set(r.division_id, { name: r.name, sort_order: r.sort_order });
-      }
+    if (linkConfig.rankByRole.size === 0 && linkConfig.membershipRoleByDiv.size === 0) {
+      return { assigned: 0, skipped: 0, removed: 0, pruned, errors: [] };
     }
 
-    if (rankLinks.rows.length === 0 && membershipDivIds.size === 0) {
-      return { assigned: 0, skipped: 0, removed: 0, errors: [] };
-    }
-
-    const rankByRole = new Map<string, { division_id: number; division_rank: string; sort_order: number }>();
-    for (const r of rankLinks.rows) {
-      const sortOrder = Number(r.sort_order ?? 999_999);
-      const existing = rankByRole.get(r.discord_role_id);
-      if (!existing || sortOrder < existing.sort_order) {
-        rankByRole.set(r.discord_role_id, {
-          division_id: r.division_id,
-          division_rank: r.name,
-          sort_order: sortOrder,
-        });
-      }
-    }
-
-    const linkedRankNames = new Set(rankLinks.rows.map(r => r.name.toLowerCase()));
-    const linkedDivisionIds = new Set<number>([
-      ...rankLinks.rows.map(r => r.division_id),
-      ...membershipDivIds,
-    ]);
-
-    const desiredFromRoles = (roles: string[]) => {
-      const roleSet = new Set(roles);
-      const desiredByDiv = new Map<number, { division_id: number; division_rank: string; sort_order: number }>();
-
-      for (const roleId of roles) {
-        const rankHit = rankByRole.get(roleId);
-        if (!rankHit) continue;
-        const membershipRole = membershipRoleByDiv.get(rankHit.division_id);
-        // If the division has a membership role, require it in addition to the rank role
-        if (membershipRole && !roleSet.has(membershipRole)) continue;
-        const cur = desiredByDiv.get(rankHit.division_id);
-        if (!cur || rankHit.sort_order < cur.sort_order) {
-          desiredByDiv.set(rankHit.division_id, rankHit);
-        }
-      }
-
-      // Division membership role alone → junior-most rank
-      for (const [divId, roleId] of membershipRoleByDiv) {
-        if (!roleSet.has(roleId) || desiredByDiv.has(divId)) continue;
-        const fallback = defaultRankByDiv.get(divId);
-        if (!fallback) continue;
-        desiredByDiv.set(divId, {
-          division_id: divId,
-          division_rank: fallback.name,
-          sort_order: fallback.sort_order,
-        });
-      }
-
-      return desiredByDiv;
-    };
+    const desiredFromRoles = (roles: string[]) => desiredDivisionAssignmentsFromRoles(roles, linkConfig);
 
     const desiredByDiscordId = new Map<string, Map<number, { division_id: number; division_rank: string; sort_order: number }>>();
     const desiredByUsername = new Map<string, Map<number, { division_id: number; division_rank: string; sort_order: number }>>();
@@ -877,10 +1047,8 @@ async function syncDivisionDiscordRoles(
       desiredByUsername.set(m.user.username.toLowerCase(), desired);
     }
 
-    const isManagedAssignment = (a: { division_id: number; division_rank: string; is_manual?: boolean }) => {
-      if (a.is_manual) return false; // manually added — never auto-remove
-      return linkedDivisionIds.has(a.division_id) || linkedRankNames.has(a.division_rank.toLowerCase());
-    };
+    const isManagedAssignment = (a: { division_id: number }) =>
+      linkConfig.linkedDivisionIds.has(a.division_id);
 
     let assigned = 0; let skipped = 0; let removed = 0; const errors: string[] = [];
     const processedProfiles = new Set<number>();
@@ -911,38 +1079,19 @@ async function syncDivisionDiscordRoles(
 
       const existingMap = await loadDivisionAssignments([profileId]);
       const existing = existingMap.get(profileId) ?? [];
-      const manual = existing
-        .filter(a => a.is_manual)
-        .map(a => ({ division_id: a.division_id, division_rank: a.division_rank, is_manual: true as const }));
 
-      const fromDiscord = [...desiredByDiv.values()].map(a => ({
-        division_id: a.division_id,
-        division_rank: a.division_rank,
-        is_manual: false as const,
-      }));
-
-      const mergedMap = new Map<number, { division_id: number; division_rank: string; is_manual: boolean }>();
-      for (const a of manual) mergedMap.set(a.division_id, a);
-      for (const a of fromDiscord) {
-        // Discord placement overwrites rank but keeps manual flag if they were manually added
-        const prev = mergedMap.get(a.division_id);
-        mergedMap.set(a.division_id, {
-          ...a,
-          is_manual: prev?.is_manual ?? false,
-        });
-      }
-      // Keep unmanaged (no Discord links) non-manual assignments as-is
-      for (const a of existing) {
-        if (mergedMap.has(a.division_id)) continue;
-        if (!isManagedAssignment(a)) {
-          mergedMap.set(a.division_id, {
-            division_id: a.division_id,
-            division_rank: a.division_rank,
-            is_manual: Boolean(a.is_manual),
-          });
-        }
-      }
-      const merged = [...mergedMap.values()];
+      const merged = mergeDivisionAssignmentsFromDiscord(
+        existing.map(a => ({
+          division_id: a.division_id,
+          division_rank: a.division_rank,
+          is_manual: Boolean(a.is_manual),
+          can_edit_resources: Boolean(a.can_edit_resources),
+          can_edit_roster: Boolean(a.can_edit_roster),
+          can_edit_info: Boolean(a.can_edit_info),
+        })),
+        desiredByDiv,
+        linkConfig,
+      );
 
       const beforeKey = existing.map(a => `${a.division_id}:${a.division_rank}:${a.is_manual ? 1 : 0}`).sort().join("|");
       const afterKey = merged.map(a => `${a.division_id}:${a.division_rank}:${a.is_manual ? 1 : 0}`).sort().join("|");
@@ -951,10 +1100,12 @@ async function syncDivisionDiscordRoles(
         return;
       }
 
-      const removedHere = existing.filter(a => isManagedAssignment(a) && !desiredByDiv.has(a.division_id)).length;
+      const removedHere = existing.filter(
+        a => linkConfig.linkedDivisionIds.has(a.division_id) && !desiredByDiv.has(a.division_id),
+      ).length;
       removed += removedHere;
       await setMemberDivisionAssignments(profileId, merged);
-      if (fromDiscord.length > 0 || removedHere > 0) assigned++;
+      if (desiredByDiv.size > 0 || removedHere > 0) assigned++;
     };
 
     for (const m of allMembers) {
@@ -1009,12 +1160,12 @@ async function syncDivisionDiscordRoles(
     }
 
     await writeLog("dps_personnel", "System", "Division Discord role sync completed",
-      `assigned=${assigned} skipped=${skipped} removed=${removed} errors=${errors.length}`);
-    console.info(`[division-sync] assigned=${assigned} skipped=${skipped} removed=${removed} errors=${errors.length}`);
-    return { assigned, skipped, removed, errors };
+      `assigned=${assigned} skipped=${skipped} removed=${removed} pruned=${pruned} errors=${errors.length}`);
+    console.info(`[division-sync] assigned=${assigned} skipped=${skipped} removed=${removed} pruned=${pruned} errors=${errors.length}`);
+    return { assigned, skipped, removed, pruned, errors };
   } catch (e) {
     console.error("[division-sync] Error:", e);
-    return { assigned: 0, skipped: 0, removed: 0, errors: [String(e)] };
+    return { assigned: 0, skipped: 0, removed: 0, pruned: 0, errors: [String(e)] };
   }
 }
 
@@ -1331,6 +1482,7 @@ const rankOrderSubquery = `
 function formatDpsPersonnelRows(
   rows: Record<string, unknown>[],
   assignmentMap: Map<number, DivisionAssignment[]>,
+  discordEnrichment?: DivisionDiscordEnrichment,
 ) {
   const sortedRows = sortDepartmentPersonnel(
     rows,
@@ -1350,11 +1502,16 @@ function formatDpsPersonnelRows(
     const id = Number(row.id);
     const assignments = assignmentMap.get(id) ?? [];
     const primary = assignments[0];
+    const discordId = String(row.discord_id ?? "").trim();
+    const division_discord_links = discordEnrichment
+      ? divisionDiscordLinksForMember(discordId, assignments, discordEnrichment)
+      : [];
     return {
       ...row,
       can_view_all_resources: Boolean(row.can_view_all_resources),
       can_access_iab: Boolean(row.can_access_iab),
       division_assignments: assignments,
+      division_discord_links,
       division_rank: primary?.division_rank ?? row.division_rank ?? null,
       division_name: primary?.division_name ?? row.division_name ?? null,
       division_names: assignments.map(a => a.division_name),
@@ -1362,7 +1519,10 @@ function formatDpsPersonnelRows(
   });
 }
 
-async function loadDpsPersonnelViaMongo(includeAll: boolean): Promise<Record<string, unknown>[]> {
+async function loadDpsPersonnelViaMongo(
+  includeAll: boolean,
+  discordEnrichment?: DivisionDiscordEnrichment,
+): Promise<Record<string, unknown>[]> {
   const rows = await listDpsPersonnelMongo(includeAll);
   const ids = rows.map(r => Number(r.id));
   let assignmentMap = new Map<number, DivisionAssignment[]>();
@@ -1371,14 +1531,18 @@ async function loadDpsPersonnelViaMongo(includeAll: boolean): Promise<Record<str
   } catch {
     assignmentMap = new Map();
   }
-  return formatDpsPersonnelRows(rows, assignmentMap);
+  const enrichment = discordEnrichment ?? await getDivisionDiscordEnrichmentForRoster();
+  return formatDpsPersonnelRows(rows, assignmentMap, enrichment);
 }
 
-async function loadDpsPersonnelViaMongoWithRetry(includeAll: boolean): Promise<Record<string, unknown>[]> {
+async function loadDpsPersonnelViaMongoWithRetry(
+  includeAll: boolean,
+  discordEnrichment?: DivisionDiscordEnrichment,
+): Promise<Record<string, unknown>[]> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      return await loadDpsPersonnelViaMongo(includeAll);
+      return await loadDpsPersonnelViaMongo(includeAll, discordEnrichment);
     } catch (err) {
       lastErr = err;
       if (attempt < 2) {
@@ -1396,14 +1560,25 @@ router.get("/roster", async (req, res) => {
     const includeAll = req.query.all === "1";
 
     try {
-      await pruneOrphanedDpsRosterMembersDebounced();
+      void pruneOrphanedDpsRosterMembersDebounced().catch((pruneErr) => {
+        req.log.warn({ err: pruneErr }, "roster GET orphan prune failed");
+      });
     } catch (pruneErr) {
       req.log.warn({ err: pruneErr }, "roster GET orphan prune failed");
     }
+    try {
+      void pruneDpsDivisionRosterDebounced().catch((pruneErr) => {
+        req.log.warn({ err: pruneErr }, "roster GET division prune failed");
+      });
+    } catch (pruneErr) {
+      req.log.warn({ err: pruneErr }, "roster GET division prune failed");
+    }
+
+    const discordEnrichment = await getDivisionDiscordEnrichmentForRoster();
 
     if (isMongoStore()) {
       try {
-        res.json(await loadDpsPersonnelViaMongoWithRetry(includeAll));
+        res.json(await loadDpsPersonnelViaMongoWithRetry(includeAll, discordEnrichment));
         return;
       } catch (mongoErr) {
         req.log.error({ err: mongoErr }, "roster GET native Mongo failed");
@@ -1445,7 +1620,11 @@ router.get("/roster", async (req, res) => {
       } catch (assignErr) {
         req.log.warn({ err: assignErr }, "roster GET division assignments load failed");
       }
-      res.json(formatDpsPersonnelRows(result.rows as Record<string, unknown>[], assignmentMap));
+      res.json(formatDpsPersonnelRows(
+        result.rows as Record<string, unknown>[],
+        assignmentMap,
+        discordEnrichment,
+      ));
     } catch (joinErr) {
       // Fallback if division tables/columns are missing on an older DB
       req.log.warn({ err: joinErr }, "roster GET division join failed — falling back");
@@ -3003,6 +3182,20 @@ router.post("/roster/divisions/:id/members", async (req, res) => {
       }
     }
 
+    const linkConfig = await loadDivisionLinkConfig("dps_divisions", "dps_division_ranks");
+    const placement = await validateLinkedDivisionMemberAdd({
+      divisionId,
+      profileId,
+      requestedRank: rankName,
+      config: linkConfig,
+      fetchMembers: fetchDivisionGuildMembers,
+    });
+    if (!placement.ok) {
+      res.status(400).json({ error: placement.error });
+      return;
+    }
+    const resolvedRankName = placement.rankName;
+
     const isNewRosterMember = !(await dpsRosterRowExists(pool, profileId));
 
     await pool.query(
@@ -3026,7 +3219,11 @@ router.post("/roster/divisions/:id/members", async (req, res) => {
         division_rank: a.division_rank,
         is_manual: Boolean(a.is_manual),
       }));
-    current.push({ division_id: divisionId, division_rank: rankName, is_manual: true });
+    current.push({
+      division_id: divisionId,
+      division_rank: resolvedRankName,
+      is_manual: placement.isManual,
+    });
     const assignments = await setMemberDivisionAssignments(profileId, current);
 
     const member = await pool.query(
@@ -3042,7 +3239,7 @@ router.post("/roster/divisions/:id/members", async (req, res) => {
     res.status(201).json({
       ...member.rows[0],
       division_assignments: assignments,
-      division_rank: assignments.find(a => a.division_id === divisionId)?.division_rank ?? rankName,
+      division_rank: assignments.find(a => a.division_id === divisionId)?.division_rank ?? resolvedRankName,
     });
   } catch (err) {
     req.log.error({ err }, "division members POST error");

@@ -5,6 +5,7 @@
 import { execSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -62,9 +63,14 @@ function needsFrontendBuild() {
   return srcMtime > distMtime;
 }
 
+function httpGet(url, options = {}) {
+  const client = url.startsWith("https:") ? https : http;
+  return client.get(url, options);
+}
+
 function probe(url) {
   return new Promise((resolve) => {
-    const req = http.get(url, (res) => {
+    const req = httpGet(url, (res) => {
       res.resume();
       resolve(res.statusCode >= 200 && res.statusCode < 400);
     });
@@ -78,7 +84,7 @@ function probe(url) {
 
 function probeDbHealth(baseUrl) {
   return new Promise((resolve) => {
-    const req = http.get(`${baseUrl}/api/health/db`, (res) => {
+    const req = httpGet(`${baseUrl}/api/health/db`, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk) => {

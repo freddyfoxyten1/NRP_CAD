@@ -21,7 +21,7 @@ import {
   setDphMemberDivisionAssignments,
   type DphDivisionAssignment,
 } from "../lib/dph-divisions.js";
-import { syncDphDivisionDiscordRoles } from "./dph-divisions.js";
+import { syncDphDivisionDiscordRoles, pruneDphDivisionRosterDebounced } from "./dph-divisions.js";
 import {
   clearAllDphPermissionGrants,
   dphRosterRowExists,
@@ -651,6 +651,11 @@ router.get("/dph", async (req, res) => {
       await pruneOrphanedDphRosterMembersDebounced();
     } catch (pruneErr) {
       req.log.warn({ err: pruneErr }, "dph GET orphan prune failed");
+    }
+    try {
+      await pruneDphDivisionRosterDebounced();
+    } catch (pruneErr) {
+      req.log.warn({ err: pruneErr }, "dph GET division prune failed");
     }
 
     const where = includeAll ? "" : "WHERE lower(d.status) != 'inactive'";
