@@ -50,11 +50,13 @@ async function start() {
     }
     const mongo = isMongoStore() ? await pingMongo() : null;
     const redis = (process.env.REDIS_URL ?? "").trim() ? await pingRedis() : null;
-    res.json({
+    const production = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
+    const ok = isMongoStore() ? Boolean(mongo) : !production;
+    res.status(ok ? 200 : 503).json({
       dataStore: isMongoStore() ? "mongo" : "sql",
       mongo,
       redis,
-      ok: isMongoStore() ? Boolean(mongo) : true,
+      ok,
     });
   });
 

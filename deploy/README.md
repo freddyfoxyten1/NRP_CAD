@@ -16,8 +16,8 @@ Internet → nginx :443 (cad.dojrblx.com)
 - **Frontend**: Vite + React, built by `bun` and served by nginx.
 - **API**: Express 5, bundled by esbuild to a single ESM file, executed by **bun**
   under **bm2** (auto-restart, health-check, daemon persistence, boot startup).
-- **DB**: Local SQLite at `cad-database/dojcad.sqlite` (auto-created). Set
-  `DATABASE_URL` in `.env` to switch to Postgres.
+- **DB**: MongoDB Atlas only (`DATA_STORE=mongo` + `MONGODB_URI`). Local SQLite
+  and `cad-database/` are not used on GitHub or the VPS.
 
 ---
 
@@ -84,9 +84,7 @@ STAFF_DISCORD_GUILD_ID=1411760639428399194
 DPS_DISCORD_GUILD_ID=1469131277612486791
 DIVISION_DISCORD_GUILD_ID=1469131277612486791
 DPH_DISCORD_GUILD_ID=1519857439220957204
-# Optional Postgres for ETL source only (website runtime uses Mongo)
-# DATABASE_URL=postgres://user:pass@localhost:5432/dojcad
-# MongoDB Atlas (see docs/mongodb.md) — website/API data store
+# MongoDB Atlas is the only production database (see docs/mongodb.md)
 DATA_STORE=mongo
 MONGODB_URI=
 MONGODB_DATABASE=dojcad
@@ -102,8 +100,8 @@ API_PORT=8080
 > (`https://cad.dojrblx.com/dojcad/discord-callback`) — otherwise Discord OAuth
 > breaks. Also add this URI to your Discord application's OAuth2 redirects.
 >
-> **MongoDB**: set `MONGODB_URI`, run `bun run migrate:mongo` once from your
-> SQL backup, then keep `DATA_STORE=mongo`. Full guide: [`docs/mongodb.md`](../docs/mongodb.md).
+> **MongoDB**: set `MONGODB_URI` and keep `DATA_STORE=mongo`. Production never
+> opens SQLite. Full guide: [`docs/mongodb.md`](../docs/mongodb.md).
 
 ---
 
@@ -113,7 +111,7 @@ API_PORT=8080
 > (`artifacts/api-server/dist/index.mjs`) is gitignored and only exists after
 > building.
 >
-> The API uses `bun:sqlite` (Bun's built-in SQLite) for the local database —
+> The production API reads and writes MongoDB Atlas only —
 > if you change the DB layer, rebuild before restarting.
 
 ```bash
@@ -156,7 +154,7 @@ module.exports = {
       instances: 1,
       max_memory_restart: "500M",
       max_restarts: 10,
-      env: { NODE_ENV: "production", API_PORT: "8080", WEB_PORT: "5173" },
+      env: { NODE_ENV: "production", DATA_STORE: "mongo", API_PORT: "8080", WEB_PORT: "5173" },
       health_check_url: "http://127.0.0.1:8080/api/healthz",
     },
   ],
@@ -325,8 +323,9 @@ curl http://127.0.0.1:8080/api/healthz
 Developer Portal (no trailing slash, `https://cad.dojrblx.com/dojcad/discord-callback`).
 
 **Database**
-Local SQLite lives at `cad-database/dojcad.sqlite`. Back it up regularly:
+Production uses MongoDB Atlas only. Confirm:
 ```bash
-sqlite3 cad-database/dojcad.sqlite ".backup backup-$(date +%F).sqlite"
+curl -s http://127.0.0.1:8080/api/health/db
+# → {"dataStore":"mongo","mongo":true,...}
 ```
-To migrate to Postgres later, set `DATABASE_URL` in `.env`.
+Back up with Atlas snapshots or `mongodump`. Do not use `cad-database/` on the VPS.

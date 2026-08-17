@@ -40,6 +40,8 @@ module.exports = {
       restart_delay: 5000,
       env: {
         NODE_ENV: "production",
+        // GitHub/VPS uses MongoDB Atlas only — never local SQLite.
+        DATA_STORE: "mongo",
         // Port the API listens on. nginx proxies /api here.
         API_PORT: "8080",
         // Frontend port is unused in production (nginx serves static files),

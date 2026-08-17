@@ -1,4 +1,4 @@
-/** Active persistent data store. Prefers Mongo whenever MONGODB_URI is configured. */
+/** Active persistent data store. GitHub / VPS production is Mongo only. */
 export type DataStore = "sql" | "mongo";
 
 function isProductionRuntime(): boolean {
@@ -14,44 +14,33 @@ export function assertMongoConfigured(): void {
   const raw = (process.env.DATA_STORE ?? "").trim().toLowerCase();
   const hasUri = Boolean(mongoUri());
 
-  if (isProductionRuntime() && !hasUri) {
-    throw new Error(
-      "Production requires MONGODB_URI. Set DATA_STORE=mongo and configure MongoDB Atlas in .env.",
-    );
+  if (isProductionRuntime()) {
+    if (raw === "sql") {
+      throw new Error("GitHub/VPS production cannot use a local SQL database. Set DATA_STORE=mongo.");
+    }
+    if (!hasUri) {
+      throw new Error(
+        "Production requires MONGODB_URI. Local SQLite is not used on GitHub or the VPS.",
+      );
+    }
+    return;
   }
 
   if (raw === "mongo" && !hasUri) {
-    throw new Error(
-      "DATA_STORE=mongo requires MONGODB_URI. Configure Atlas or use DATA_STORE=sql for local development only.",
-    );
-  }
-
-  if (isProductionRuntime() && raw === "sql") {
-    throw new Error("Production cannot run with DATA_STORE=sql. Use DATA_STORE=mongo.");
+    throw new Error("DATA_STORE=mongo requires MONGODB_URI. Configure MongoDB Atlas in .env.");
   }
 }
 
 export function getDataStore(): DataStore {
   assertMongoConfigured();
 
+  if (isProductionRuntime()) return "mongo";
+
   const raw = (process.env.DATA_STORE ?? "").trim().toLowerCase();
   const hasUri = Boolean(mongoUri());
 
-  if (raw === "sql") {
-    if (isProductionRuntime()) {
-      throw new Error("DATA_STORE=sql is not permitted in production.");
-    }
-    return "sql";
-  }
-
-  if (raw === "mongo" || raw === "") {
-    if (hasUri) return "mongo";
-    if (isProductionRuntime()) {
-      throw new Error("Production requires MONGODB_URI when using MongoDB.");
-    }
-    return "sql";
-  }
-
+  if (raw === "sql") return "sql";
+  if (raw === "mongo" || raw === "") return hasUri ? "mongo" : "sql";
   return hasUri ? "mongo" : "sql";
 }
 
