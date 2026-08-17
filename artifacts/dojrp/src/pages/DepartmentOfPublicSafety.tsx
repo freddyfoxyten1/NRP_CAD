@@ -1350,7 +1350,7 @@ const AddOfficerModal = ({
 }) => {
   const [form, setForm] = useState<AddForm>({
     username: '', discord_username: '', discord_id: '',
-    dps_rank: 'Unranked', dps_role: '', callsign: '', status: 'Active', appointed_date: '',
+    dps_rank: '', dps_role: '', callsign: '', status: 'Active', appointed_date: '',
   });
   const [saving, setSaving]         = useState(false);
   const [suggestions, setSuggestions] = useState<UserHit[]>([]);
@@ -1398,6 +1398,9 @@ const AddOfficerModal = ({
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.username.trim()) return;
+    // A member whose rank does not exist gets pruned on the next sync, so the
+    // rank cannot be left unset.
+    if (!form.dps_rank.trim()) { toast.error('Pick a rank for this officer.'); return; }
     setSaving(true);
     try {
       await onAdd(form);
@@ -1474,7 +1477,7 @@ const AddOfficerModal = ({
             <div>
               <label className={labelCls}>DPS Rank</label>
               <select value={form.dps_rank} onChange={e => set('dps_rank', e.target.value)} className={selectCls}>
-                <option value="Unranked">Unranked</option>
+                <option value="" disabled>Select a rank…</option>
                 {(ranks.length > 0 ? ranks.map(r => r.name) : RANK_OPTIONS).map(r => (
                   <option key={r} value={r}>{r}</option>
                 ))}

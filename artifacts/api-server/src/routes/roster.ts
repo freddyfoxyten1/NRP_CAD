@@ -305,6 +305,43 @@ async function removeDpsRosterMember(profileId: number): Promise<void> {
   );
 }
 
+/**
+ * Drop roster rows that no longer point at a real rank.
+ *
+ * Members reference ranks by name, so a deleted or renamed rank leaves them
+ * stranded: they vanish from the roster but keep occupying the officers list.
+ *
+ * Deliberately does nothing when no ranks exist. A transient read failure or a
+ * half-configured department would otherwise look identical to "every member is
+ * orphaned" and wipe the whole roster. Clearing the last rank is an explicit
+ * action that already removes its members.
+ */
+async function pruneOrphanedDpsRosterMembers(): Promise<number> {
+  const ranksRes = await pool.query<{ name: string }>(`SELECT name FROM dps_ranks`);
+  if (ranksRes.rows.length === 0) return 0;
+
+  const validRanks = new Set(
+    ranksRes.rows.map(r => String(r.name ?? "").trim().toLowerCase()).filter(Boolean)
+  );
+  if (validRanks.size === 0) return 0;
+
+  const membersRes = await pool.query<{ profile_id: number; dps_rank: string | null }>(
+    `SELECT profile_id, dps_rank FROM dps_users`
+  );
+
+  let removed = 0;
+  for (const member of membersRes.rows) {
+    const rank = String(member.dps_rank ?? "").trim().toLowerCase();
+    if (rank && validRanks.has(rank)) continue;
+    await removeDpsRosterMember(Number(member.profile_id));
+    removed += 1;
+  }
+  if (removed > 0) {
+    console.info(`[dps-prune] removed ${removed} member(s) with no matching rank`);
+  }
+  return removed;
+}
+
 /** Migrate legacy single division_rank into dps_user_divisions (idempotent). */
 async function migrateLegacyDivisionAssignments(): Promise<void> {
   try {
@@ -1782,10 +1819,13 @@ router.patch("/roster/:id", async (req, res) => {
 // and a dps_users row is inserted for it.
 router.post("/roster", async (req, res) => {
   const { username, discord_username = "", discord_id = "",
-          dps_rank = "Unranked", dps_role = "", callsign = "4D-XX", status = "Active", appointed_date } =
+          dps_rank = "", dps_role = "", callsign = "4D-XX", status = "Active", appointed_date } =
     req.body as Record<string, string>;
 
   if (!username?.trim()) { res.status(400).json({ error: "Username is required." }); return; }
+  // Members are matched to ranks by name, and anyone on a rank that does not
+  // exist is pruned on the next sync — so refuse to create one.
+  if (!dps_rank?.trim()) { res.status(400).json({ error: "A rank is required." }); return; }
 
   try {
     const existing = await pool.query<{ id: number }>(
@@ -1939,15 +1979,23 @@ router.get("/roster/division-discord-roles", async (req, res) => {
 });
 
 // ── POST /roster/sync-discord-roles — manual trigger for DPS role sync ────────
-router.post("/roster/sync-discord-roles", async (_req, res) => {
+router.post("/roster/sync-discord-roles", async (req, res) => {
+  // Runs before the Discord calls so stranded members are still cleared when
+  // the guild fetch fails, and regardless of whether any rank is role-linked.
+  let pruned = 0;
+  try {
+    pruned = await pruneOrphanedDpsRosterMembers();
+  } catch (pruneErr) {
+    req.log.warn({ err: pruneErr }, "orphaned roster member prune failed");
+  }
   try {
     const members = await fetchDpsGuildMembers();
     await refreshCadAvatarsFromGuildMembers(members);
     const dps = await syncDpsDiscordRoles(members);
     const divisions = await syncDivisionDiscordRoles(members);
-    res.json({ ...dps, divisions });
+    res.json({ ...dps, removed: dps.removed + pruned, pruned, divisions });
   } catch (err) {
-    res.status(500).json({ error: "Sync failed." });
+    res.status(500).json({ error: "Sync failed.", pruned });
   }
 });
 
