@@ -127,7 +127,7 @@ export function personnelGroupLabelFromRank<
   return group.name;
 }
 
-/** Resolve roster title from API group_name or linked department rank metadata. */
+/** Resolve roster title from the member's current department rank only. */
 export function personnelGroupLabelForDisplay<
   T extends PersonnelRosterMember,
 >(
@@ -136,19 +136,7 @@ export function personnelGroupLabelForDisplay<
   groups: TitleGroup[],
   getRankName: (member: T) => string | null | undefined,
 ): string | null {
-  const fromRank = personnelGroupLabelFromRank(member, ranks, groups, getRankName);
-  if (fromRank) return fromRank;
-
-  const fromApi = personnelGroupLabel(member);
-  if (!fromApi) return null;
-
-  const safeGroups = groups.filter(g => !isCommunityTitle(g.name));
-  if (safeGroups.length === 0) return fromApi;
-
-  const matched = safeGroups.find(
-    g => g.name.trim().toLowerCase() === fromApi.toLowerCase(),
-  );
-  return matched?.name ?? fromApi;
+  return personnelGroupLabelFromRank(member, ranks, groups, getRankName);
 }
 
 /** Whether a member should appear on the department personnel roster display. */
@@ -188,11 +176,6 @@ export function buildPersonnelTitleGroups<
   for (const g of safeGroups) {
     titleOrder.set(g.name, { id: g.id, sort: g.sort_order });
   }
-  for (const m of eligible) {
-    const label = personnelGroupLabelForDisplay(m, ranks, groups, getRankName);
-    if (!label || titleOrder.has(label)) continue;
-    titleOrder.set(label, { id: null, sort: 999 });
-  }
 
   return [...titleOrder.entries()]
     .sort((a, b) => a[1].sort - b[1].sort || a[0].localeCompare(b[0]))
@@ -204,7 +187,8 @@ export function buildPersonnelTitleGroups<
         ranks,
         getRankName,
       ),
-    }));
+    }))
+    .filter(group => group.members.length > 0);
 }
 
 export type PersonnelRosterTitle<T> = {

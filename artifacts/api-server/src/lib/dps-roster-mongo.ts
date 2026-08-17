@@ -122,6 +122,9 @@ export async function listDpsPersonnelMongo(includeAll: boolean): Promise<Record
         ? String(group.name)
         : null;
 
+    // Public roster: only members whose rank exists in current Mongo Personnel Management.
+    if (!includeAll && (!rankMeta || !groupName)) continue;
+
     rows.push({
       id: profileId,
       username: asStringOrNull(d.username) ?? asStringOrNull(p.username) ?? "",

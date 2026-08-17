@@ -1273,7 +1273,9 @@ router.get("/roster", async (req, res) => {
         res.json(await loadDpsPersonnelViaMongo(includeAll));
         return;
       } catch (mongoErr) {
-        req.log.warn({ err: mongoErr }, "roster GET native Mongo failed — falling back to SQL bridge");
+        req.log.error({ err: mongoErr }, "roster GET native Mongo failed");
+        res.status(500).json({ error: "Unable to load roster." });
+        return;
       }
     }
 
