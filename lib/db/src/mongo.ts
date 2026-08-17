@@ -50,6 +50,15 @@ export async function connectMongo(): Promise<Db> {
 }
 
 export async function getDb(): Promise<Db> {
+  if (db) {
+    try {
+      await db.command({ ping: 1 });
+      return db;
+    } catch {
+      client = null;
+      db = null;
+    }
+  }
   return connectMongo();
 }
 

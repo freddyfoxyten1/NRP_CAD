@@ -6,7 +6,7 @@ import {
   dedupeRosterMembersById,
   type TitleGroup,
 } from "@/lib/roster-sort";
-import { normalizeRankGroupId } from "@/lib/roster-fetch";
+import { normalizeRankGroupId, fetchRosterArray } from "@/lib/roster-fetch";
 
 type RosterTab = "personnel" | "vehicles" | "equipment";
 
@@ -221,7 +221,7 @@ export default function DpsPublicRosterModal({
 
     let cancelled = false;
     Promise.all([
-      fetch(apiBase, { headers: { accept: "application/json" } }).then(r => r.ok ? r.json() : []),
+      fetchRosterArray<RosterMember>(apiBase, "roster"),
       fetch(`${apiBase}/groups`, { headers: { accept: "application/json" } }).then(r => r.ok ? r.json() : []),
       fetch(`${apiBase}/ranks`, { headers: { accept: "application/json" } }).then(r => r.ok ? r.json() : []),
       fetch(`${apiBase}/vehicles`, { headers: { accept: "application/json" } }).then(r => r.ok ? r.json() : []),

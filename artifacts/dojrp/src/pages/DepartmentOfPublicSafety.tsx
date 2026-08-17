@@ -297,7 +297,12 @@ function loadRosterMetadata() {
       fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks'),
       fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
       fetchRosterArray<DivisionRankRow>('/api/roster/division-ranks', 'division ranks'),
-    ]).then(([groups, ranks, divs, divRanks]) => ({ groups, ranks, divs, divRanks }));
+    ])
+      .then(([groups, ranks, divs, divRanks]) => ({ groups, ranks, divs, divRanks }))
+      .catch((err) => {
+        rosterMetadataPromise = null;
+        throw err;
+      });
   }
   return rosterMetadataPromise;
 }
@@ -1823,17 +1828,9 @@ const DepartmentOfPublicSafety = () => {
 
     void (async () => {
       try {
-        const [members, meta] = await Promise.all([
-          fetchRosterArray<RosterMember>('/api/roster', 'roster'),
-          loadRosterMetadata(),
-        ]);
+        const members = await fetchRosterArray<RosterMember>('/api/roster', 'roster');
         if (cancelled) return;
         setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
-        setGroups(meta.groups);
-        setRanks(meta.ranks);
-        setDivisionRanksForEdit(meta.divRanks);
-        setRosterDivisions(meta.divs);
-        setDivisionStats(s => ({ ...s, divisions: meta.divs.length, ranks: meta.divRanks.length }));
       } catch (err) {
         if (!cancelled) {
           setRoster([]);
@@ -1842,6 +1839,18 @@ const DepartmentOfPublicSafety = () => {
       } finally {
         if (!cancelled) setRosterLoading(false);
       }
+
+      if (cancelled) return;
+      void loadRosterMetadata()
+        .then((meta) => {
+          if (cancelled) return;
+          setGroups(meta.groups);
+          setRanks(meta.ranks);
+          setDivisionRanksForEdit(meta.divRanks);
+          setRosterDivisions(meta.divs);
+          setDivisionStats(s => ({ ...s, divisions: meta.divs.length, ranks: meta.divRanks.length }));
+        })
+        .catch(() => { /* metadata may already be loaded from mount */ });
     })();
 
     return () => { cancelled = true; };

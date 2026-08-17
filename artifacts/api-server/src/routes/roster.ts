@@ -1262,6 +1262,21 @@ async function loadDpsPersonnelViaMongo(includeAll: boolean): Promise<Record<str
   return formatDpsPersonnelRows(rows, assignmentMap);
 }
 
+async function loadDpsPersonnelViaMongoWithRetry(includeAll: boolean): Promise<Record<string, unknown>[]> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await loadDpsPersonnelViaMongo(includeAll);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 // ── GET personnel (pass ?all=1 to include inactive) ───────────────────────────
 // Only users with a dps_users row are department personnel.
 router.get("/roster", async (req, res) => {
@@ -1270,7 +1285,7 @@ router.get("/roster", async (req, res) => {
 
     if (isMongoStore()) {
       try {
-        res.json(await loadDpsPersonnelViaMongo(includeAll));
+        res.json(await loadDpsPersonnelViaMongoWithRetry(includeAll));
         return;
       } catch (mongoErr) {
         req.log.error({ err: mongoErr }, "roster GET native Mongo failed");
