@@ -292,7 +292,7 @@ const MemberPortalIndex = () => {
                       {
                         label: 'In-Game',
                         icon: Gamepad2,
-                        value: portalData?.stats.inGameCount ?? '—',
+                        value: portalData?.stats.inGameCount ?? '…',
                         color: 'border-[#1a2a38] text-[#4fc3f7]',
                       },
                     ].map(({ label, icon: Icon, value, color }) => (
