@@ -173,6 +173,8 @@ type RosterMember = {
     can_edit_roster?: boolean;
     can_edit_info?: boolean;
   }>;
+  /** Division ids where the member holds the linked membership Discord role. */
+  division_discord_links?: number[];
   staff_role?: string | null;
   status: string;
   appointed_date: string | null;
@@ -211,6 +213,9 @@ function normalizeRosterMember(m: RosterMember): RosterMember {
           can_edit_info: Boolean(a.can_edit_info),
         }))
       : m.division_assignments,
+    division_discord_links: Array.isArray(m.division_discord_links)
+      ? m.division_discord_links.map(Number)
+      : m.division_discord_links,
   };
 }
 
@@ -261,6 +266,17 @@ function divisionShortName(d: Pick<RosterDivision, 'name' | 'unit_key'>): string
 }
 
 function memberInDivision(m: RosterMember, d: RosterDivision): boolean {
+  const hasDiscordLink = Boolean(d.discord_role_id?.trim());
+  if (hasDiscordLink) {
+    if (Array.isArray(m.division_discord_links)) {
+      if (m.division_discord_links.includes(d.id)) return true;
+      if (m.division_discord_links.length > 0) return false;
+    }
+    if (Array.isArray(m.division_assignments) && m.division_assignments.some(a =>
+      a.division_id === d.id || a.division_name.toLowerCase() === d.name.toLowerCase()
+    )) return true;
+    return false;
+  }
   if (Array.isArray(m.division_assignments) && m.division_assignments.some(a =>
     a.division_id === d.id || a.division_name.toLowerCase() === d.name.toLowerCase()
   )) return true;
@@ -1819,9 +1835,17 @@ const DepartmentOfPublicSafety = () => {
 
     void (async () => {
       try {
-        const members = await fetchRosterArray<RosterMember>('/api/roster', 'roster');
+        const [members, meta] = await Promise.all([
+          fetchRosterArray<RosterMember>('/api/roster', 'roster'),
+          loadRosterMetadata(),
+        ]);
         if (cancelled) return;
         setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
+        setGroups(meta.groups);
+        setRanks(meta.ranks);
+        setDivisionRanksForEdit(meta.divRanks);
+        setRosterDivisions(meta.divs);
+        setDivisionStats({ divisions: meta.divs.length, ranks: meta.divRanks.length });
       } catch (err) {
         if (!cancelled) {
           setRoster([]);
@@ -1830,18 +1854,6 @@ const DepartmentOfPublicSafety = () => {
       } finally {
         if (!cancelled) setRosterLoading(false);
       }
-
-      if (cancelled) return;
-      void loadRosterMetadata()
-        .then((meta) => {
-          if (cancelled) return;
-          setGroups(meta.groups);
-          setRanks(meta.ranks);
-          setDivisionRanksForEdit(meta.divRanks);
-          setRosterDivisions(meta.divs);
-          setDivisionStats(s => ({ ...s, divisions: meta.divs.length, ranks: meta.divRanks.length }));
-        })
-        .catch(() => { /* metadata may already be loaded from mount */ });
     })();
 
     return () => { cancelled = true; };
