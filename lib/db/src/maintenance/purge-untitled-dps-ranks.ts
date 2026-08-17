@@ -11,12 +11,14 @@
  *
  * Dry run:  bun run --cwd ./lib/db purge:untitled-dps-ranks
  * Apply:    bun run --cwd ./lib/db purge:untitled-dps-ranks -- --apply
+ * Add --verbose to list each affected member instead of per-rank counts.
  */
 process.env.DATA_STORE = "mongo";
 
 import { closeMongo, connectMongo, getCollection } from "../mongo";
 
 const APPLY = process.argv.includes("--apply");
+const VERBOSE = process.argv.includes("--verbose");
 
 function normalizeGroupId(value: unknown): number | null {
   if (value == null || value === "") return null;
@@ -65,9 +67,21 @@ async function main(): Promise<void> {
   console.log(`titles: ${groupIds.size}`);
   console.log(`ranks: ${rankDocs.length} total, ${titledNames.size} kept by name, ${doomedRanks.length} docs to delete`);
   for (const d of doomedRanks) console.log(`  - rank id=${d.id} '${d.name}'`);
+
   console.log(`\nmembers: ${memberDocs.length} total, ${doomedMembers.length} to remove`);
-  for (const m of doomedMembers) {
-    console.log(`  - profile_id=${m.profile_id} '${m.username}' rank='${m.dps_rank ?? ""}'`);
+  if (VERBOSE) {
+    for (const m of doomedMembers) {
+      console.log(`  - profile_id=${m.profile_id} '${m.username}' rank='${m.dps_rank ?? ""}'`);
+    }
+  } else {
+    const perRank = new Map<string, number>();
+    for (const m of doomedMembers) {
+      const label = String(m.dps_rank ?? "").trim() || "(blank)";
+      perRank.set(label, (perRank.get(label) ?? 0) + 1);
+    }
+    for (const [label, count] of [...perRank].sort((a, b) => b[1] - a[1])) {
+      console.log(`  - ${count} on '${label}'`);
+    }
   }
 
   if (!APPLY) {
