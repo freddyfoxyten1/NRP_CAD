@@ -80,6 +80,15 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, 'dist/public'),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('pdfjs-dist') || id.includes('pdf.worker')) return 'pdfjs';
+          if (id.includes('@tiptap') || id.includes('prosemirror')) return 'tiptap';
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/')) return 'react-vendor';
+        },
+      },
+    },
   },
   server: {
     port,

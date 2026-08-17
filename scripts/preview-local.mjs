@@ -3,6 +3,7 @@
  * Default (preview / preview:edit / preview:live): unpublished UI + VPS Mongo.
  */
 import { execSync, spawn } from "node:child_process";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,37 @@ const repoEnv = {
 
 const children = [];
 let exiting = false;
+
+function dirNewestMtime(dir) {
+  let newest = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name === "dist") continue;
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      newest = Math.max(newest, dirNewestMtime(full));
+      continue;
+    }
+    newest = Math.max(newest, statSync(full).mtimeMs);
+  }
+  return newest;
+}
+
+function needsFrontendBuild() {
+  if (process.env.PREVIEW_FORCE_BUILD === "1") return true;
+  const distIndex = path.join(root, "artifacts/dojrp/dist/public/index.html");
+  if (!existsSync(distIndex)) return true;
+
+  const distMtime = statSync(distIndex).mtimeMs;
+  let srcMtime = dirNewestMtime(path.join(root, "artifacts/dojrp/src"));
+  for (const file of [
+    path.join(root, "artifacts/dojrp/vite.config.ts"),
+    path.join(root, "artifacts/dojrp/index.html"),
+    path.join(root, "artifacts/dojrp/tailwind.config.ts"),
+  ]) {
+    if (existsSync(file)) srcMtime = Math.max(srcMtime, statSync(file).mtimeMs);
+  }
+  return srcMtime > distMtime;
+}
 
 function probe(url) {
   return new Promise((resolve) => {
@@ -182,17 +214,20 @@ await (usingRemoteApi
   ? (console.log(`Using live VPS API (GitHub deploy data): ${PREVIEW_API_URL}`), Promise.resolve(true))
   : ensureApi());
 
-console.log("Building frontend…");
-try {
-  execSync("bun run --cwd ./artifacts/dojrp build", {
-    cwd: root,
-    stdio: "inherit",
-    env: repoEnv,
-    shell: true,
-  });
-} catch {
-  console.error("Frontend build failed.");
-  shutdown(1);
+const shouldBuildFrontend = needsFrontendBuild();
+console.log(shouldBuildFrontend ? "Building frontend…" : "Frontend build is up to date — skipping rebuild.");
+if (shouldBuildFrontend) {
+  try {
+    execSync("bun run --cwd ./artifacts/dojrp build", {
+      cwd: root,
+      stdio: "inherit",
+      env: repoEnv,
+      shell: true,
+    });
+  } catch {
+    console.error("Frontend build failed.");
+    shutdown(1);
+  }
 }
 
 if (!usingRemoteApi && !(await isApiHealthy())) {
