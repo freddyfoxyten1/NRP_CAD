@@ -1,3 +1,5 @@
+import http from 'node:http';
+import https from 'node:https';
 import path from 'path';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -28,6 +30,11 @@ function apiProxyOptions() {
     secure: previewApiUrl.startsWith('https://'),
     timeout: 120_000,
     proxyTimeout: 120_000,
+    // nginx on the VPS drops idle keep-alive sockets sooner than Node's default
+    // agent expects, so a reused socket fails with ECONNREFUSED on the next poll.
+    agent: apiTarget.startsWith('https://')
+      ? new https.Agent({ keepAlive: false })
+      : new http.Agent({ keepAlive: false }),
     configure: (proxy: { on: (event: string, fn: (...args: unknown[]) => void) => void }) => {
       proxy.on('proxyReq', (proxyReq: { setHeader: (name: string, value: string) => void }, req: { headers: { host?: string } }) => {
         const browserHost = req.headers.host;
