@@ -34,6 +34,7 @@ import { useMemberPortal } from './member-portal-shared';
 const DPS_SEAL_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}dps-seal.png`;
 const DPH_SEAL_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}dph-seal.png`;
 const DOC_SEAL_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}doc-seal.png`;
+const IAB_SEAL_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}iab-seal.png?v=4`;
 const CIVILIAN_SEAL_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}civilian-seal.png`;
 
 type DepartmentEntry = {
@@ -92,7 +93,7 @@ const DEPARTMENTS: DepartmentEntry[] = [
     short: 'IAB',
     description: 'Professional standards and oversight — opening soon.',
     icon: Scale,
-    placeholder: true,
+    logoUrl: IAB_SEAL_URL,
     accent: '#f4c542',
     glow: 'rgba(244,197,66,0.18)',
     live: false,

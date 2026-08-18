@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, LogOut, Scale, Shield } from 'lucide-react';
+import { LayoutDashboard, LogOut, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
-import DojrpShield from '@/components/shared/DojrpShield';
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
 import { isSuperAdminSession } from '@/lib/superadmin';
+import { IAB_SEAL_URL } from '@/pages/public-index-skin';
+
+const IAB_LOGO_CLASS = 'shrink-0 object-contain';
 
 const DpsInternalAffairs = () => {
   const navigate = useNavigate();
@@ -75,7 +77,7 @@ const DpsInternalAffairs = () => {
       <div className="flex min-h-screen flex-col lg:flex-row">
         <aside className="border-b border-[#131f30] bg-[#02060b] px-5 py-5 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-[265px] lg:flex-col lg:border-b-0 lg:border-r lg:border-[#131f30]">
           <div className="flex items-center gap-3">
-            <DojrpShield className="h-10 w-10" />
+            <img src={IAB_SEAL_URL} alt="" className={`h-10 w-10 ${IAB_LOGO_CLASS}`} />
             <div>
               <p className="text-lg font-black tracking-[-0.04em]">
                 <DojrpLogo />
@@ -95,7 +97,7 @@ const DpsInternalAffairs = () => {
               type="button"
               className="flex items-center gap-2.5 rounded-md border-l-2 border-[#f4c542] bg-[#131002] px-4 py-3 text-left text-sm font-semibold text-[#f4c542]"
             >
-              <Scale className="h-4 w-4 shrink-0" />
+              <img src={IAB_SEAL_URL} alt="" className={`h-4 w-4 ${IAB_LOGO_CLASS}`} />
               Overview
             </button>
           </nav>
@@ -150,9 +152,7 @@ const DpsInternalAffairs = () => {
 
           <div className="px-5 py-8 sm:px-8">
             <div className="flex min-h-[320px] flex-col items-center justify-center gap-4 rounded-2xl border border-[#131f30] bg-[#070d16] text-center">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[#f4c542]/20 bg-[#f4c542]/8">
-                <Scale className="h-8 w-8 text-[#f4c542]/70" />
-              </div>
+              <img src={IAB_SEAL_URL} alt="" className={`h-20 w-20 ${IAB_LOGO_CLASS}`} />
               <div>
                 <p className="text-sm font-black text-white">Internal Affairs workspace</p>
                 <p className="mt-1 max-w-md text-xs text-[#526179]">
