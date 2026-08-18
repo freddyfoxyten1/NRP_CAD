@@ -269,8 +269,8 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
 
   const result = await pool.query<CadSessionPayload>(
     `SELECT p.id, p.username, p.email, p.rank, p.role, p.status,
-            COALESCE(NULLIF(d.dps_rank, ''), p.dps_rank) AS dps_rank,
-            COALESCE(NULLIF(d.dps_role, ''), p.dps_role) AS dps_role,
+            NULLIF(d.dps_rank, '') AS dps_rank,
+            NULLIF(d.dps_role, '') AS dps_role,
             p.staff_rank, p.staff_role,
             NULLIF(p.discord_id, '') AS discord_id,
             NULLIF(p.avatar_hash, '') AS avatar_hash,

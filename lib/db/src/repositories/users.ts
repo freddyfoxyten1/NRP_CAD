@@ -113,8 +113,8 @@ export async function withDpsRanks(
 ): Promise<Omit<UserDoc, "_id"> & { dps_rank: string | null; dps_role: string | null }> {
   const dpsCol = await getCollection<{ profile_id: number; dps_rank?: string | null; dps_role?: string | null }>("dps_users");
   const dps = await dpsCol.findOne({ profile_id: user.id });
-  const dpsRank = (dps?.dps_rank && String(dps.dps_rank).trim()) || user.dps_rank || null;
-  const dpsRole = (dps?.dps_role && String(dps.dps_role).trim()) || user.dps_role || null;
+  const dpsRank = dps?.dps_rank && String(dps.dps_rank).trim() ? String(dps.dps_rank).trim() : null;
+  const dpsRole = dps?.dps_role && String(dps.dps_role).trim() ? String(dps.dps_role).trim() : null;
   return { ...user, dps_rank: dpsRank, dps_role: dpsRole };
 }
 
