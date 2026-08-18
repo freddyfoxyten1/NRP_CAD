@@ -84,6 +84,8 @@ export { isUniqueViolation } from "./sql-errors";
 
 export * as mediaRepo from "./repositories/media";
 export * as resourcesRepo from "./repositories/resources";
+export type { ResourceDepartment } from "./repositories/resources";
+export * as googleIntegrationsRepo from "./repositories/google-integrations";
 export * as settingsRepo from "./repositories/settings";
 export * as auditRepo from "./repositories/audit";
 export * as usersRepo from "./repositories/users";

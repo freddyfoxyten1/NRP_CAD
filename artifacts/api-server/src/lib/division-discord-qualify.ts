@@ -119,6 +119,30 @@ export function divisionMembershipIdsFromRoles(
   return ids;
 }
 
+export type DivisionDiscordEnrichment = {
+  map: Map<string, number[]>;
+  warm: boolean;
+  linkedDivisionIds: Set<number>;
+};
+
+export function divisionDiscordLinksForMember(
+  discordId: string,
+  assignments: Array<{ division_id: number }>,
+  enrichment: DivisionDiscordEnrichment,
+): number[] {
+  if (!discordId) return [];
+  if (enrichment.warm) {
+    return enrichment.map.get(discordId) ?? [];
+  }
+  if (enrichment.map.size > 0) {
+    return enrichment.map.get(discordId) ?? [];
+  }
+  if (enrichment.linkedDivisionIds.size === 0) return [];
+  return assignments
+    .filter(a => enrichment.linkedDivisionIds.has(a.division_id))
+    .map(a => a.division_id);
+}
+
 /** Build discord_id → linked division ids from a guild member snapshot. */
 export function buildDivisionDiscordMembershipMap(
   members: Array<{ user: { id: string }; roles: string[] }>,

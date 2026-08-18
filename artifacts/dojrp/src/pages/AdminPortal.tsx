@@ -1,18 +1,24 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   nestedPortalSectionPath,
   parseNestedPortalSection,
   portalSectionPath,
   usePortalSection,
 } from '@/hooks/usePortalSection';
-import { BookOpen, Car, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Crosshair, ExternalLink, FileText, GripVertical, Image as ImageIcon, Info, Link, Lock, LogOut, Megaphone, Monitor, Pencil, Plus, RefreshCw, Scale, Search, Settings, Shield, ShoppingBag, Terminal as TerminalIcon, Trash2, Upload, User, Users, X } from 'lucide-react';
+import { BookOpen, Car, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Crosshair, ExternalLink, FileText, Globe, GripVertical, Image as ImageIcon, Info, Link, Lock, LogOut, Megaphone, Monitor, Pencil, Plus, RefreshCw, Scale, Search, Settings, Shield, ShoppingBag, Terminal as TerminalIcon, Trash2, Upload, User, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
 import DojrpShield from '@/components/shared/DojrpShield';
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
 import DocumentEditor from '@/components/editor/DocumentEditor';
 import PdfViewer from '@/components/shared/PdfViewer';
+import GoogleDocPicker, { type GoogleDocSelection } from '@/components/resources/GoogleDocPicker';
+import { googleFileIdFromResource, isPdfLikeResource, resourceFileUrl, resourceTypeLabel } from '@/lib/resource-type';
+import { persistGoogleDocResource } from '@/lib/persist-google-doc';
+import { readApiJson } from '@/lib/fetch-api-json';
+import { parseResourcePathname } from '@/lib/resource-url';
+import { useResourceDeepLink } from '@/hooks/useResourceDeepLink';
 import StoreProductCard, { type StorePriceIcon, type StoreProduct } from '@/components/shared/StoreProductCard';
 import StoreDescriptionEditor from '@/components/shared/StoreDescriptionEditor';
 import { ContentBlocksEditor, renderContentBlocks, type ContentBlock } from '@/components/shared/ContentBlocks';
@@ -717,6 +723,7 @@ const SrRankEditModal = ({ rank, discordRoles, onClose, onSaved }: {
 
 const AdminPortal = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [activeTab, setActiveTab, rawSection] = usePortalSection<AdminTab>({
     base: 'admin',
     valid: ADMIN_SECTIONS,
@@ -734,6 +741,9 @@ const AdminPortal = () => {
     if (next) navigate(nestedPortalSectionPath('admin', 'logs', next));
     else navigate(portalSectionPath('admin', 'logs'));
   }, [navigate]);
+  const pathnameResourceLink = useMemo(() => parseResourcePathname(location.pathname), [location.pathname]);
+  const showStaffResourcesTab = activeTab === 'staff-resources'
+    || (pathnameResourceLink?.department === 'staff' && pathnameResourceLink.mode === 'edit');
   const [members, setMembers] = useState<AdminMember[]>([]);
   // Guild-member view (Discord members merged with CAD profiles + staff groups)
   const [guildMembers,        setGuildMembers]        = useState<GuildMember[]>([]);
@@ -789,6 +799,8 @@ const AdminPortal = () => {
     title: string;
     type: string;
     logo_url: string | null;
+    google_file_id?: string | null;
+    header_config?: unknown;
     created_by: string | null;
     created_at: string;
     updated_at: string;
@@ -798,8 +810,9 @@ const AdminPortal = () => {
   const [staffResourceDeletingId, setStaffResourceDeletingId] = useState<number | null>(null);
   const [staffAddStep, setStaffAddStep] = useState<0 | 1 | 2>(0);
   const [staffNewTitle, setStaffNewTitle] = useState('');
-  const [staffNewType, setStaffNewType] = useState<'document' | 'file'>('document');
+  const [staffNewType, setStaffNewType] = useState<'document' | 'file' | 'google_doc'>('document');
   const [staffUploadFile, setStaffUploadFile] = useState<File | null>(null);
+  const [staffGoogleDoc, setStaffGoogleDoc] = useState<GoogleDocSelection | null>(null);
   const [staffCreating, setStaffCreating] = useState(false);
   const [staffUploadStatus, setStaffUploadStatus] = useState<string | null>(null);
   const [staffOpenDocId, setStaffOpenDocId] = useState<number | null>(null);
@@ -1016,9 +1029,42 @@ const AdminPortal = () => {
   };
 
   useEffect(() => {
-    if (activeTab !== 'staff-resources') return;
+    if (!showStaffResourcesTab) return;
     void fetchStaffResources();
-  }, [activeTab]);
+  }, [showStaffResourcesTab]);
+
+  const openStaffResourceState = useCallback((r: StaffResourceRow, canEdit: boolean) => {
+    if (isPdfLikeResource(r)) {
+      setStaffOpenPdf(r);
+      setStaffOpenDocId(null);
+      setStaffOpenDocCanEdit(false);
+      return;
+    }
+    setStaffOpenPdf(null);
+    setStaffOpenDocId(r.id);
+    setStaffOpenDocCanEdit(canEdit);
+  }, []);
+
+  const { openResourceUrl: openStaffResourceUrl, closeResourceUrl: closeStaffResourceUrl } = useResourceDeepLink({
+    department: 'staff',
+    resources: staffResources,
+    resourcesLoaded: !staffResourcesLoading,
+    onOpen: openStaffResourceState,
+    closePath: '/admin_staff-resources',
+  });
+
+  const handleOpenStaffResource = (r: StaffResourceRow, canEdit: boolean) => {
+    openStaffResourceUrl(r, canEdit);
+    openStaffResourceState(r, canEdit);
+  };
+
+  const handleCloseStaffResource = () => {
+    setStaffOpenPdf(null);
+    setStaffOpenDocId(null);
+    setStaffOpenDocCanEdit(false);
+    closeStaffResourceUrl();
+    void fetchStaffResources();
+  };
 
   useEffect(() => {
     if (!currentAdmin) return;
@@ -1458,6 +1504,7 @@ const AdminPortal = () => {
     setStaffNewTitle('');
     setStaffNewType('document');
     setStaffUploadFile(null);
+    setStaffGoogleDoc(null);
     setStaffUploadStatus(null);
     setStaffCreating(false);
   };
@@ -1479,11 +1526,34 @@ const AdminPortal = () => {
       const created = (await res.json()) as StaffResourceRow;
       resetStaffAddDialog();
       await fetchStaffResources();
-      setStaffOpenDocId(created.id);
-      setStaffOpenDocCanEdit(true);
+      handleOpenStaffResource(created, true);
       toast.success('Document created.');
     } catch {
       toast.error('Failed to create document.');
+    } finally {
+      setStaffCreating(false);
+    }
+  };
+
+  const handleCreateStaffGoogleResource = async () => {
+    const title = staffNewTitle.trim();
+    if (!title || !staffGoogleDoc) return;
+    setStaffCreating(true);
+    try {
+      const body = await persistGoogleDocResource({
+        department: 'staff',
+        title: title || staffGoogleDoc.title,
+        createdBy: currentAdmin?.username ?? 'Admin',
+        fileId: staffGoogleDoc.fileId,
+        url: staffGoogleDoc.url,
+        adminCode,
+      });
+      resetStaffAddDialog();
+      await fetchStaffResources();
+      handleOpenStaffResource(body as StaffResourceRow, true);
+      toast.success('Google Doc saved.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save Google Doc.');
     } finally {
       setStaffCreating(false);
     }
@@ -1790,6 +1860,7 @@ const AdminPortal = () => {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify({ id: session.id, email: session.email }),
+          signal: AbortSignal.timeout(6_000),
         });
         if (statusRes.ok) {
           const status = await statusRes.json() as { active?: boolean; account?: CadSession };
@@ -2807,7 +2878,7 @@ const AdminPortal = () => {
     : activeTab === 'staff-roster' ? staffRosterLoading
     : activeTab === 'information-support' ? infoSupportLoading
     : activeTab === 'terms-privacy' ? legalLoading
-    : activeTab === 'staff-resources' ? staffResourcesLoading
+    : showStaffResourcesTab ? staffResourcesLoading
     : activeTab === 'gallery' ? galleryLoading
     : activeTab === 'store' ? storeLoading
     : activeTab === 'logs' ? (logsSubTab !== null && auditLogsLoading)
@@ -4094,7 +4165,7 @@ const AdminPortal = () => {
                 )}
               </section>
             )}
-            {activeTab === 'staff-resources' && (
+            {showStaffResourcesTab && (
               <section className="space-y-5">
                 <div className="rounded-xl border border-[#131f30] bg-[#070d16] p-5 shadow-[0_22px_55px_rgba(0,0,0,0.22)] sm:p-7">
                   <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
@@ -4135,7 +4206,7 @@ const AdminPortal = () => {
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-black text-white">{r.title}</p>
                             <p className="text-[10px] text-[#3f5470]">
-                              {r.type === 'pdf' ? 'PDF' : 'Document'} · Updated{' '}
+                              {resourceTypeLabel(r)} · Updated{' '}
                               {new Date(r.updated_at).toLocaleDateString('en-US', {
                                 month: 'short', day: 'numeric', year: 'numeric',
                               })}
@@ -4143,16 +4214,10 @@ const AdminPortal = () => {
                           </div>
                           <button
                             type="button"
-                            onClick={() => {
-                              if (r.type === 'pdf') setStaffOpenPdf(r);
-                              else {
-                                setStaffOpenDocId(r.id);
-                                setStaffOpenDocCanEdit(true);
-                              }
-                            }}
+                            onClick={() => handleOpenStaffResource(r, !isPdfLikeResource(r))}
                             className="rounded-lg border border-[#ff5d5d]/30 bg-[#ff5d5d]/8 px-3 py-1.5 text-[11px] font-black text-[#ff7070] hover:bg-[#ff5d5d]/15"
                           >
-                            {r.type === 'pdf' ? 'View' : 'Edit'}
+                            {isPdfLikeResource(r) ? 'View' : 'Edit'}
                           </button>
                           <button
                             type="button"
@@ -5206,11 +5271,7 @@ const AdminPortal = () => {
           resourceId={staffOpenDocId}
           canEdit={staffOpenDocCanEdit}
           apiBase="/api/staff/resources"
-          onClose={() => {
-            setStaffOpenDocId(null);
-            setStaffOpenDocCanEdit(false);
-            void fetchStaffResources();
-          }}
+          onClose={handleCloseStaffResource}
         />
       )}
 
@@ -5220,7 +5281,7 @@ const AdminPortal = () => {
             <p className="truncate text-sm font-black text-white">{staffOpenPdf.title}</p>
             <button
               type="button"
-              onClick={() => setStaffOpenPdf(null)}
+              onClick={handleCloseStaffResource}
               className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white"
               aria-label="Close"
             >
@@ -5228,8 +5289,9 @@ const AdminPortal = () => {
             </button>
           </div>
           <PdfViewer
-            fileUrl={`/api/staff/resources/${staffOpenPdf.id}/file`}
+            fileUrl={resourceFileUrl('staff', staffOpenPdf.id, staffOpenPdf)}
             downloadName={`${staffOpenPdf.title}.pdf`}
+            liveRefreshMs={googleFileIdFromResource(staffOpenPdf) || staffOpenPdf.type === 'google_doc' ? 45_000 : undefined}
           />
         </div>
       )}
@@ -5271,8 +5333,8 @@ const AdminPortal = () => {
       )}
 
       {staffAddStep === 2 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-sm rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-black text-white">{staffNewTitle}</h3>
@@ -5283,10 +5345,10 @@ const AdminPortal = () => {
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="mb-4 grid grid-cols-2 gap-2">
+            <div className="mb-4 grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => { setStaffNewType('document'); setStaffUploadFile(null); }}
+                onClick={() => { setStaffNewType('document'); setStaffUploadFile(null); setStaffGoogleDoc(null); }}
                 className={`rounded-xl border px-3 py-4 text-center transition-colors ${
                   staffNewType === 'document'
                     ? 'border-[#ff5d5d]/50 bg-[#ff5d5d]/10 text-[#ff7070]'
@@ -5298,7 +5360,7 @@ const AdminPortal = () => {
               </button>
               <button
                 type="button"
-                onClick={() => setStaffNewType('file')}
+                onClick={() => { setStaffNewType('file'); setStaffGoogleDoc(null); }}
                 className={`rounded-xl border px-3 py-4 text-center transition-colors ${
                   staffNewType === 'file'
                     ? 'border-[#ff5d5d]/50 bg-[#ff5d5d]/10 text-[#ff7070]'
@@ -5307,6 +5369,18 @@ const AdminPortal = () => {
               >
                 <Upload className="mx-auto mb-2 h-5 w-5" />
                 <p className="text-[10px] font-black uppercase tracking-widest">PDF / DOCX</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setStaffNewType('google_doc'); setStaffUploadFile(null); }}
+                className={`rounded-xl border px-3 py-4 text-center transition-colors ${
+                  staffNewType === 'google_doc'
+                    ? 'border-[#ff5d5d]/50 bg-[#ff5d5d]/10 text-[#ff7070]'
+                    : 'border-[#1f3050] text-[#526179] hover:text-white'
+                }`}
+              >
+                <Globe className="mx-auto mb-2 h-5 w-5" />
+                <p className="text-[10px] font-black uppercase tracking-widest">Google Doc</p>
               </button>
             </div>
             {staffNewType === 'file' && (
@@ -5320,6 +5394,11 @@ const AdminPortal = () => {
                 />
               </label>
             )}
+            {staffNewType === 'google_doc' && (
+              <div className="mb-4">
+                <GoogleDocPicker createdBy={currentAdmin?.username ?? 'Admin'} onChange={setStaffGoogleDoc} />
+              </div>
+            )}
             <div className="flex gap-3">
               <button type="button" onClick={() => setStaffAddStep(1)}
                 className="h-10 flex-1 rounded-lg border border-[#1e2d42] text-xs font-bold text-[#a8b7cd] hover:bg-white/5">
@@ -5330,13 +5409,14 @@ const AdminPortal = () => {
                 disabled={staffCreating || (staffNewType === 'file' && !staffUploadFile)}
                 onClick={() => {
                   if (staffNewType === 'file') void handleUploadStaffResource();
+                  else if (staffNewType === 'google_doc') void handleCreateStaffGoogleResource();
                   else void handleCreateStaffDocument();
                 }}
                 className="h-10 flex-1 rounded-lg bg-[#ff5d5d] text-xs font-black text-white hover:bg-[#ff7474] disabled:opacity-40"
               >
                 {staffCreating
                   ? (staffUploadStatus ?? 'Creating…')
-                  : staffNewType === 'file' ? 'Upload →' : 'Create & Edit →'}
+                  : staffNewType === 'file' ? 'Upload →' : staffNewType === 'google_doc' ? 'Link →' : 'Create & Edit →'}
               </button>
             </div>
           </div>

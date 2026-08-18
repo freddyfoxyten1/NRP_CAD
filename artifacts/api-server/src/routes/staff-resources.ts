@@ -9,6 +9,7 @@ import multer from "multer";
 import { pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 import { ConversionError, convertDocxToPdf, isDocx, isLegacyDoc, isPdf } from "../lib/docx-to-pdf";
+import { sanitizeResourceForClient, tryServeGoogleDocFile } from "../lib/google-doc-resource";
 
 const router = Router();
 const ADMIN_CODE = process.env.ADMIN_PORTAL_CODE ?? "ADMIN2026";
@@ -42,11 +43,12 @@ const parseJsonField = (value: unknown, fallback: unknown = {}) => {
   return fallback;
 };
 
-const normalizeResourceRow = (row: Record<string, unknown>) => ({
-  ...row,
-  header_config: parseJsonField(row.header_config, {}),
-  content: parseJsonField(row.content, {}),
-});
+const normalizeResourceRow = (row: Record<string, unknown>) =>
+  sanitizeResourceForClient({
+    ...row,
+    header_config: parseJsonField(row.header_config, {}),
+    content: parseJsonField(row.content, {}),
+  });
 
 (async () => {
   try {
@@ -66,13 +68,16 @@ const normalizeResourceRow = (row: Record<string, unknown>) => ({
     `);
     await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS header_config jsonb NOT NULL DEFAULT '{}'`);
     await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS file_data bytea`);
+    await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
+    await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
+    await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
   } catch (e) {
     console.error("staff_resources migration failed:", e);
   }
 })();
 
-const RESOURCE_LIST_COLS = `id, title, type, logo_url, created_by, created_at, updated_at`;
-const RESOURCE_DETAIL_COLS = `id, title, type, logo_url, header_config, content, created_by, created_at, updated_at`;
+const RESOURCE_LIST_COLS = `id, title, type, logo_url, header_config, created_by, created_at, updated_at, google_file_id, google_integration_id, google_modified_time`;
+const RESOURCE_DETAIL_COLS = `id, title, type, logo_url, header_config, content, created_by, created_at, updated_at, google_file_id, google_integration_id, google_modified_time`;
 
 /** GET /staff/resources — list (no content blob) */
 router.get("/staff/resources", async (req, res) => {
@@ -118,6 +123,7 @@ router.get("/staff/resources/:id/file", async (req, res) => {
     return;
   }
   try {
+    if (await tryServeGoogleDocFile(req, res, "staff", id)) return;
     const { isMongoStore, resourcesRepo } = await import("@workspace/db");
     if (isMongoStore()) {
       const file = await resourcesRepo.getResourceFile("staff", id);

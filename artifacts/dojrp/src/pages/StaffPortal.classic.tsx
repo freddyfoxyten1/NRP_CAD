@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePortalSection } from '@/hooks/usePortalSection';
 import { BookOpen, CalendarDays, ChevronDown, ChevronRight, FileText, LayoutDashboard, LogOut, MapPin, Pencil, Plus, Search, Shield, Trash2, Users, X } from 'lucide-react';
@@ -8,6 +8,10 @@ import DojrpShield from '@/components/shared/DojrpShield';
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
 import DocumentEditor from '@/components/editor/DocumentEditor';
 import PdfViewer from '@/components/shared/PdfViewer';
+import { googleFileIdFromResource, isPdfLikeResource, resourceFileUrl, resourceTypeLabel } from '@/lib/resource-type';
+import { parseResourcePathname } from '@/lib/resource-url';
+import { useResourceDeepLink } from '@/hooks/useResourceDeepLink';
+import { useLocation } from 'react-router-dom';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { getStaffRosterTitle, getStaffSidebarTitle } from '@/lib/display-rank';
@@ -38,6 +42,8 @@ type StaffResource = {
   title: string;
   type: string;
   logo_url: string | null;
+  google_file_id?: string | null;
+  header_config?: unknown;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -123,6 +129,7 @@ const Avatar = ({ name, discordId, avatarHash, size = 'sm' }: { name: string; di
 // ── Main page ──────────────────────────────────────────────────────────────────
 const StaffPortalClassic = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [session,     setSession]     = useState<CadSession | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -131,7 +138,14 @@ const StaffPortalClassic = () => {
     base: 'staff',
     valid: ['roster', 'resources', 'events'] as const,
     defaultSection: 'roster',
+    resolveParent: raw =>
+      raw.startsWith('resources-') || raw.startsWith('public_resource_') || raw.startsWith('edit_resource_')
+        ? 'resources'
+        : null,
   });
+  const pathnameResourceLink = useMemo(() => parseResourcePathname(location.pathname), [location.pathname]);
+  const showResourcesTab = activeTab === 'resources'
+    || (pathnameResourceLink?.department === 'staff' && pathnameResourceLink.mode === 'public');
 
   // ── Roster state ──────────────────────────────────────────────────────────
   const [groups,       setGroups]       = useState<StaffGroup[]>([]);
@@ -283,9 +297,41 @@ const StaffPortalClassic = () => {
   };
 
   useEffect(() => {
-    if (activeTab !== 'resources') return;
+    if (!showResourcesTab) return;
     void fetchResources();
-  }, [activeTab]);
+  }, [showResourcesTab]);
+
+  const openResourceState = useCallback((r: StaffResource) => {
+    if (isPdfLikeResource(r)) {
+      setOpenPdf(r);
+      setOpenDocId(null);
+      return;
+    }
+    setOpenPdf(null);
+    setOpenDocId(r.id);
+  }, []);
+
+  const onStaffResourceDeepLink = useCallback((r: StaffResource) => {
+    openResourceState(r);
+  }, [openResourceState]);
+
+  const { openResourceUrl, closeResourceUrl } = useResourceDeepLink({
+    department: 'staff',
+    resources,
+    resourcesLoaded: !resourcesLoading,
+    onOpen: onStaffResourceDeepLink,
+  });
+
+  const handleOpenResource = (r: StaffResource) => {
+    openResourceUrl(r, false);
+    openResourceState(r);
+  };
+
+  const handleCloseResource = () => {
+    setOpenPdf(null);
+    setOpenDocId(null);
+    closeResourceUrl();
+  };
 
   const fetchEvents = async () => {
     setEventsLoading(true);
@@ -395,7 +441,7 @@ const StaffPortalClassic = () => {
 
   const pageLoading = authLoading
     || (activeTab === 'roster' && dataLoading)
-    || (activeTab === 'resources' && resourcesLoading)
+    || (showResourcesTab && resourcesLoading)
     || (activeTab === 'events' && eventsLoading);
 
   const inputCls = 'h-10 w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-3 text-sm font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#ff5d5d] transition-colors';
@@ -628,7 +674,7 @@ const StaffPortalClassic = () => {
         )}
 
         {/* ─── RESOURCES TAB (view only) ─────────────────────────────────────── */}
-        {activeTab === 'resources' && (
+        {showResourcesTab && (
           <div className="flex-1 px-8 py-9">
             {pageLoading ? (
               <PageLoadingScreen loading accent="#ff7070" />
@@ -661,10 +707,7 @@ const StaffPortalClassic = () => {
                       <button
                         key={r.id}
                         type="button"
-                        onClick={() => {
-                          if (r.type === 'pdf') setOpenPdf(r);
-                          else setOpenDocId(r.id);
-                        }}
+                          onClick={() => handleOpenResource(r)}
                         className="group relative flex flex-col gap-3 rounded-2xl border border-[#1e2d42] bg-[#0d1422] p-6 text-left shadow-[0_8px_24px_rgba(0,0,0,0.2)] transition-all hover:border-[#ff5d5d]/40 hover:shadow-[0_12px_32px_rgba(0,0,0,0.3)]"
                       >
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#ff5d5d]/20 bg-[#ff5d5d]/8">
@@ -673,7 +716,7 @@ const StaffPortalClassic = () => {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-black text-white">{r.title}</p>
                           <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
-                            {r.type === 'pdf' ? 'PDF' : 'Document'}
+                            {resourceTypeLabel(r)}
                           </p>
                         </div>
                         <p className="text-[10px] text-[#3f5470]">
@@ -943,7 +986,7 @@ const StaffPortalClassic = () => {
           resourceId={openDocId}
           canEdit={false}
           apiBase="/api/staff/resources"
-          onClose={() => setOpenDocId(null)}
+          onClose={handleCloseResource}
         />
       )}
 
@@ -953,7 +996,7 @@ const StaffPortalClassic = () => {
             <p className="truncate text-sm font-black text-white">{openPdf.title}</p>
             <button
               type="button"
-              onClick={() => setOpenPdf(null)}
+              onClick={handleCloseResource}
               className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white"
               aria-label="Close"
             >
@@ -961,8 +1004,9 @@ const StaffPortalClassic = () => {
             </button>
           </div>
           <PdfViewer
-            fileUrl={`/api/staff/resources/${openPdf.id}/file`}
+            fileUrl={resourceFileUrl('staff', openPdf.id, openPdf)}
             downloadName={`${openPdf.title}.pdf`}
+            liveRefreshMs={googleFileIdFromResource(openPdf) || openPdf.type === 'google_doc' ? 45_000 : undefined}
           />
         </div>
       )}

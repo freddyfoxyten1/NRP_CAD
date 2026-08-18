@@ -7,7 +7,8 @@
     "dev": "bun run build && bun run start",
     "build": "bun ./build.mjs",
     "start": "bun --preload ../../scripts/load-env.mjs ./dist/index.mjs",
-    "typecheck": "bunx tsc -p tsconfig.json --noEmit"
+    "typecheck": "bunx tsc -p tsconfig.json --noEmit",
+    "test": "bun test src/lib/google-oauth.test.ts src/lib/google-doc-resource.test.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

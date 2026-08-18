@@ -27,6 +27,9 @@ export type ResourceDoc = {
   allowed_dph_ranks?: string | null;
   created_by?: string | null;
   sort_order?: number | null;
+  google_file_id?: string | null;
+  google_integration_id?: number | null;
+  google_modified_time?: string | null;
   created_at: string;
   updated_at?: string;
   deleted_at?: string | null;

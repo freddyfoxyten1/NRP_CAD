@@ -8,11 +8,13 @@ import { buildLinkedRankByRoleId, pickHighestLinkedDiscordRole } from "../lib/di
 import {
   buildDivisionDiscordMembershipMap,
   desiredDivisionAssignmentsFromRoles,
+  divisionDiscordLinksForMember,
   isDivisionUnrankedRank,
   loadDivisionLinkConfig,
   mergeDivisionAssignmentsFromDiscord,
   pruneDivisionRosterAssignments,
   validateLinkedDivisionMemberAdd,
+  type DivisionDiscordEnrichment,
   type DivisionLinkConfig,
 } from "../lib/division-discord-qualify.js";
 import {
@@ -461,12 +463,6 @@ const divisionDiscordMembershipCache: {
 const DIVISION_MEMBERSHIP_MAP_TTL_MS = 5 * 60 * 1000;
 let _membershipCacheRefreshRunning: Promise<void> | null = null;
 
-type DivisionDiscordEnrichment = {
-  map: Map<string, number[]>;
-  warm: boolean;
-  linkedDivisionIds: Set<number>;
-};
-
 function rememberDivisionGuildMembers(members: DpsGuildMember[]): DpsGuildMember[] {
   divisionGuildMembersCache.members = members;
   divisionGuildMembersCache.fetchedAt = Date.now();
@@ -546,24 +542,6 @@ async function getDivisionDiscordEnrichmentForRoster(): Promise<DivisionDiscordE
     warm: divisionDiscordMembershipCache.warm,
     linkedDivisionIds,
   };
-}
-
-function divisionDiscordLinksForMember(
-  discordId: string,
-  assignments: DivisionAssignment[],
-  enrichment: DivisionDiscordEnrichment,
-): number[] {
-  if (!discordId) return [];
-  if (enrichment.warm) {
-    return enrichment.map.get(discordId) ?? [];
-  }
-  if (enrichment.map.size > 0) {
-    return enrichment.map.get(discordId) ?? [];
-  }
-  if (enrichment.linkedDivisionIds.size === 0) return [];
-  return assignments
-    .filter(a => enrichment.linkedDivisionIds.has(a.division_id))
-    .map(a => a.division_id);
 }
 
 /**
