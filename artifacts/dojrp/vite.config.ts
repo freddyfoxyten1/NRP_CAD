@@ -84,6 +84,7 @@ const apiProxy = {
   '/api/resources/google': unpublishedApiProxy(),
   '/api/dph/resources/google': unpublishedApiProxy(),
   '/api/staff/resources/google': unpublishedApiProxy(),
+  '/api/public/discord-presence': unpublishedApiProxy(),
   '/api': apiProxyOptions(),
 };
 

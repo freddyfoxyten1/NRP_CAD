@@ -42,7 +42,8 @@ const App = () => (
           <Route path="/google-callback" element={<GoogleCallback />} />
           <Route path="/dojcad/google-callback" element={<GoogleCallback />} />
           <Route path="/dps/internal-affairs" element={<Navigate to="/dps_internal-affairs" replace />} />
-          <Route path="/civilian" element={<Navigate to="/portal_dashboard" replace />} />
+          <Route path="/civilian" element={<Navigate to="/civilian_operations" replace />} />
+          <Route path="/dot" element={<Navigate to="/dot_information" replace />} />
 
           {/* Bare bases → default sections */}
           <Route path="/portal" element={<Navigate to="/portal_dashboard" replace />} />

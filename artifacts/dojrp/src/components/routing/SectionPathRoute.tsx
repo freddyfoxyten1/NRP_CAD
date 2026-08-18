@@ -17,6 +17,8 @@ const DpsInternalAffairs = lazy(() => import("@/pages/DpsInternalAffairs"));
 const StaffPortal = lazy(() => import("@/pages/StaffPortal"));
 const CadPage = lazy(() => import("@/pages/CadPage"));
 const DocCadPage = lazy(() => import("@/pages/DocCadPage"));
+const CivilianOperations = lazy(() => import("@/pages/CivilianOperations"));
+const DepartmentOfTransportation = lazy(() => import("@/pages/DepartmentOfTransportation"));
 
 const BASES = new Set([
   "public",
@@ -26,6 +28,8 @@ const BASES = new Set([
   "dph",
   "doc",
   "staff",
+  "civilian",
+  "dot",
 ]);
 
 function withSuspense(node: ReactNode) {
@@ -147,6 +151,18 @@ export default function SectionPathRoute() {
       return withSuspense(
         <RequireAuth>
           <StaffPortal />
+        </RequireAuth>,
+      );
+    case "civilian":
+      return withSuspense(
+        <RequireAuth>
+          <CivilianOperations />
+        </RequireAuth>,
+      );
+    case "dot":
+      return withSuspense(
+        <RequireAuth>
+          <DepartmentOfTransportation />
         </RequireAuth>,
       );
     default:

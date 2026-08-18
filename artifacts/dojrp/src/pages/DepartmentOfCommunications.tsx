@@ -22,6 +22,8 @@ import { canAccessDocCad } from '@/lib/cad-access';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
+import { useDiscordPresence } from '@/hooks/useDiscordPresence';
+import { DiscordStatusBadge } from '@/components/shared/DiscordStatusBadge';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type Tab = 'personnel-roster' | 'vehicle-roster' | 'equipment-roster' | 'event-calendar' | 'department-panel';
@@ -897,6 +899,11 @@ const DepartmentOfCommunications = () => {
     }
     return defined;
   })();
+  const rosterDiscordIds = useMemo(
+    () => [...roster, ...panelMembers].map(m => m.discord_id),
+    [roster, panelMembers],
+  );
+  const discordPresence = useDiscordPresence(rosterDiscordIds);
   const toggleGroup = (label: string) => setCollapsed(p => ({ ...p, [label]: !p[label] }));
 
   const filteredPanel = panelMembers.filter(m => {
@@ -1312,6 +1319,7 @@ const DepartmentOfCommunications = () => {
                           <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-40">Rank</th>
                           <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-24">Callsign</th>
                           <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-20">Status</th>
+                          <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-28">Discord Status</th>
                           <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-28">Appointed</th>
                           <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Discord ID</th>
                           <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Certifications</th>
@@ -1324,7 +1332,7 @@ const DepartmentOfCommunications = () => {
                             <React.Fragment key={group.label}>
                               <tr className="cursor-pointer border-b border-t border-[#131f30] bg-[#0a1525] hover:bg-[#0c1830] transition-colors"
                                 onClick={() => toggleGroup(group.label)}>
-                                <td colSpan={7} className="px-5 py-2.5">
+                                <td colSpan={8} className="px-5 py-2.5">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {collapsed[group.label]
                                       ? <ChevronRight className="h-3.5 w-3.5 text-[#4384ff] shrink-0" />
@@ -1358,6 +1366,11 @@ const DepartmentOfCommunications = () => {
                                     </td>
                                     <td className="px-4 py-3.5"><span className="font-black text-[#4384ff]">{m.callsign || '—'}</span></td>
                                     <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                                    <td className="px-4 py-3.5">
+                                      <DiscordStatusBadge
+                                        status={m.discord_id ? (discordPresence[m.discord_id] ?? 'offline') : 'offline'}
+                                      />
+                                    </td>
                                     <td className="px-4 py-3.5 text-[#8392aa]">{formatDate(m.appointed_date)}</td>
                                     <td className="px-4 py-3.5"><span className="font-mono text-[11px] text-[#526179]">{m.discord_id || '—'}</span></td>
                                     <td className="px-4 py-3.5">
@@ -1777,6 +1790,7 @@ const DepartmentOfCommunications = () => {
                                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Rank</th>
                                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Callsign</th>
                                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Status</th>
+                                <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Discord Status</th>
                                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Appointed</th>
                                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] text-right">Actions</th>
                               </tr>
@@ -1801,6 +1815,11 @@ const DepartmentOfCommunications = () => {
                                   </td>
                                   <td className="px-4 py-3.5 font-black text-[#4384ff]">{m.callsign || '—'}</td>
                                   <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                                  <td className="px-4 py-3.5">
+                                    <DiscordStatusBadge
+                                      status={m.discord_id ? (discordPresence[m.discord_id] ?? 'offline') : 'offline'}
+                                    />
+                                  </td>
                                   <td className="px-4 py-3.5 text-[#8392aa]">{formatDate(m.appointed_date)}</td>
                                   <td className="px-4 py-3.5">
                                     <div className="flex items-center justify-end gap-2">

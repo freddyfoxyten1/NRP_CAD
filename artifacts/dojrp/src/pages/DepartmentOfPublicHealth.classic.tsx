@@ -9,7 +9,7 @@ import {
   AlertCircle, BookOpen, CalendarDays, Car, ChevronDown, ChevronRight, ChevronUp,
   Clock, FileText, Globe, GripVertical, Info, LayoutDashboard, Layers, Lock, LogOut, MapPin, Package,
   Pencil, Phone, Plus, Radio, RefreshCw, Search, Settings,
-  Shield, Trash2, Users, X, Monitor,
+  Shield, Trash2, Users, X,
 } from 'lucide-react';
 import DocumentEditor from '@/components/editor/DocumentEditor';
 import PdfViewer from '@/components/shared/PdfViewer';
@@ -32,22 +32,18 @@ import {
   DivisionsInformationView,
 } from '@/components/dps/DivisionRoster';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
-import { canAccessDpsCad } from '@/lib/cad-access';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
-import { buildPersonnelTitleGroups, dedupeRosterMembersById, dedupeTitleRanksByName, sortByRankThenCallsign } from '@/lib/roster-sort';
+import { buildPersonnelRosterTree, dedupeRosterMembersById, dedupeTitleRanksByName, sortByRankThenCallsign } from '@/lib/roster-sort';
 import { useDiscordPresence } from '@/hooks/useDiscordPresence';
 import { DiscordStatusBadge } from '@/components/shared/DiscordStatusBadge';
-import { fetchRosterArray, fetchRosterJson, normalizeRankGroupId, rankBelongsToGroup } from '@/lib/roster-fetch';
+import { fetchRosterArray } from '@/lib/roster-fetch';
 import { collectDepartmentPermissions } from '@/lib/permission-access';
 import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
-import { DpsModernShell } from '@/pages/dps/DpsModernShell';
+import { DphModernShell } from '@/pages/dph/DphModernShell';
 import IndexInfoEditFields from '@/components/department/IndexInfoEditFields';
-import InfoEditPreviewFrame from '@/components/department/InfoEditPreviewFrame';
-import IndexInfoLivePreview from '@/components/department/IndexInfoLivePreview';
-import DpsPageInfoLivePreview from '@/components/department/DpsPageInfoLivePreview';
 import {
   emptyIndexInfoForm,
   indexInfoFormFromApi,
@@ -57,32 +53,31 @@ import {
   type IndexInfoFormState,
 } from '@/lib/index-info-content';
 
-function getDpsTabSubtitle(activeTab: Tab): string {
+function getDphTabSubtitle(activeTab: Tab): string {
   switch (activeTab) {
-    case 'personnel-roster': return 'Active personnel roster for the Department of Public Safety.';
+    case 'personnel-roster': return 'Active personnel roster for the Department of Public Health.';
     case 'division-roster': return 'Select a division to view its roster, ranks, and Discord-linked assignments.';
     case 'divisions-information': return 'Select a division to view its information section.';
-    case 'vehicle-roster': return 'Vehicle inventory and assignments for the Department of Public Safety.';
-    case 'equipment-roster': return 'Equipment inventory and assignments for the Department of Public Safety.';
+    case 'vehicle-roster': return 'Vehicle inventory and assignments for the Department of Public Health.';
+    case 'equipment-roster': return 'Equipment inventory and assignments for the Department of Public Health.';
     case 'event-calendar': return 'Upcoming department events, training sessions, and operations.';
     case 'information': return 'Department information, announcements, and updates.';
     case 'resources': return 'Department resources, guides, and reference materials.';
     case 'supervisory-panel': return 'Reserved for future supervisory tools.';
-    case 'department-panel': return 'Manage officers, ranks, callsigns, unit assignments and certifications.';
-    default: return 'Department of Public Safety portal.';
+    default: return 'Manage members, ranks, callsigns, unit assignments and certifications.';
   }
 }
 
 
 
-// ?? Access control ?????????????????????????????????????????????????????????????
+// ── Access control ─────────────────────────────────────────────────────────────
 // Panel access is now driven by the panel_access flag on each rank group.
 // The check is done at render time from the loaded groups + ranks state.
 
-// ?? Types ??????????????????????????????????????????????????????????????????????
+// ── Types ──────────────────────────────────────────────────────────────────────
 type Tab = 'personnel-roster' | 'division-roster' | 'divisions-information' | 'vehicle-roster' | 'equipment-roster' | 'event-calendar' | 'information' | 'resources' | 'supervisory-panel' | 'department-panel';
 
-const DPS_SECTIONS = [
+const DPH_SECTIONS = [
   'personnel-roster',
   'division-roster',
   'divisions-information',
@@ -95,7 +90,7 @@ const DPS_SECTIONS = [
   'department-panel',
 ] as const satisfies readonly Tab[];
 
-type DpsRank = {
+type DphRank = {
   id: number; name: string; sort_order: number; group_id: number | null;
   color_hex: string | null; callsign_prefix: string | null; insignia_url: string | null;
   discord_role_id: string | null;
@@ -105,11 +100,11 @@ type DpsRank = {
   callsign_max: number | null;
 };
 
-type DpsDiscordRole = { id: string; name: string; position: number };
+type DphDiscordRole = { id: string; name: string; position: number };
 
 type RankMember = {
   id: number; username: string; discord_username: string; discord_id: string;
-  avatar_hash: string | null; callsign: string; rank: string; dps_rank: string | null; status: string;
+  avatar_hash: string | null; callsign: string; rank: string; dph_rank: string | null; status: string;
 };
 
 type CustomCallsign = {
@@ -117,8 +112,8 @@ type CustomCallsign = {
   assigned_profile_id: number | null; assigned_username: string | null;
 };
 
-type RankDetail = DpsRank & { members: RankMember[]; custom_callsigns: CustomCallsign[] };
-type DpsGroup = {
+type RankDetail = DphRank & { members: RankMember[]; custom_callsigns: CustomCallsign[] };
+type DphGroup = {
   id: number;
   name: string;
   sort_order: number;
@@ -126,7 +121,38 @@ type DpsGroup = {
   division_oversight?: boolean;
 };
 
-type DpsEvent = {
+type DivisionRankRow = { id: number; name: string; division_id: number | null };
+
+let dphRosterMetadataPromise: Promise<{
+  groups: DphGroup[];
+  ranks: DphRank[];
+  divs: RosterDivision[];
+  divRanks: DivisionRankRow[];
+}> | null = null;
+
+function loadDphRosterMetadata() {
+  if (!dphRosterMetadataPromise) {
+    dphRosterMetadataPromise = Promise.allSettled([
+      fetchRosterArray<DphGroup>('/api/dph/groups', 'groups'),
+      fetchRosterArray<DphRank>('/api/dph/ranks', 'ranks'),
+      fetchRosterArray<RosterDivision>('/api/dph/divisions', 'divisions'),
+      fetchRosterArray<DivisionRankRow>('/api/dph/division-ranks', 'division ranks'),
+    ])
+      .then(([groups, ranks, divs, divRanks]) => ({
+        groups: groups.status === 'fulfilled' ? groups.value : [],
+        ranks: dedupeTitleRanksByName(ranks.status === 'fulfilled' ? ranks.value : []),
+        divs: divs.status === 'fulfilled' ? divs.value : [],
+        divRanks: divRanks.status === 'fulfilled' ? divRanks.value : [],
+      }))
+      .catch((err) => {
+        dphRosterMetadataPromise = null;
+        throw err;
+      });
+  }
+  return dphRosterMetadataPromise;
+}
+
+type DphEvent = {
   id: number;
   title: string;
   event_date: string;   // 'YYYY-MM-DD'
@@ -139,7 +165,7 @@ type DpsEvent = {
   created_at: string;
 };
 
-type DpsResource = {
+type DphResource = {
   id: number;
   title: string;
   type: 'document' | 'pdf' | 'google_doc';
@@ -153,7 +179,7 @@ type DpsResource = {
   division_only?: boolean;
   allowed_ranks?: string[];
   personnel_only?: boolean;
-  allowed_dps_ranks?: string[];
+  allowed_dph_ranks?: string[];
 };
 
 type FleetVehicle = {
@@ -199,8 +225,8 @@ type RosterMember = {
   rank: string;
   role: string;
   /** Separated DPS fields */
-  dps_rank: string | null;
-  dps_role: string | null;
+  dph_rank: string | null;
+  dph_role: string | null;
   division_rank: string | null;
   division_name?: string | null;
   division_names?: string[];
@@ -260,7 +286,7 @@ function normalizeRosterMember(m: RosterMember): RosterMember {
   };
 }
 
-// ?? Constants ??????????????????????????????????????????????????????????????????
+// ── Constants ──────────────────────────────────────────────────────────────────
 const RANK_OPTIONS = [
   'Owner', 'Executive', 'Chief of Department', 'Assistant Chief', 'Deputy Chief',
   'Captain', 'Lieutenant', 'Sergeant', 'Corporal',
@@ -329,7 +355,7 @@ function memberInDivision(m: RosterMember, d: RosterDivision): boolean {
   return flag ? !!m[flag] : false;
 }
 
-/** @deprecated Hardcoded labels ? fleet/equipment still use these as fallback keys. */
+/** @deprecated Hardcoded labels — fleet/equipment still use these as fallback keys. */
 const DIVISION_OPTIONS = [
   { key: 'POB', label: 'Patrol Operations Bureau' },
   { key: 'IAB', label: 'Internal Affairs Bureau' },
@@ -338,38 +364,7 @@ const DIVISION_OPTIONS = [
   { key: 'FOU', label: 'Field Operations Unit' },
 ];
 
-type DivisionRankRow = { id: number; name: string; division_id: number | null };
-
-let rosterMetadataPromise: Promise<{
-  groups: DpsGroup[];
-  ranks: DpsRank[];
-  divs: RosterDivision[];
-  divRanks: DivisionRankRow[];
-}> | null = null;
-
-function loadRosterMetadata() {
-  if (!rosterMetadataPromise) {
-    rosterMetadataPromise = Promise.allSettled([
-      fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups'),
-      fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks'),
-      fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
-      fetchRosterArray<DivisionRankRow>('/api/roster/division-ranks', 'division ranks'),
-    ])
-      .then(([groups, ranks, divs, divRanks]) => ({
-        groups: groups.status === 'fulfilled' ? groups.value : [],
-        ranks: dedupeTitleRanksByName(ranks.status === 'fulfilled' ? ranks.value : []),
-        divs: divs.status === 'fulfilled' ? divs.value : [],
-        divRanks: divRanks.status === 'fulfilled' ? divRanks.value : [],
-      }))
-      .catch((err) => {
-        rosterMetadataPromise = null;
-        throw err;
-      });
-  }
-  return rosterMetadataPromise;
-}
-
-// Group headings are loaded dynamically from /api/roster/groups.
+// Group headings are loaded dynamically from /api/dph/groups.
 // Each RosterMember already carries a group_name field returned by the API.
 
 const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
@@ -383,7 +378,7 @@ const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'event-calendar',          label: 'Event Calendar',          icon: CalendarDays },
 ];
 
-// ?? Sub-components ????????????????????????????????????????????????????????????
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 const UnitDot = ({ active }: { active: boolean }) => (
   <span className={`mx-auto block h-2.5 w-2.5 rounded-full ${active ? 'bg-[#f4c542] shadow-[0_0_6px_rgba(244,197,66,0.6)]' : 'bg-[#1a2638]'}`} />
@@ -431,9 +426,9 @@ const inputCls = "h-9 w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-
 const selectCls = "h-9 w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-3 text-xs font-semibold text-white outline-none focus:border-[#2f70ff] appearance-none";
 const labelCls  = "block text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470] mb-1.5";
 
-// ?? Edit Member Modal ?????????????????????????????????????????????????????????
+// ── Edit Member Modal ─────────────────────────────────────────────────────────
 type EditForm = {
-  dps_rank: string; dps_role: string; division_rank: string; callsign: string; status: string;
+  dph_rank: string; dph_role: string; division_rank: string; callsign: string; status: string;
   appointed_date: string;
   pob: boolean; iab: boolean; hsu: boolean; sru: boolean; fou: boolean;
   certifications: string;
@@ -445,13 +440,13 @@ const EditModal = ({
   member: RosterMember;
   onClose: () => void;
   onSave: (id: number, form: EditForm) => Promise<void>;
-  ranks: DpsRank[];
+  ranks: DphRank[];
   divisionRanks: { id: number; name: string; division_id: number | null }[];
   divisions: RosterDivision[];
 }) => {
   const [form, setForm] = useState<EditForm>({
-    dps_rank: member.dps_rank || member.rank || '',
-    dps_role: member.dps_role ?? '',
+    dph_rank: member.dph_rank || member.rank || '',
+    dph_role: member.dph_role ?? '',
     division_rank: member.division_rank ?? '',
     callsign: member.callsign ?? '',
     status: member.status ?? 'Active',
@@ -464,10 +459,10 @@ const EditModal = ({
 
   const set = <K extends keyof EditForm>(k: K, v: EditForm[K]) => setForm(p => ({ ...p, [k]: v }));
 
-  // ?? Rank-aware callsign helpers ???????????????????????????????????????????
-  const originalRank  = member.dps_rank || member.rank || '';
-  const rankChanged   = form.dps_rank.trim().toLowerCase() !== originalRank.trim().toLowerCase();
-  const selectedRank  = ranks.find(r => r.name === form.dps_rank) ?? null;
+  // ── Rank-aware callsign helpers ───────────────────────────────────────────
+  const originalRank  = member.dph_rank || member.rank || '';
+  const rankChanged   = form.dph_rank.trim().toLowerCase() !== originalRank.trim().toLowerCase();
+  const selectedRank  = ranks.find(r => r.name === form.dph_rank) ?? null;
   const isDynamicRank = selectedRank?.callsign_type === 'dynamic';
   const isStaticRank  = selectedRank?.callsign_type === 'static';
   const csPrefix = selectedRank?.callsign_prefix?.trim() ?? '';
@@ -483,7 +478,7 @@ const EditModal = ({
 
   // When rank changes: auto-fill static callsign; reset suffix for dynamic
   useEffect(() => {
-    const rank = ranks.find(r => r.name === form.dps_rank);
+    const rank = ranks.find(r => r.name === form.dph_rank);
     if (!rank) return;
     if (rank.callsign_type === 'static' && rank.callsign_prefix && rank.callsign_static != null) {
       const auto = `${rank.callsign_prefix.trim()}-${rank.callsign_static}`;
@@ -494,7 +489,7 @@ const EditModal = ({
       setDynSuffix(parsed || fallback);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.dps_rank]);
+  }, [form.dph_rank]);
 
   // Build full callsign from a suffix number and write it into the form
   const applyDynSuffix = (suffix: string) => {
@@ -518,7 +513,7 @@ const EditModal = ({
       <div className="relative w-full max-w-lg rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="mb-6 flex items-center justify-between">
           <div>
-            <h3 className="text-base font-black text-white">Edit Officer</h3>
+            <h3 className="text-base font-black text-white">Edit Member</h3>
             <p className="mt-0.5 text-xs text-[#526179]">{member.username}</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white">
@@ -529,9 +524,9 @@ const EditModal = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>DPS Rank</label>
-              <select value={form.dps_rank} onChange={e => set('dps_rank', e.target.value)} className={selectCls}>
-                <option value="">? Select rank ?</option>
+              <label className={labelCls}>DPH Rank</label>
+              <select value={form.dph_rank} onChange={e => set('dph_rank', e.target.value)} className={selectCls}>
+                <option value="">— Select rank —</option>
                 {(ranks.length > 0 ? ranks.map(r => r.name) : RANK_OPTIONS).map(r => (
                   <option key={r} value={r}>{r}</option>
                 ))}
@@ -540,40 +535,40 @@ const EditModal = ({
             <div>
               <label className={labelCls}>Callsign</label>
               {rankChanged && (isDynamicRank || isStaticRank) ? (
-                /* Rank is changing ? backend will auto-assign; show notice */
+                /* Rank is changing — backend will auto-assign; show notice */
                 <div className="flex items-center gap-2 h-9 rounded-lg border border-[#1b3320] bg-[#071410] px-3">
                   <Radio className="h-3 w-3 text-[#3ecf8e] shrink-0" />
                   <span className="text-[11px] font-semibold text-[#3ecf8e]">Auto-assigned on save</span>
                   {csPrefix && (
-                    <span className="ml-auto font-mono text-[10px] text-[#526179]">{csPrefix}-?</span>
+                    <span className="ml-auto font-mono text-[10px] text-[#526179]">{csPrefix}-…</span>
                   )}
                 </div>
               ) : isDynamicRank ? (
-                /* Same dynamic rank ? callsign is fully managed; show read-only */
+                /* Same dynamic rank — callsign is fully managed; show read-only */
                 <div className="flex items-center gap-2 h-9 rounded-lg border border-[#1b2e1a] bg-[#071410] px-3">
                   <Radio className="h-3 w-3 text-[#3ecf8e] shrink-0" />
-                  <span className="font-mono text-xs font-bold text-[#3ecf8e]">{form.callsign || '?'}</span>
+                  <span className="font-mono text-xs font-bold text-[#3ecf8e]">{form.callsign || '—'}</span>
                   <span className="text-[9px] text-[#3f5470] ml-auto">managed by rank</span>
                 </div>
               ) : isStaticRank ? (
-                /* Same static rank ? show assigned value, allow override */
+                /* Same static rank — show assigned value, allow override */
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-2 h-9 rounded-lg border border-[#1f3050] bg-[#07111f] px-3">
-                    <span className="font-mono text-xs font-bold text-[#4384ff]">{form.callsign || '?'}</span>
+                    <span className="font-mono text-xs font-bold text-[#4384ff]">{form.callsign || '—'}</span>
                     <span className="text-[9px] text-[#3f5470] ml-auto">auto-assigned</span>
                   </div>
-                  <input type="text" placeholder="Override callsign?" value={form.callsign}
+                  <input type="text" placeholder="Override callsign…" value={form.callsign}
                     onChange={e => set('callsign', e.target.value)}
                     className="h-8 w-full rounded-lg border border-[#131f30] bg-[#070d16] px-3 text-[11px] font-semibold text-[#a8b7cd] placeholder:text-[#2a3a50] outline-none focus:border-[#2f70ff]" />
                 </div>
               ) : (
-                /* No rank config ? plain text */
+                /* No rank config — plain text */
                 <input type="text" placeholder="e.g. 1A-01" value={form.callsign}
                   onChange={e => set('callsign', e.target.value)} className={inputCls} />
               )}
               {!rankChanged && (isDynamicRank || isStaticRank) && (
                 <p className="mt-1 text-[10px] text-[#3f5470]">
-                  Full callsign: <span className="font-mono text-[#4384ff]">{form.callsign || '?'}</span>
+                  Full callsign: <span className="font-mono text-[#4384ff]">{form.callsign || '—'}</span>
                 </p>
               )}
             </div>
@@ -581,14 +576,14 @@ const EditModal = ({
 
           <div>
             <label className={labelCls}>DPS Role</label>
-            <input type="text" placeholder="e.g. Patrol, Detective, SWAT" value={form.dps_role}
-              onChange={e => set('dps_role', e.target.value)} className={inputCls} />
+            <input type="text" placeholder="e.g. Patrol, Detective, SWAT" value={form.dph_role}
+              onChange={e => set('dph_role', e.target.value)} className={inputCls} />
           </div>
 
           <div>
             <label className={labelCls}>Division Rank</label>
             <select value={form.division_rank} onChange={e => set('division_rank', e.target.value)} className={selectCls}>
-              <option value="">? Unassigned ?</option>
+              <option value="">— Unassigned —</option>
               {divisionRanks.map(r => (
                 <option key={r.id} value={r.name}>{r.name}</option>
               ))}
@@ -613,7 +608,7 @@ const EditModal = ({
             <label className={labelCls}>Unit Assignments</label>
             <div className="flex flex-wrap gap-3">
               {divisions.length === 0 ? (
-                <p className="text-[11px] text-[#3f5470]">No divisions yet ? create them in Division Roster.</p>
+                <p className="text-[11px] text-[#3f5470]">No divisions yet — create them in Division Roster.</p>
               ) : divisions.map(d => {
                 const flag = unitFlagForDivision(d);
                 const checked = flag ? !!form[flag] : memberInDivision(member, d);
@@ -646,7 +641,7 @@ const EditModal = ({
             </button>
             <button type="submit" disabled={saving}
               className="flex-1 h-10 rounded-lg bg-[#2f66ee] text-xs font-black text-white hover:bg-[#3977ff] disabled:opacity-60">
-              {saving ? 'Saving?' : 'Save Changes'}
+              {saving ? 'Saving…' : 'Save Changes'}
             </button>
           </div>
         </form>
@@ -655,7 +650,7 @@ const EditModal = ({
   );
 };
 
-// ?? Roster Access Permissions Modal ???????????????????????????????????????????
+// ── Roster Access Permissions Modal ───────────────────────────────────────────
 const RosterAccessPermissionsModal = ({
   member,
   resourceSaving,
@@ -702,7 +697,7 @@ const RosterAccessPermissionsModal = ({
               className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-2.5 py-1.5 text-[10px] font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
             >
               <Lock className="h-3 w-3" />
-              {clearing ? 'Clearing?' : 'Clear All'}
+              {clearing ? 'Clearing…' : 'Clear All'}
             </button>
             <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
               <X className="h-4 w-4" />
@@ -720,7 +715,7 @@ const RosterAccessPermissionsModal = ({
             >
               <span className="shrink-0">{row.icon}</span>
               <span className="min-w-0 flex-1">
-                <span className="block text-xs font-black">{row.saving ? '?' : row.label}</span>
+                <span className="block text-xs font-black">{row.saving ? '…' : row.label}</span>
                 <span className="mt-0.5 block text-[10px] opacity-70">{row.description}</span>
               </span>
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] ${
@@ -743,12 +738,12 @@ const RosterAccessPermissionsModal = ({
   );
 };
 
-// ?? Rank Edit Modal ???????????????????????????????????????????????????????????
+// ── Rank Edit Modal ───────────────────────────────────────────────────────────
 type RankEditForm = {
   name: string; color_hex: string; callsign_prefix: string; insignia_url: string; discord_role_id: string;
   callsign_type: 'static' | 'dynamic' | 'custom';
   callsign_static: string;
-  callsign_static_suffix: boolean;   // false ? store 'XX', true ? store the numeric value
+  callsign_static_suffix: boolean;   // false → store 'XX', true → store the numeric value
   callsign_min: string;
   callsign_max: string;
 };
@@ -757,7 +752,7 @@ const RankEditModal = ({
   rankId, dpsGuildRoles, onClose, onSaved,
 }: {
   rankId: number;
-  dpsGuildRoles: DpsDiscordRole[];
+  dpsGuildRoles: DphDiscordRole[];
   onClose: () => void;
   onSaved: () => void;
 }) => {
@@ -779,8 +774,9 @@ const RankEditModal = ({
 
   useEffect(() => {
     setLoading(true);
-    fetchRosterJson<RankDetail & { discord_role_id?: string | null; callsign_type?: string | null; callsign_static?: string | null; callsign_min?: number | null; callsign_max?: number | null }>(`/api/roster/ranks/${rankId}`, 'rank')
-      .then((d) => {
+    fetch(`/api/dph/ranks/${rankId}`, { headers: { accept: 'application/json' } })
+      .then(r => r.json())
+      .then((d: RankDetail & { discord_role_id?: string | null; callsign_type?: string | null; callsign_static?: string | null; callsign_min?: number | null; callsign_max?: number | null }) => {
         setDetail(d);
         setForm({
           name:            d.name,
@@ -807,7 +803,7 @@ const RankEditModal = ({
         // Auto-fill dynamic callsigns for members that don't have a valid one yet
         if (d.callsign_type === 'dynamic' && d.members.length > 0) {
           const rangeMax = d.callsign_max ?? 0;
-          fetch(`/api/roster/ranks/${rankId}/auto-assign-callsigns`, { method: 'POST' })
+          fetch(`/api/dph/ranks/${rankId}/auto-assign-callsigns`, { method: 'POST' })
             .then(r => r.ok ? r.json() : null)
             .then((data: { results: { profile_id: number; callsign: string }[] } | null) => {
               if (!data) return;
@@ -842,7 +838,7 @@ const RankEditModal = ({
     const callsign = prefix ? `${prefix}-${padded}` : padded;
     setSavingMemberId(memberId);
     try {
-      await fetch(`/api/roster/${memberId}`, {
+      await fetch(`/api/dph/${memberId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ callsign }),
@@ -857,10 +853,10 @@ const RankEditModal = ({
     }
   };
 
-  // ?? Custom callsign slot CRUD ?????????????????????????????????????????????
+  // ── Custom callsign slot CRUD ─────────────────────────────────────────────
   const autoAssignAll = async (maxVal?: number) => {
     try {
-      const r = await fetch(`/api/roster/ranks/${rankId}/auto-assign-callsigns`, { method: 'POST' });
+      const r = await fetch(`/api/dph/ranks/${rankId}/auto-assign-callsigns`, { method: 'POST' });
       if (!r.ok) return;
       const { results } = await r.json() as { results: { profile_id: number; callsign: string }[] };
       const csMap = new Map(results.map(x => [x.profile_id, x.callsign]));
@@ -883,7 +879,7 @@ const RankEditModal = ({
 
   const reorderSlots = async (newOrder: CustomCallsign[]) => {
     setCustomSlots(newOrder);
-    await fetch(`/api/roster/ranks/${rankId}/custom-callsigns/reorder`, {
+    await fetch(`/api/dph/ranks/${rankId}/custom-callsigns/reorder`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ids: newOrder.map(s => s.id) }),
     });
@@ -892,7 +888,7 @@ const RankEditModal = ({
   const addCustomSlot = async (text: string) => {
     const t = text.trim();
     if (!t) return;
-    const r = await fetch(`/api/roster/ranks/${rankId}/custom-callsigns`, {
+    const r = await fetch(`/api/dph/ranks/${rankId}/custom-callsigns`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ callsign: t }),
     });
@@ -904,7 +900,7 @@ const RankEditModal = ({
   const deleteCustomSlot = async (csId: number) => {
     // Capture assignee before deleting so we can clear their display callsign
     const slot = customSlots.find(s => s.id === csId);
-    await fetch(`/api/roster/rank-callsigns/${csId}`, { method: 'DELETE' });
+    await fetch(`/api/dph/rank-callsigns/${csId}`, { method: 'DELETE' });
     setCustomSlots(prev => prev.filter(s => s.id !== csId));
     if (slot?.assigned_profile_id) {
       setDetail(prev => prev ? {
@@ -916,7 +912,7 @@ const RankEditModal = ({
 
   const updateSlotCallsign = async (csId: number, callsign: string) => {
     if (!callsign.trim()) return;
-    const r = await fetch(`/api/roster/rank-callsigns/${csId}`, {
+    const r = await fetch(`/api/dph/rank-callsigns/${csId}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ callsign }),
     });
@@ -935,7 +931,7 @@ const RankEditModal = ({
   const assignMemberToSlot = async (csId: number, profileId: number | null) => {
     const prevSlot = customSlots.find(s => s.id === csId);
     const prevAssigneeId = prevSlot?.assigned_profile_id ?? null;
-    const r = await fetch(`/api/roster/rank-callsigns/${csId}`, {
+    const r = await fetch(`/api/dph/rank-callsigns/${csId}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ assigned_profile_id: profileId }),
     });
@@ -983,7 +979,7 @@ const RankEditModal = ({
         callsign_min: form.callsign_type === 'dynamic' ? (parseInt(form.callsign_min) || 0) : null,
         callsign_max: form.callsign_type === 'dynamic' ? (parseInt(form.callsign_max) || 0) : null,
       };
-      const res = await fetch(`/api/roster/ranks/${rankId}`, {
+      const res = await fetch(`/api/dph/ranks/${rankId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -994,7 +990,7 @@ const RankEditModal = ({
       }
       // Auto-fill dynamic callsigns after saving (fires in background)
       if (form.callsign_type === 'dynamic') void autoAssignAll();
-      toast.success(form.discord_role_id.trim() ? 'Rank saved ? Discord sync triggered.' : 'Rank saved.');
+      toast.success(form.discord_role_id.trim() ? 'Rank saved — Discord sync triggered.' : 'Rank saved.');
       onSaved();
       onClose();
     } catch (err) {
@@ -1026,7 +1022,7 @@ const RankEditModal = ({
             )}
             <div>
               <h3 className="text-base font-black text-white">Edit Rank</h3>
-              <p className="text-xs text-[#526179]">{detail?.name ?? '?'}</p>
+              <p className="text-xs text-[#526179]">{detail?.name ?? '…'}</p>
             </div>
           </div>
           <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white">
@@ -1035,7 +1031,7 @@ const RankEditModal = ({
         </div>
 
         {loading ? (
-          <div className="flex min-h-[200px] items-center justify-center text-sm font-bold text-[#8ea1bb]">Loading rank?</div>
+          <div className="flex min-h-[200px] items-center justify-center text-sm font-bold text-[#8ea1bb]">Loading rank…</div>
         ) : (
           <form onSubmit={handleSubmit}>
             <div className="px-7 pt-6 pb-4 space-y-5">
@@ -1072,7 +1068,7 @@ const RankEditModal = ({
 
               {/* Callsign configuration */}
               <div className="space-y-3">
-                {/* Prefix ? hidden for custom type (callsigns are fully specified) */}
+                {/* Prefix — hidden for custom type (callsigns are fully specified) */}
                 {form.callsign_type !== 'custom' && (
                   <div>
                     <label className={labelCls}>Callsign Prefix <span className="text-[#3f5470] normal-case font-normal">(optional)</span></label>
@@ -1103,7 +1099,7 @@ const RankEditModal = ({
                     ))}
                   </div>
 
-                  {/* Static ? optional numeric suffix */}
+                  {/* Static — optional numeric suffix */}
                   {form.callsign_type === 'static' && (
                     <div className="mt-3 space-y-2">
                       {/* Toggle */}
@@ -1115,14 +1111,14 @@ const RankEditModal = ({
                         </div>
                         Include number suffix
                       </button>
-                      {/* Stepper ? only shown when suffix is on */}
+                      {/* Stepper — only shown when suffix is on */}
                       {form.callsign_static_suffix && (
                         <div>
                           <label className="block text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470] mb-1.5">Number</label>
                           <div className="flex items-center gap-2">
                             <button type="button"
                               onClick={() => set('callsign_static', String(Math.max(0, parseInt(form.callsign_static) - 1 || 0)))}
-                              className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[#1f3050] bg-[#070d16] text-[#a8b7cd] hover:bg-white/5 font-black">?</button>
+                              className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[#1f3050] bg-[#070d16] text-[#a8b7cd] hover:bg-white/5 font-black">−</button>
                             <input type="number" min={0} value={form.callsign_static}
                               onChange={e => set('callsign_static', e.target.value)}
                               className={`${inputCls} text-center font-mono flex-1`} />
@@ -1135,7 +1131,7 @@ const RankEditModal = ({
                     </div>
                   )}
 
-                  {/* Dynamic ? min/max range */}
+                  {/* Dynamic — min/max range */}
                   {form.callsign_type === 'dynamic' && (
                     <div className="mt-3 space-y-2">
                       <div>
@@ -1143,7 +1139,7 @@ const RankEditModal = ({
                         <div className="flex items-center gap-2">
                           <button type="button"
                             onClick={() => set('callsign_min', String(Math.max(0, (parseInt(form.callsign_min) || 0) - 1)))}
-                            className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[#1f3050] bg-[#070d16] text-[#a8b7cd] hover:bg-white/5 font-black">?</button>
+                            className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[#1f3050] bg-[#070d16] text-[#a8b7cd] hover:bg-white/5 font-black">−</button>
                           <input type="number" min={0} value={form.callsign_min}
                             onChange={e => set('callsign_min', e.target.value)}
                             className={`${inputCls} text-center font-mono flex-1`} />
@@ -1157,7 +1153,7 @@ const RankEditModal = ({
                         <div className="flex items-center gap-2">
                           <button type="button"
                             onClick={() => set('callsign_max', String(Math.max(0, (parseInt(form.callsign_max) || 0) - 1)))}
-                            className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[#1f3050] bg-[#070d16] text-[#a8b7cd] hover:bg-white/5 font-black">?</button>
+                            className="h-9 w-9 shrink-0 flex items-center justify-center rounded-lg border border-[#1f3050] bg-[#070d16] text-[#a8b7cd] hover:bg-white/5 font-black">−</button>
                           <input type="number" min={0} value={form.callsign_max}
                             onChange={e => set('callsign_max', e.target.value)}
                             className={`${inputCls} text-center font-mono flex-1`} />
@@ -1169,7 +1165,7 @@ const RankEditModal = ({
                     </div>
                   )}
 
-                  {/* Custom ? explicit named callsign slots */}
+                  {/* Custom — explicit named callsign slots */}
                   {form.callsign_type === 'custom' && (
                     <div className="mt-3 space-y-1.5">
                       <p className="text-[10px] text-[#3f5470] mb-2">
@@ -1199,7 +1195,7 @@ const RankEditModal = ({
                           <span className="shrink-0 cursor-grab active:cursor-grabbing text-[#2a3a50] hover:text-[#526179]">
                             <GripVertical className="h-4 w-4" />
                           </span>
-                          {/* Callsign text ? editable on blur */}
+                          {/* Callsign text — editable on blur */}
                           <input
                             type="text"
                             defaultValue={slot.callsign}
@@ -1215,7 +1211,7 @@ const RankEditModal = ({
                             onChange={e => assignMemberToSlot(slot.id, e.target.value ? Number(e.target.value) : null)}
                             className="flex-1 h-7 rounded border border-[#1f3050] bg-[#070d16] px-2 text-[10px] text-white outline-none focus:border-[#4384ff] appearance-none cursor-pointer"
                           >
-                            <option value="">? Unassigned ?</option>
+                            <option value="">— Unassigned —</option>
                             {detail?.members.map(m => (
                               <option key={m.id} value={m.id}>{m.username}</option>
                             ))}
@@ -1250,7 +1246,7 @@ const RankEditModal = ({
                     </div>
                   )}
 
-                  {/* Live preview ? not shown for custom type */}
+                  {/* Live preview — not shown for custom type */}
                   {form.callsign_type !== 'custom' && (
                   <div className="mt-2.5 flex items-center gap-2">
                     <span className="text-[10px] text-[#3f5470]">Preview:</span>
@@ -1266,7 +1262,7 @@ const RankEditModal = ({
                         const mn = parseInt(form.callsign_min) || 0;
                         const mx = parseInt(form.callsign_max) || 0;
                         const pad = Math.max(String(mx).length, 2);
-                        return `${pre}${sep}${String(mn).padStart(pad, '0')} ? ${pre}${sep}${String(mx).padStart(pad, '0')}`;
+                        return `${pre}${sep}${String(mn).padStart(pad, '0')} – ${pre}${sep}${String(mx).padStart(pad, '0')}`;
                       })()}
                     </span>
                     {form.callsign_type === 'dynamic' && (
@@ -1296,7 +1292,7 @@ const RankEditModal = ({
                   onChange={e => set('discord_role_id', e.target.value)}
                   className={inputCls + ' cursor-pointer'}
                 >
-                  <option value="">? No Discord role linked ?</option>
+                  <option value="">— No Discord role linked —</option>
                   {dpsGuildRoles.map(r => (
                     <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
@@ -1322,12 +1318,12 @@ const RankEditModal = ({
                     className="ml-auto flex items-center gap-1.5 rounded-lg border border-[#2f66ee]/40 bg-[#2f66ee]/10 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-[#4384ff] hover:bg-[#2f66ee]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Radio className="h-3 w-3" />
-                    {syncing ? 'Syncing?' : 'Sync Callsigns'}
+                    {syncing ? 'Syncing…' : 'Sync Callsigns'}
                   </button>
                 )}
               </div>
               {!detail?.members.length ? (
-                <p className="text-[11px] text-[#2a3a50]">No officers currently hold this rank.</p>
+                <p className="text-[11px] text-[#2a3a50]">No members currently hold this rank.</p>
               ) : (
                 <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
                   {detail.members.map(m => {
@@ -1338,7 +1334,7 @@ const RankEditModal = ({
                     const pre = form.callsign_prefix.trim();
                     const preview = suffix !== '' && !isNaN(parseInt(suffix))
                       ? (pre ? `${pre}-${String(parseInt(suffix)).padStart(padLen, '0')}` : String(parseInt(suffix)).padStart(padLen, '0'))
-                      : (m.callsign || '?');
+                      : (m.callsign || '—');
                     return (
                       <div key={m.id} className="flex items-center gap-3 rounded-lg border border-[#0f1b28] bg-[#070d16] px-3 py-2">
                         <DiscordAvatar name={m.discord_username || m.username} discordId={m.discord_id} avatarHash={m.avatar_hash} />
@@ -1346,7 +1342,7 @@ const RankEditModal = ({
                           <p className="text-xs font-black text-white truncate">{m.username}</p>
                           {m.discord_username && <p className="text-[10px] text-[#526179]">@{m.discord_username}</p>}
                         </div>
-                        <span className="shrink-0 font-black text-[10px] text-[#4384ff]">{m.callsign || '?'}</span>
+                        <span className="shrink-0 font-black text-[10px] text-[#4384ff]">{m.callsign || '—'}</span>
                         <StatusBadge status={m.status} />
                       </div>
                     );
@@ -1363,7 +1359,7 @@ const RankEditModal = ({
               </button>
               <button type="submit" disabled={saving}
                 className="flex-1 h-10 rounded-lg bg-[#2f66ee] text-xs font-black text-white hover:bg-[#3977ff] disabled:opacity-60">
-                {saving ? 'Saving?' : 'Save Rank'}
+                {saving ? 'Saving…' : 'Save Rank'}
               </button>
             </div>
           </form>
@@ -1373,10 +1369,10 @@ const RankEditModal = ({
   );
 };
 
-// ?? Add Officer Modal ?????????????????????????????????????????????????????????
+// ── Add Member Modal ─────────────────────────────────────────────────────────
 type AddForm = {
   username: string; discord_username: string; discord_id: string;
-  dps_rank: string; dps_role: string; callsign: string; status: string; appointed_date: string;
+  dph_rank: string; dph_role: string; callsign: string; status: string; appointed_date: string;
 };
 
 type UserHit = { id: number | null; username: string; discord_username: string; discord_id: string; rank: string };
@@ -1386,11 +1382,11 @@ const AddOfficerModal = ({
 }: {
   onClose: () => void;
   onAdd: (form: AddForm) => Promise<void>;
-  ranks: DpsRank[];
+  ranks: DphRank[];
 }) => {
   const [form, setForm] = useState<AddForm>({
     username: '', discord_username: '', discord_id: '',
-    dps_rank: '', dps_role: '', callsign: '', status: 'Active', appointed_date: '',
+    dph_rank: 'Unranked', dph_role: '', callsign: '', status: 'Active', appointed_date: '',
   });
   const [saving, setSaving]         = useState(false);
   const [suggestions, setSuggestions] = useState<UserHit[]>([]);
@@ -1415,10 +1411,11 @@ const AddOfficerModal = ({
     if (!val.trim()) { setSuggestions([]); setShowSugg(false); return; }
     debounceRef.current = setTimeout(async () => {
       try {
-        const list = await fetchRosterArray<UserHit>(
-          `/api/roster/member-search?q=${encodeURIComponent(val.trim())}`,
-          'members',
-        );
+        const r = await fetch(`/api/dph/member-search?q=${encodeURIComponent(val.trim())}`,
+          { headers: { accept: 'application/json' } });
+        if (!r.ok) { setSuggestions([]); setShowSugg(false); return; }
+        const rows = await r.json();
+        const list = Array.isArray(rows) ? rows as UserHit[] : [];
         setSuggestions(list);
         setShowSugg(list.length > 0);
       } catch { /* ignore */ }
@@ -1438,15 +1435,12 @@ const AddOfficerModal = ({
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.username.trim()) return;
-    // A member whose rank does not exist gets pruned on the next sync, so the
-    // rank cannot be left unset.
-    if (!form.dps_rank.trim()) { toast.error('Pick a rank for this officer.'); return; }
     setSaving(true);
     try {
       await onAdd(form);
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add officer.');
+      toast.error(err instanceof Error ? err.message : 'Failed to add member.');
     } finally {
       setSaving(false);
     }
@@ -1456,7 +1450,7 @@ const AddOfficerModal = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
       <div className="relative w-full max-w-md rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
         <div className="mb-6 flex items-center justify-between">
-          <h3 className="text-base font-black text-white">Add New Officer</h3>
+          <h3 className="text-base font-black text-white">Add New Member</h3>
           <button type="button" onClick={onClose} className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white">
             <X className="h-4 w-4" />
           </button>
@@ -1464,12 +1458,12 @@ const AddOfficerModal = ({
 
         <form onSubmit={handleSubmit} className="space-y-4">
 
-          {/* ?? Username with typeahead ?? */}
+          {/* ── Username with typeahead ── */}
           <div ref={wrapRef} className="relative">
             <label className={labelCls}>CAD Username <span className="text-red-400">*</span></label>
             <input
               type="text" required autoComplete="off"
-              placeholder="Start typing a name or ID?"
+              placeholder="Start typing a name or ID…"
               value={form.username}
               onChange={e => onUsernameChange(e.target.value)}
               onFocus={() => suggestions.length > 0 && setShowSugg(true)}
@@ -1515,9 +1509,9 @@ const AddOfficerModal = ({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>DPS Rank</label>
-              <select value={form.dps_rank} onChange={e => set('dps_rank', e.target.value)} className={selectCls}>
-                <option value="" disabled>Select a rank?</option>
+              <label className={labelCls}>DPH Rank</label>
+              <select value={form.dph_rank} onChange={e => set('dph_rank', e.target.value)} className={selectCls}>
+                <option value="Unranked">Unranked</option>
                 {(ranks.length > 0 ? ranks.map(r => r.name) : RANK_OPTIONS).map(r => (
                   <option key={r} value={r}>{r}</option>
                 ))}
@@ -1532,8 +1526,8 @@ const AddOfficerModal = ({
 
           <div>
             <label className={labelCls}>DPS Role</label>
-            <input type="text" placeholder="e.g. Patrol, Detective, SWAT" value={form.dps_role}
-              onChange={e => set('dps_role', e.target.value)} className={inputCls} />
+            <input type="text" placeholder="e.g. Patrol, Detective, SWAT" value={form.dph_role}
+              onChange={e => set('dph_role', e.target.value)} className={inputCls} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -1557,7 +1551,7 @@ const AddOfficerModal = ({
             </button>
             <button type="submit" disabled={saving}
               className="flex-1 h-10 rounded-lg bg-[#2f66ee] text-xs font-black text-white hover:bg-[#3977ff] disabled:opacity-60">
-              {saving ? 'Adding?' : 'Add Officer'}
+              {saving ? 'Adding…' : 'Add Member'}
             </button>
           </div>
         </form>
@@ -1566,7 +1560,7 @@ const AddOfficerModal = ({
   );
 };
 
-// ?? Main page ??????????????????????????????????????????????????????????????????
+// ── Main page ──────────────────────────────────────────────────────────────────
 
 type PageBlock =
   | { type: 'text'; body: string }
@@ -1576,9 +1570,9 @@ type PageBlock =
   | { type: 'thumbnail'; url: string; caption: string }
   | { type: 'footer'; text: string };
 
-type DpsShellTheme = 'classic' | 'modern';
+type DphShellTheme = 'classic' | 'modern';
 
-const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: DpsShellTheme } = {}) => {
+const DepartmentOfPublicHealth = ({ shellTheme = 'classic' }: { shellTheme?: DphShellTheme } = {}) => {
   const navigate = useNavigate();
   const { online: cadOnline, mode: cadMode } = useCadStatus();
 
@@ -1591,13 +1585,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     'personnel', 'division', 'vehicle', 'equipment', 'resources', 'calendar', 'information',
   ]);
   const [activeTab, setActiveTab, rawSection] = usePortalSection<Tab>({
-    base: 'dps',
-    valid: DPS_SECTIONS,
+    base: 'dph',
+    valid: DPH_SECTIONS,
     defaultSection: 'personnel-roster',
     resolveParent: (raw) => {
       if (raw === "supervisory-panel" || raw.startsWith("supervisory-panel-")) return "supervisory-panel";
-      if (raw === "department-panel" || raw.startsWith("department-panel-")) return "department-panel";
-      if (raw.startsWith("resources-") || raw.startsWith("edit_resource_") || raw.startsWith("public_resource_")) return "resources";
+      if (raw === 'department-panel' || raw.startsWith('department-panel-')) return 'department-panel';
+      if (raw.startsWith('resources-') || raw.startsWith('edit_resource_') || raw.startsWith('public_resource_')) return 'resources';
       return null;
     },
   });
@@ -1612,7 +1606,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   }, [rawSection]);
   const setPanelSection = useCallback((next: PanelSection | null) => {
     const parent = activeTab === 'supervisory-panel' ? 'supervisory-panel' : 'department-panel';
-    navigate(nestedPortalSectionPath('dps', parent, next));
+    navigate(nestedPortalSectionPath('dph', parent, next));
   }, [navigate, activeTab]);
   const [divisionRanksForEdit, setDivisionRanksForEdit] = useState<{ id: number; name: string; division_id: number | null }[]>([]);
   const [rosterDivisions, setRosterDivisions] = useState<RosterDivision[]>([]);
@@ -1631,7 +1625,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const [rosterSearch,  setRosterSearch]  = useState('');
   const [collapsed,     setCollapsed]     = useState<Record<string, boolean>>({});
 
-  // Department panel ? personnel
+  // Department panel — personnel
   const [panelMembers,  setPanelMembers]  = useState<RosterMember[]>([]);
   const [panelLoading,  setPanelLoading]  = useState(false);
   const [panelSearch,   setPanelSearch]   = useState('');
@@ -1639,10 +1633,10 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const [editMember,    setEditMember]    = useState<RosterMember | null>(null);
   const [accessMemberId, setAccessMemberId] = useState<number | null>(null);
   const [addOpen,       setAddOpen]       = useState(false);
-  // Department panel ? ranks (for modal dropdowns)
-  const [ranksRaw,        setRanksRaw]        = useState<DpsRank[]>([]);
+  // Department panel — ranks (for modal dropdowns)
+  const [ranksRaw,        setRanksRaw]        = useState<DphRank[]>([]);
   const ranks = Array.isArray(ranksRaw) ? ranksRaw : [];
-  const setRanks = (value: React.SetStateAction<DpsRank[]>) => {
+  const setRanks = (value: React.SetStateAction<DphRank[]>) => {
     setRanksRaw(prev => {
       const base = Array.isArray(prev) ? prev : [];
       const next = typeof value === 'function' ? value(base) : value;
@@ -1703,10 +1697,10 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const [dragOverEquipmentSide,  setDragOverEquipmentSide]  = useState<'before' | 'after'>('after');
   const [dragOverEquipmentCat,   setDragOverEquipmentCat]   = useState<string | null>(null);
 
-  // Department panel ? groups (roster section headings)
-  const [groupsRaw,        setGroupsRaw]        = useState<DpsGroup[]>([]);
+  // Department panel — groups (roster section headings)
+  const [groupsRaw,        setGroupsRaw]        = useState<DphGroup[]>([]);
   const groups = Array.isArray(groupsRaw) ? groupsRaw : [];
-  const setGroups = (value: React.SetStateAction<DpsGroup[]>) => {
+  const setGroups = (value: React.SetStateAction<DphGroup[]>) => {
     setGroupsRaw(prev => {
       const base = Array.isArray(prev) ? prev : [];
       const next = typeof value === 'function' ? value(base) : value;
@@ -1726,11 +1720,11 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const [addingRank,       setAddingRank]       = useState(false);
   // rank edit modal
   const [editRankId,       setEditRankId]       = useState<number | null>(null);
-  const [dpsGuildRoles,    setDpsGuildRoles]    = useState<DpsDiscordRole[]>([]);
+  const [dpsGuildRoles,    setDpsGuildRoles]    = useState<DphDiscordRole[]>([]);
   // Event calendar
-  const [eventsRaw,       setEventsRaw]       = useState<DpsEvent[]>([]);
+  const [eventsRaw,       setEventsRaw]       = useState<DphEvent[]>([]);
   const events = Array.isArray(eventsRaw) ? eventsRaw : [];
-  const setEvents = (value: React.SetStateAction<DpsEvent[]>) => {
+  const setEvents = (value: React.SetStateAction<DphEvent[]>) => {
     setEventsRaw(prev => {
       const base = Array.isArray(prev) ? prev : [];
       const next = typeof value === 'function' ? value(base) : value;
@@ -1739,10 +1733,10 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   };
   const [eventsLoading,   setEventsLoading]   = useState(false);
   const [showEventForm,   setShowEventForm]   = useState(false);
-  const [editingEvent,    setEditingEvent]    = useState<DpsEvent | null>(null);
+  const [editingEvent,    setEditingEvent]    = useState<DphEvent | null>(null);
   const [eventForm,       setEventForm]       = useState({
     title: '', event_date: '', event_time: '', location: '', purpose: '',
-    hosted_by: '', hosting_department: 'Department of Public Safety', is_public: false,
+    hosted_by: '', hosting_department: 'Department of Public Health', is_public: false,
   });
   const [savingEvent,     setSavingEvent]     = useState(false);
   const [deletingEventId, setDeletingEventId] = useState<number | null>(null);
@@ -1756,7 +1750,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const [savingInfo,       setSavingInfo]       = useState(false);
 
   // Resources
-  const [resources,           setResources]           = useState<DpsResource[]>([]);
+  const [resources,           setResources]           = useState<DphResource[]>([]);
   const [resourcesLoading,    setResourcesLoading]    = useState(false);
   const [addResourceStep,     setAddResourceStep]     = useState<0 | 1 | 2>(0); // 0=closed, 1=name, 2=type
   const [newResourceName,     setNewResourceName]     = useState('');
@@ -1765,7 +1759,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const [uploadFile,          setUploadFile]          = useState<File | null>(null);
   const [googleDocSelection,  setGoogleDocSelection]  = useState<GoogleDocSelection | null>(null);
   const [uploadStatus,        setUploadStatus]        = useState<string | null>(null);
-  const [openPdf,             setOpenPdf]             = useState<DpsResource | null>(null);
+  const [openPdf,             setOpenPdf]             = useState<DphResource | null>(null);
   const [openDocId,           setOpenDocId]           = useState<number | null>(null);
   const [openDocCanEdit,      setOpenDocCanEdit]       = useState(false);
   const [deletingResourceId,  setDeletingResourceId]  = useState<number | null>(null);
@@ -1773,7 +1767,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const [newResourceDivisionOnly, setNewResourceDivisionOnly] = useState(true);
   const [newResourceAllowedRanks, setNewResourceAllowedRanks] = useState<string[]>([]);
   const [newResourcePersonnelOnly, setNewResourcePersonnelOnly] = useState(false);
-  const [newResourceAllowedDpsRanks, setNewResourceAllowedDpsRanks] = useState<string[]>([]);
+  const [newResourceAllowedDphRanks, setNewResourceAllowedDphRanks] = useState<string[]>([]);
   const [divisionResourcesTick, setDivisionResourcesTick] = useState(0);
   // rank drag-and-drop
   const [dragRankId,       setDragRankId]       = useState<number | null>(null);
@@ -1790,7 +1784,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const [dragOverVehicleSide, setDragOverVehicleSide] = useState<'before' | 'after'>('after');
   const [dragOverVehicleCat,  setDragOverVehicleCat]  = useState<string | null>(null);
 
-  // ?? Auth ?????????????????????????????????????????????????????????????????????
+  // ── Auth ─────────────────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
     const validate = async () => {
@@ -1819,7 +1813,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     return () => { mounted = false; };
   }, [navigate]);
 
-  // ?? Phone SSE ????????????????????????????????????????????????????????????????
+  // ── Phone SSE ────────────────────────────────────────────────────────────────
   usePhoneSSE(session ? session.username : null, (ev) => {
     if (ev.type === 'incoming_call') {
       setIncomingCall({ callId: ev.callId, callerUsername: ev.callerUsername, calleeName: ev.calleeName, phone: ev.phone });
@@ -1837,55 +1831,60 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   };
   const handleSignOut = () => { setIsSigningOut(true); clearCadSession(); toast.success('Signed out successfully.'); navigate('/', { replace: true }); };
 
-  // ?? Vehicle roster fetch ?????????????????????????????????????????????????????
+  // ── Vehicle roster fetch ─────────────────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== 'vehicle-roster') return;
     const showLoading = fleet.length === 0;
     if (showLoading) setFleetLoading(true);
-    fetchRosterArray<FleetVehicle>('/api/roster/vehicles', 'vehicle roster')
-      .then(setFleet)
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load vehicle roster.'))
+    fetch('/api/dph/vehicles', { headers: { accept: 'application/json' }, cache: 'no-store' })
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((rows: unknown) => setFleet(Array.isArray(rows) ? rows as FleetVehicle[] : []))
+      .catch(() => toast.error('Failed to load vehicle roster.'))
       .finally(() => { if (showLoading) setFleetLoading(false); });
   }, [activeTab]);
 
-  // ?? Equipment roster fetch ???????????????????????????????????????????????????
+  // ── Equipment roster fetch ───────────────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== 'equipment-roster') return;
     const showLoading = equipment.length === 0;
     if (showLoading) setEquipmentLoading(true);
-    fetchRosterArray<EquipmentItem>('/api/roster/equipment', 'equipment roster')
-      .then(setEquipment)
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load equipment roster.'))
+    fetch('/api/dph/equipment', { headers: { accept: 'application/json' }, cache: 'no-store' })
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((rows: unknown) => setEquipment(Array.isArray(rows) ? rows as EquipmentItem[] : []))
+      .catch(() => toast.error('Failed to load equipment roster.'))
       .finally(() => { if (showLoading) setEquipmentLoading(false); });
   }, [activeTab]);
 
-  // ?? Mount: load groups + ranks so the Department Panel access check works ?????
+  // ── Mount: load groups + ranks so the Department Panel access check works ─────
   useEffect(() => {
-    loadRosterMetadata()
-      .then(({ groups: grps, ranks: rnks, divs, divRanks }) => {
-        setGroups(grps);
-        setRanks(rnks);
-        setDivisionRanksForEdit(divRanks);
-        setRosterDivisions(divs);
+    loadDphRosterMetadata()
+      .then((meta) => {
+        setGroups(meta.groups);
+        setRanks(meta.ranks);
+        setDivisionRanksForEdit(meta.divRanks);
+        setRosterDivisions(meta.divs);
         setDivisionStats({
-          divisions: divs.length,
-          ranks: divRanks.length,
+          divisions: meta.divs.length,
+          ranks: meta.divRanks.length,
         });
       })
-      .catch(() => { /* silent ? button just won't show until data is available */ })
+      .catch(() => { /* silent — button just won't show until data is available */ })
       .finally(() => setRosterMetaReady(true));
   }, []);
 
-  // ?? Roster for membership checks on Resources tab ????????????????????????????
+  // ── Roster for membership checks on Resources tab ────────────────────────────
   useEffect(() => {
     if (activeTab !== 'resources') return;
     if (roster.length > 0) return;
-    fetchRosterArray<RosterMember>('/api/roster', 'roster')
-      .then((rows) => setRoster(dedupeRosterMembersById(rows.map(normalizeRosterMember))))
-      .catch(() => { /* silent ? division-only resources may stay hidden until roster loads elsewhere */ });
+    fetch('/api/dph', { headers: { accept: 'application/json' } })
+      .then(r => (r.ok ? r.json() : null))
+      .then((rows: unknown) => {
+        if (Array.isArray(rows)) setRoster(dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)));
+      })
+      .catch(() => { /* silent — division-only resources may stay hidden until roster loads elsewhere */ });
   }, [activeTab, roster.length]);
 
-  // ?? Personnel / Division roster fetch ?????????????????????????????????????????
+  // ── Personnel / Division roster fetch ─────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== 'personnel-roster' && activeTab !== 'division-roster' && activeTab !== 'divisions-information') return;
     let cancelled = false;
@@ -1893,9 +1892,9 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     if (showLoading) setRosterLoading(true);
 
     void (async () => {
-      const metaP = loadRosterMetadata();
+      const metaP = loadDphRosterMetadata();
       try {
-        const members = await fetchRosterArray<RosterMember>('/api/roster', 'roster');
+        const members = await fetchRosterArray<RosterMember>('/api/dph', 'roster');
         if (cancelled) return;
         setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
       } catch (err) {
@@ -1915,7 +1914,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
         setRosterDivisions(meta.divs);
         setDivisionStats({ divisions: meta.divs.length, ranks: meta.divRanks.length });
       } catch {
-        /* members already painted ? titles apply when metadata arrives */
+        /* members already painted — titles apply when metadata arrives */
       } finally {
         if (!cancelled) setRosterMetaReady(true);
       }
@@ -1924,10 +1923,10 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     return () => { cancelled = true; };
   }, [activeTab]);
 
-  // ?? Department panel fetch (all members including inactive) ???????????????????
+  // ── Department panel fetch (all members including inactive) ───────────────────
   const fetchPanelMembers = (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setPanelLoading(true);
-    fetchRosterArray<RosterMember>('/api/roster?all=1', 'members')
+    fetchRosterArray<RosterMember>('/api/dph?all=1', 'members')
       .then((rows) => setPanelMembers(dedupeRosterMembersById(rows.map(normalizeRosterMember))))
       .catch((err) => {
         if (!opts?.silent) {
@@ -1939,7 +1938,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   };
   const fetchRanks = (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setRanksLoading(true);
-    fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks')
+    fetchRosterArray<DphRank>('/api/dph/ranks', 'ranks')
       .then((rows) => setRanks(dedupeTitleRanksByName(rows)))
       .catch((err) => {
         if (opts?.silent) return;
@@ -1957,7 +1956,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     try {
       const dynamicRanks = ranks.filter(r => r.callsign_type === 'dynamic');
       await Promise.all(dynamicRanks.map(r =>
-        fetch(`/api/roster/ranks/${r.id}/auto-assign-callsigns`, { method: 'POST' }).catch(() => null)
+        fetch(`/api/dph/ranks/${r.id}/auto-assign-callsigns`, { method: 'POST' }).catch(() => null)
       ));
       fetchPanelMembers();
       toast.success('Callsigns synced.');
@@ -1968,18 +1967,17 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     }
   };
 
-  /** Pull DPS Discord guild members and apply linked-rank add/remove to the roster. */
+  /** Pull DPH Discord guild members and apply linked-rank add/remove to the roster. */
   const handleSyncDiscordRoles = async (opts?: { silent?: boolean }) => {
     setSyncingDiscord(true);
     try {
-      const res = await fetch('/api/roster/sync-discord-roles', { method: 'POST' });
+      const res = await fetch('/api/dph/sync-discord-roles', { method: 'POST' });
       const data = await res.json().catch(() => ({})) as {
         assigned?: number; skipped?: number; removed?: number; errors?: string[];
         divisions?: { assigned?: number; removed?: number; errors?: string[] };
         error?: string;
       };
       if (!res.ok) throw new Error(data.error ?? 'Discord sync failed.');
-      // A silent (automatic) sync must not re-trigger the panel loading screen.
       fetchPanelMembers({ silent: opts?.silent });
       fetchRanks({ silent: opts?.silent });
       if (!opts?.silent) {
@@ -1990,7 +1988,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
         if (errCount > 0) {
           toast.error(`Discord sync finished with ${errCount} error(s). Added ${assigned}, removed ${removed}.`);
         } else {
-          toast.success(`Discord sync complete ? added ${assigned}, removed ${removed}.`);
+          toast.success(`Discord sync complete — added ${assigned}, removed ${removed}.`);
         }
       }
     } catch (err) {
@@ -2001,24 +1999,30 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
       setSyncingDiscord(false);
     }
   };
-  const fetchGroups = () => {
-    setGroupsLoading(true);
-    fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups')
-      .then(setGroups)
+  const fetchGroups = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setGroupsLoading(true);
+    fetchRosterArray<DphGroup>('/api/dph/groups', 'groups')
+      .then((rows) => setGroups(rows))
       .catch((err) => {
-        setGroups([]);
-        toast.error(err instanceof Error ? err.message : 'Failed to load groups.');
+        if (opts?.silent) return;
+        setGroups((prev) => {
+          if (prev.length === 0) {
+            toast.error(err instanceof Error ? err.message : 'Failed to load groups.');
+          }
+          return prev;
+        });
       })
-      .finally(() => setGroupsLoading(false));
+      .finally(() => { if (!opts?.silent) setGroupsLoading(false); });
   };
   const fetchEvents = () => {
     const showLoading = events.length === 0;
     if (showLoading) setEventsLoading(true);
-    fetchRosterArray<DpsEvent>('/api/roster/events', 'events')
-      .then(setEvents)
-      .catch((err) => {
+    fetch('/api/dph/events', { headers: { accept: 'application/json' } })
+      .then(r => r.json())
+      .then((rows) => setEvents(Array.isArray(rows) ? rows : []))
+      .catch(() => {
         setEvents([]);
-        toast.error(err instanceof Error ? err.message : 'Failed to load events.');
+        toast.error('Failed to load events.');
       })
       .finally(() => { if (showLoading) setEventsLoading(false); });
   };
@@ -2029,8 +2033,9 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const fetchPageInfo = () => {
     const showLoading = pageInfo === null;
     if (showLoading) setInfoLoading(true);
-    fetchRosterJson<{ sections?: (PageBlock | Record<string, unknown>)[] }>('/api/roster/content/page_info', 'page info')
-      .then((d) => {
+    fetch('/api/dph/content/page_info')
+      .then(r => r.json())
+      .then((d: { sections?: (PageBlock | Record<string,unknown>)[] }) => {
         if (d.sections?.length) {
           // Migrate old heading+body format to new block format
           const sections: PageBlock[] = (d.sections as any[]).map((s: any): PageBlock => {
@@ -2050,11 +2055,9 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   };
 
   const fetchIndexInfo = () => {
-    fetchRosterJson<Partial<IndexInfoContent>>(
-      '/api/roster/content/index_info',
-      'index info',
-    )
-      .then((d) => {
+    fetch('/api/dph/content/index_info')
+      .then(r => r.json())
+      .then((d: Partial<IndexInfoContent>) => {
         if (indexInfoHasContent(d)) {
           setIndexInfoForm(indexInfoFormFromApi(d));
         }
@@ -2070,14 +2073,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     const showLoading = fleet.length === 0;
     if (showLoading) { setFleetLoading(true); setCategoriesLoading(true); }
     Promise.all([
-      fetchRosterArray<FleetVehicle>('/api/roster/vehicles', 'vehicles'),
-      fetchRosterArray<{ id: number; name: string; sort_order: number }>('/api/roster/fleet/categories', 'vehicle categories'),
+      fetch('/api/dph/vehicles',         { headers: { accept: 'application/json' }, cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+      fetch('/api/dph/fleet/categories', { headers: { accept: 'application/json' }, cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
     ])
-      .then(([vehicles, cats]) => {
-        setFleet(vehicles);
-        setFleetCategories(cats);
+      .then(([vehicles, cats]: [unknown, unknown]) => {
+        setFleet(Array.isArray(vehicles) ? vehicles as FleetVehicle[] : []);
+        setFleetCategories(Array.isArray(cats) ? cats as {id:number;name:string;sort_order:number}[] : []);
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load vehicles.'))
+      .catch(() => toast.error('Failed to load vehicles.'))
       .finally(() => { if (showLoading) { setFleetLoading(false); setCategoriesLoading(false); } });
   };
 
@@ -2085,14 +2088,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     const showLoading = equipment.length === 0;
     if (showLoading) { setEquipmentLoading(true); setEqCategoriesLoading(true); }
     Promise.all([
-      fetchRosterArray<EquipmentItem>('/api/roster/equipment', 'equipment'),
-      fetchRosterArray<{ id: number; name: string; sort_order: number }>('/api/roster/equipment/categories', 'equipment categories'),
+      fetch('/api/dph/equipment',            { headers: { accept: 'application/json' }, cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
+      fetch('/api/dph/equipment/categories', { headers: { accept: 'application/json' }, cache: 'no-store' }).then(r => { if (!r.ok) throw new Error(); return r.json(); }),
     ])
-      .then(([items, cats]) => {
-        setEquipment(items);
-        setEquipmentCategories(cats);
+      .then(([items, cats]: [unknown, unknown]) => {
+        setEquipment(Array.isArray(items) ? items as EquipmentItem[] : []);
+        setEquipmentCategories(Array.isArray(cats) ? cats as {id:number;name:string;sort_order:number}[] : []);
       })
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load equipment.'))
+      .catch(() => toast.error('Failed to load equipment.'))
       .finally(() => { if (showLoading) { setEquipmentLoading(false); setEqCategoriesLoading(false); } });
   };
 
@@ -2110,14 +2113,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     const cleanups: Array<() => void> = [];
     if (panelSection === 'personnel') {
       fetchPanelMembers(); fetchRanks(); fetchGroups();
-      // Discord sync and guild roles are refinements ? let the panel paint first.
+      // Discord sync and guild roles are refinements — let the panel paint first.
       const idle = window.setTimeout(() => {
         void handleSyncDiscordRoles({ silent: true });
-        // Load DPS guild roles for the Discord-role dropdown in the rank edit modal
-        fetch('/api/roster/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
+        // Load DPH guild roles for the Discord-role dropdown in the rank edit modal
+        fetch('/api/dph/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
           .then(r => r.ok ? r.json() : [])
-          .then((rows: DpsDiscordRole[]) => setDpsGuildRoles(rows))
-          .catch(() => { /* non-fatal ? dropdown just stays empty */ });
+          .then((rows: DphDiscordRole[]) => setDpsGuildRoles(rows))
+          .catch(() => { /* non-fatal — dropdown just stays empty */ });
       }, 400);
       cleanups.push(() => window.clearTimeout(idle));
     }
@@ -2126,25 +2129,31 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
       fetchPanelMembers({ silent: panelSection === 'division' && panelMembers.length > 0 });
       // Sync Discord-linked division ranks onto the roster
       if (panelSection === 'division') {
-        fetch('/api/roster/sync-division-discord-roles', { method: 'POST' })
+        fetch('/api/dph/sync-division-discord-roles', { method: 'POST' })
           .then(r => r.ok ? r.json() : null)
           .then(() => fetchPanelMembers({ silent: true }))
           .catch(() => { /* non-fatal */ });
       }
-      fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions')
-        .then((rows) => {
+      fetch('/api/dph/divisions', { headers: { accept: 'application/json' } })
+        .then(r => r.json())
+        .then(divs => {
+          const rows = Array.isArray(divs) ? (divs as RosterDivision[]) : [];
           setRosterDivisions(rows);
           setDivisionStats(s => ({ ...s, divisions: rows.length }));
         })
         .catch(() => {});
-      fetchRosterArray<{ id: number; name: string; division_id: number | null }>('/api/roster/division-ranks', 'division ranks')
-        .then((divRanks) => {
-          setDivisionRanksForEdit(divRanks);
-          setDivisionStats(s => ({ ...s, ranks: divRanks.length }));
+      fetch('/api/dph/division-ranks', { headers: { accept: 'application/json' } })
+        .then(r => r.json())
+        .then(divRanks => {
+          setDivisionRanksForEdit(Array.isArray(divRanks) ? divRanks : []);
+          setDivisionStats(s => ({ ...s, ranks: Array.isArray(divRanks) ? divRanks.length : 0 }));
         })
         .catch(() => {});
     }
-    if (panelSection === 'vehicle' || panelSection === null) { fetchFleetPanel(); fetchRanks(); }
+    if (panelSection === 'vehicle' || panelSection === null) {
+      fetchFleetPanel();
+      fetchRanks({ silent: true });
+    }
     if (panelSection === 'equipment' || panelSection === null) { fetchEquipmentPanel(); }
     if (panelSection === 'resources') { fetchResources(); }
     if (panelSection === 'information') { fetchIndexInfo(); fetchPageInfo(); }
@@ -2154,19 +2163,20 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
   useEffect(() => {
     if (editRankId === null && addRankGroupId == null) return;
-    fetch('/api/roster/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
+    fetch('/api/dph/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
       .then(r => r.ok ? r.json() : [])
-      .then((rows: DpsDiscordRole[]) => setDpsGuildRoles(rows))
+      .then((rows: DphDiscordRole[]) => setDpsGuildRoles(rows))
       .catch(() => {});
   }, [editRankId, addRankGroupId]);
 
-  // ?? Resources fetch ???????????????????????????????????????????????????????????
+  // ── Resources fetch ───────────────────────────────────────────────────────────
   const fetchResources = () => {
     const showLoading = resources.length === 0;
     if (showLoading) setResourcesLoading(true);
-    fetchRosterArray<DpsResource>('/api/resources', 'resources')
-      .then(setResources)
-      .catch((err) => toast.error(err instanceof Error ? err.message : 'Failed to load resources.'))
+    fetch('/api/dph/resources', { headers: { accept: 'application/json' } })
+      .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((rows: DphResource[]) => setResources(rows))
+      .catch(() => toast.error('Failed to load resources.'))
       .finally(() => { if (showLoading) setResourcesLoading(false); });
   };
 
@@ -2174,7 +2184,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     if (activeTab === 'resources') fetchResources();
   }, [activeTab]);
 
-  const openResourceState = useCallback((r: DpsResource, canEdit: boolean) => {
+  const openResourceState = useCallback((r: DphResource, canEdit: boolean) => {
     if (isPdfLikeResource(r)) {
       setOpenPdf(r);
       setOpenDocId(null);
@@ -2187,13 +2197,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   }, []);
 
   const { openResourceUrl, closeResourceUrl } = useResourceDeepLink({
-    department: 'dps',
+    department: 'dph',
     resources,
     resourcesLoaded: !resourcesLoading,
     onOpen: openResourceState,
   });
 
-  const handleOpenResource = (r: DpsResource, canEdit: boolean) => {
+  const handleOpenResource = (r: DphResource, canEdit: boolean) => {
     openResourceUrl(r, canEdit);
     openResourceState(r, canEdit);
   };
@@ -2222,7 +2232,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     if (!newResourceName.trim()) return;
     setCreatingResource(true);
     try {
-      const res = await fetch('/api/resources', {
+      const res = await fetch('/api/dph/resources', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -2236,13 +2246,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                 allowed_ranks: newResourceAllowedRanks,
               }
             : {
-                personnel_only: newResourcePersonnelOnly || newResourceAllowedDpsRanks.length > 0,
-                allowed_dps_ranks: newResourceAllowedDpsRanks,
+                personnel_only: newResourcePersonnelOnly || newResourceAllowedDphRanks.length > 0,
+                allowed_dph_ranks: newResourceAllowedDphRanks,
               }),
         }),
       });
       if (!res.ok) throw new Error('Failed to create resource.');
-      const doc = await res.json() as DpsResource;
+      const doc = await res.json() as DphResource;
       if (resourceTargetDivisionId == null) {
         setResources(p => [doc, ...p]);
       } else {
@@ -2270,7 +2280,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     setNewResourceDivisionOnly(true);
     setNewResourceAllowedRanks([]);
     setNewResourcePersonnelOnly(false);
-    setNewResourceAllowedDpsRanks([]);
+    setNewResourceAllowedDphRanks([]);
   };
 
   const handleUploadResource = async () => {
@@ -2281,7 +2291,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
       return;
     }
     setCreatingResource(true);
-    setUploadStatus(ext === 'docx' ? 'Converting document?' : 'Uploading?');
+    setUploadStatus(ext === 'docx' ? 'Converting document…' : 'Uploading…');
     try {
       const form = new FormData();
       form.append('title', newResourceName.trim());
@@ -2292,11 +2302,11 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
         form.append('division_only', newResourceDivisionOnly ? '1' : '0');
         form.append('allowed_ranks', JSON.stringify(newResourceAllowedRanks));
       } else {
-        form.append('personnel_only', (newResourcePersonnelOnly || newResourceAllowedDpsRanks.length > 0) ? '1' : '0');
-        form.append('allowed_dps_ranks', JSON.stringify(newResourceAllowedDpsRanks));
+        form.append('personnel_only', (newResourcePersonnelOnly || newResourceAllowedDphRanks.length > 0) ? '1' : '0');
+        form.append('allowed_dph_ranks', JSON.stringify(newResourceAllowedDphRanks));
       }
-      const res = await fetch('/api/resources/upload', { method: 'POST', body: form });
-      const body = await res.json().catch(() => ({})) as DpsResource & { error?: string };
+      const res = await fetch('/api/dph/resources/upload', { method: 'POST', body: form });
+      const body = await res.json().catch(() => ({})) as DphResource & { error?: string };
       if (!res.ok) throw new Error(body.error ?? 'Upload failed. Please try again.');
       if (resourceTargetDivisionId == null) {
         setResources(p => [body, ...p]);
@@ -2321,7 +2331,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     setCreatingResource(true);
     try {
       const body = await persistGoogleDocResource({
-        department: 'dps',
+        department: 'dph',
         title: newResourceName.trim() || googleDocSelection.title,
         createdBy: session?.username,
         fileId: googleDocSelection.fileId,
@@ -2334,12 +2344,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                 allowed_ranks: newResourceAllowedRanks,
               }
             : {
-                personnel_only: newResourcePersonnelOnly || newResourceAllowedDpsRanks.length > 0,
-                allowed_dps_ranks: newResourceAllowedDpsRanks,
+                personnel_only: newResourcePersonnelOnly || newResourceAllowedDphRanks.length > 0,
+                allowed_dph_ranks: newResourceAllowedDphRanks,
               }),
         },
       });
-      const saved = body as DpsResource;
+      const saved = body as DphResource;
       if (resourceTargetDivisionId == null) {
         setResources(p => [saved, ...p]);
         fetchResources();
@@ -2360,7 +2370,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const handleDeleteResource = async (id: number) => {
     setDeletingResourceId(id);
     try {
-      await fetch(`/api/resources/${id}`, { method: 'DELETE' });
+      await fetch(`/api/dph/resources/${id}`, { method: 'DELETE' });
       setResources(p => p.filter(r => r.id !== id));
       setDivisionResourcesTick(t => t + 1);
       toast.success('Resource deleted.');
@@ -2371,25 +2381,26 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     }
   };
 
-  // ?? Roster helpers ????????????????????????????????????????????????????????????
+  // ── Roster helpers ────────────────────────────────────────────────────────────
   const filteredRoster = (Array.isArray(roster) ? roster : []).filter(m => {
     const q = rosterSearch.toLowerCase();
-    return !q || m.username.toLowerCase().includes(q) || (m.dps_rank || m.rank).toLowerCase().includes(q)
+    return !q || m.username.toLowerCase().includes(q) || (m.dph_rank || m.rank).toLowerCase().includes(q)
       || m.callsign?.toLowerCase().includes(q) || m.discord_username?.toLowerCase().includes(q);
   });
   const getRankMeta = (rankName: string | null | undefined) =>
     rankName ? (ranks.find(r => r.name.toLowerCase() === rankName.toLowerCase().trim()) ?? null) : null;
-  const departmentRankName = (m: RosterMember) => m.dps_rank || null;
+  const departmentRankName = (m: RosterMember) => m.dph_rank || m.rank || null;
   const sortRosterMembers = (list: RosterMember[]) =>
     sortByRankThenCallsign(list, ranks, departmentRankName);
   const groupedRoster = useMemo(() => {
-    return buildPersonnelTitleGroups(
+    return buildPersonnelRosterTree(
       filteredRoster,
       groups,
       ranks,
       departmentRankName,
+      { hideEmptyRanks: Boolean(rosterSearch.trim()) },
     );
-  }, [filteredRoster, groups, ranks]);
+  }, [filteredRoster, groups, ranks, rosterSearch]);
   const visibleRosterCount = useMemo(
     () => groupedRoster.reduce((sum, g) => sum + g.members.length, 0),
     [groupedRoster],
@@ -2400,17 +2411,17 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
   const filteredPanel = sortRosterMembers((Array.isArray(panelMembers) ? panelMembers : []).filter(m => {
     const q = panelSearch.toLowerCase();
-    return !q || m.username.toLowerCase().includes(q) || (m.dps_rank || m.rank).toLowerCase().includes(q) || m.callsign?.toLowerCase().includes(q);
+    return !q || m.username.toLowerCase().includes(q) || (m.dph_rank || m.rank).toLowerCase().includes(q) || m.callsign?.toLowerCase().includes(q);
   }));
 
   const departmentPermissionOverviewRows = useMemo((): PermissionAccessOverviewRow[] => (
     sortRosterMembers(Array.isArray(panelMembers) ? panelMembers : []).map(m => {
-      const rankMeta = ranks.find(r => r.name.toLowerCase() === (m.dps_rank || m.rank)?.toLowerCase());
+      const rankMeta = ranks.find(r => r.name.toLowerCase() === (m.dph_rank || m.rank)?.toLowerCase());
       return {
         id: m.id,
         username: m.username,
         subtitle: m.discord_username,
-        rankLabel: m.dps_rank || m.rank || '?',
+        rankLabel: m.dph_rank || m.rank || '—',
         rankColor: rankMeta?.color_hex ?? null,
         permissions: collectDepartmentPermissions(m, ranks, groups),
       };
@@ -2418,43 +2429,43 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   ), [panelMembers, ranks, groups]);
 
   const formatDate = (d: string | null) => {
-    if (!d) return '?';
+    if (!d) return '—';
     try { return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
     catch { return d; }
   };
 
-  // ?? Department panel actions ??????????????????????????????????????????????????
+  // ── Department panel actions ──────────────────────────────────────────────────
   const handleSaveEdit = async (id: number, form: EditForm) => {
     const certs = form.certifications.split(',').map(s => s.trim()).filter(Boolean);
-    const res = await fetch(`/api/roster/${id}`, {
+    const res = await fetch(`/api/dph/${id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...form, certifications: certs, actor: session?.username ?? 'DPS Panel' }),
+      body: JSON.stringify({ ...form, certifications: certs, actor: session?.username ?? 'DPH Panel' }),
     });
     if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? 'Failed to save.'); }
-    toast.success('Officer updated.');
+    toast.success('Member updated.');
     fetchPanelMembers();
     // Also refresh personnel roster if it's loaded
     if (roster.length > 0) {
-      fetch('/api/roster', { headers: { accept: 'application/json' } })
+      fetch('/api/dph', { headers: { accept: 'application/json' } })
         .then(r => r.json()).then((rows) => setRoster(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : [])).catch(() => {});
     }
   };
 
   const handleAddOfficer = async (form: AddForm) => {
-    const res = await fetch('/api/roster', {
+    const res = await fetch('/api/dph', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...form, actor: session?.username ?? 'DPS Panel' }),
+      body: JSON.stringify({ ...form, actor: session?.username ?? 'DPH Panel' }),
     });
-    if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? 'Failed to add officer.'); }
-    toast.success('Officer added successfully.');
+    if (!res.ok) { const e = await res.json() as { error?: string }; throw new Error(e.error ?? 'Failed to add member.'); }
+    toast.success('Member added successfully.');
     fetchPanelMembers();
   };
 
   const handleDelete = async (member: RosterMember) => {
     if (!confirm(`Remove ${member.username} from the roster? This cannot be undone.`)) return;
-    const res = await fetch(`/api/roster/${member.id}`, { method: 'DELETE', headers: { 'x-actor': session?.username ?? 'DPS Panel' } });
+    const res = await fetch(`/api/dph/${member.id}`, { method: 'DELETE', headers: { 'x-actor': session?.username ?? 'DPH Panel' } });
     if (!res.ok) { toast.error('Failed to remove member.'); return; }
     toast.success(`${member.username} removed from roster.`);
     fetchPanelMembers();
@@ -2472,13 +2483,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     )) return;
     setClearingPermissionGrants(true);
     try {
-      const res = await fetch('/api/roster/permissions/clear-all', {
+      const res = await fetch('/api/dph/permissions/clear-all', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-actor': session?.username ?? 'DPS Panel',
+          'x-actor': session?.username ?? 'DPH Panel',
         },
-        body: JSON.stringify({ actor: session?.username ?? 'DPS Panel' }),
+        body: JSON.stringify({ actor: session?.username ?? 'DPH Panel' }),
       });
       if (!res.ok) {
         const err = await res.json() as { error?: string };
@@ -2489,7 +2500,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
       fetchPanelMembers({ silent: true });
       fetchGroups();
       if (roster.length > 0) {
-        fetch('/api/roster', { headers: { accept: 'application/json' } })
+        fetch('/api/dph', { headers: { accept: 'application/json' } })
           .then(r => r.json())
           .then((rows) => {
             if (Array.isArray(rows)) {
@@ -2511,12 +2522,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
       m.id === member.id ? { ...m, can_view_all_resources: enabled } : m
     ));
     try {
-      const res = await fetch(`/api/roster/${member.id}/resource-access`, {
+      const res = await fetch(`/api/dph/${member.id}/resource-access`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           can_view_all_resources: enabled,
-          actor: session?.username ?? 'DPS Panel',
+          actor: session?.username ?? 'DPH Panel',
         }),
       });
       if (!res.ok) {
@@ -2543,13 +2554,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     if (!confirm(`Remove all access permissions for ${member.username}?`)) return;
     setClearingMemberPermissionId(member.id);
     try {
-      const res = await fetch(`/api/roster/${member.id}/permissions/clear`, {
+      const res = await fetch(`/api/dph/${member.id}/permissions/clear`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-actor': session?.username ?? 'DPS Panel',
+          'x-actor': session?.username ?? 'DPH Panel',
         },
-        body: JSON.stringify({ actor: session?.username ?? 'DPS Panel' }),
+        body: JSON.stringify({ actor: session?.username ?? 'DPH Panel' }),
       });
       if (!res.ok) {
         const err = await res.json() as { error?: string };
@@ -2567,7 +2578,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     }
   };
 
-  // ?? Reorder/move ranks via drag-and-drop (same or different group) ????????????
+  // ── Reorder/move ranks via drag-and-drop (same or different group) ────────────
   const handleRankReorder = async (
     targetGroupId: number,
     draggedId: number,
@@ -2578,13 +2589,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     if (!draggedRank) return;
     if (draggedId === targetId) return;
 
-    const sourceGroupId = normalizeRankGroupId(draggedRank.group_id);
-    const targetGroup = normalizeRankGroupId(targetGroupId);
-    const isCrossGroup  = sourceGroupId !== targetGroup;
+    const sourceGroupId = draggedRank.group_id;
+    const isCrossGroup  = sourceGroupId !== targetGroupId;
 
     // Build the new ordered list for the target group (excluding the dragged rank)
     const targetGroupRanks = ranks
-      .filter(r => normalizeRankGroupId(r.group_id) === targetGroup && r.id !== draggedId)
+      .filter(r => r.group_id === targetGroupId && r.id !== draggedId)
       .sort((a, b) => a.sort_order - b.sort_order);
 
     let newOrder: typeof ranks;
@@ -2600,20 +2610,20 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
     // Optimistic update: remove dragged from old position, insert into target group
     setRanks(prev => [
-      ...prev.filter(r => r.id !== draggedId && normalizeRankGroupId(r.group_id) !== targetGroup),
+      ...prev.filter(r => r.id !== draggedId && r.group_id !== targetGroupId),
       ...newOrder.map((r, i) => ({ ...r, group_id: targetGroupId, sort_order: i })),
     ]);
 
     try {
       if (isCrossGroup) {
-        const mv = await fetch(`/api/roster/ranks/${draggedId}`, {
+        const mv = await fetch(`/api/dph/ranks/${draggedId}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ group_id: targetGroupId }),
         });
         if (!mv.ok) throw new Error('move failed');
       }
-      const ro = await fetch('/api/roster/ranks/reorder', {
+      const ro = await fetch('/api/dph/ranks/reorder', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ids: newOrder.map(r => r.id) }),
@@ -2625,7 +2635,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     }
   };
 
-  // ?? Vehicle drag-and-drop reorder / cross-category move ??????????????????????
+  // ── Vehicle drag-and-drop reorder / cross-category move ──────────────────────
   const handleVehicleReorder = async (
     targetCat: string,
     targetCatSort: number,
@@ -2663,14 +2673,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
     try {
       if (isCrossCat) {
-        const mv = await fetch(`/api/roster/fleet/${draggedId}`, {
+        const mv = await fetch(`/api/dph/fleet/${draggedId}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ category: targetCat, category_sort: targetCatSort }),
         });
         if (!mv.ok) throw new Error('move failed');
       }
-      const ro = await fetch('/api/roster/fleet/reorder', {
+      const ro = await fetch('/api/dph/fleet/reorder', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ids: newOrder.map(v => v.id) }),
@@ -2682,7 +2692,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     }
   };
 
-  // ?? Equipment drag-and-drop reorder / cross-category move ????????????????????
+  // ── Equipment drag-and-drop reorder / cross-category move ────────────────────
   const handleEquipmentReorder = async (
     targetCat: string,
     targetCatSort: number,
@@ -2720,14 +2730,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
     try {
       if (isCrossCat) {
-        const mv = await fetch(`/api/roster/equipment/${draggedId}`, {
+        const mv = await fetch(`/api/dph/equipment/${draggedId}`, {
           method: 'PATCH',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ category: targetCat, category_sort: targetCatSort }),
         });
         if (!mv.ok) throw new Error('move failed');
       }
-      const ro = await fetch('/api/roster/equipment/reorder', {
+      const ro = await fetch('/api/dph/equipment/reorder', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ids: newOrder.map(e => e.id) }),
@@ -2739,44 +2749,26 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     }
   };
 
-  // ?? Delete a rank ?????????????????????????????????????????????????????????????
+  // ── Delete a rank ─────────────────────────────────────────────────────────────
   const handleDeleteRank = async (rankId: number, rankName: string) => {
-    const onRank = panelMembers.filter(
-      m => (m.dps_rank ?? '').trim().toLowerCase() === rankName.trim().toLowerCase()
-    ).length;
-    const confirmText = onRank > 0
-      ? `Delete the rank "${rankName}"?\n\n${onRank} member${onRank === 1 ? '' : 's'} on this rank will also be removed from the roster. This cannot be undone.`
-      : `Delete the rank "${rankName}"? This cannot be undone.`;
-    if (!window.confirm(confirmText)) return;
+    if (!window.confirm(`Delete the rank "${rankName}"? This cannot be undone.`)) return;
     try {
-      const res = await fetch(`/api/roster/ranks/${rankId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/dph/ranks/${rankId}`, { method: 'DELETE' });
       if (!res.ok) { toast.error('Failed to delete rank.'); return; }
-      const { removed_members = 0 } = await res.json().catch(() => ({})) as { removed_members?: number };
       setRanks(prev => prev.filter(r => r.id !== rankId));
-      if (removed_members > 0) {
-        fetchPanelMembers({ silent: true });
-        if (roster.length > 0) {
-          fetch('/api/roster', { headers: { accept: 'application/json' } })
-            .then(r => r.json())
-            .then((rows) => setRoster(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : []))
-            .catch(() => { /* non-fatal ? the panel list is already refreshed */ });
-        }
-      }
-      toast.success(removed_members > 0
-        ? `Rank "${rankName}" deleted ? ${removed_members} member${removed_members === 1 ? '' : 's'} removed from the roster.`
-        : `Rank "${rankName}" deleted.`);
+      toast.success(`Rank "${rankName}" deleted.`);
     } catch {
       toast.error('Failed to delete rank.');
     }
   };
 
-  // ?? Add rank to a specific group ?????????????????????????????????????????????
+  // ── Add rank to a specific group ─────────────────────────────────────────────
   const handleAddRankToGroup = async (groupId: number) => {
     const name = newRankName.trim();
     if (!name) return;
     setAddingRank(true);
     try {
-      const res = await fetch('/api/roster/ranks', {
+      const res = await fetch('/api/dph/ranks', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -2791,17 +2783,17 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
       setNewRankDiscordRoleId('');
       setAddRankGroupId(null);
       fetchRanks();
-      toast.success(newRankDiscordRoleId.trim() ? 'Rank added ? Discord sync triggered.' : 'Rank added.');
+      toast.success(newRankDiscordRoleId.trim() ? 'Rank added — Discord sync triggered.' : 'Rank added.');
     } finally { setAddingRank(false); }
   };
 
-  // ?? Group heading actions ?????????????????????????????????????????????????????
+  // ── Group heading actions ─────────────────────────────────────────────────────
   const handleAddGroup = async () => {
     const name = newGroupName.trim();
     if (!name) return;
     setAddingGroup(true);
     try {
-      const res = await fetch('/api/roster/groups', {
+      const res = await fetch('/api/dph/groups', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -2809,17 +2801,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
       const data = await res.json() as { error?: string };
       if (!res.ok) { toast.error(data.error ?? 'Failed to add group.'); return; }
       setNewGroupName('');
-      setAddTitleOpen(false);
       fetchGroups();
-      toast.success('Title added.');
-    } catch {
-      toast.error('Failed to add title.');
     } finally { setAddingGroup(false); }
   };
 
-  const reorderGroupsApi = async (ordered: DpsGroup[]) => {
+  const reorderGroupsApi = async (ordered: DphGroup[]) => {
     try {
-      const res = await fetch('/api/roster/groups/reorder', {
+      const res = await fetch('/api/dph/groups/reorder', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ ids: ordered.map(g => g.id) }),
@@ -2859,7 +2847,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const handleRenameGroup = async (id: number) => {
     const name = editingGroupName.trim();
     if (!name) { setEditingGroupId(null); return; }
-    const res = await fetch(`/api/roster/groups/${id}`, {
+    const res = await fetch(`/api/dph/groups/${id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name }),
@@ -2872,17 +2860,17 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
   const handleDeleteGroup = async (id: number, name: string) => {
     if (!confirm(`Remove the "${name}" group? Its ranks will be moved to the last remaining group.`)) return;
-    await fetch(`/api/roster/groups/${id}`, { method: 'DELETE' });
+    await fetch(`/api/dph/groups/${id}`, { method: 'DELETE' });
     fetchGroups();
   };
 
   const handleTogglePanelAccess = async (id: number, enabled: boolean) => {
     // Optimistic update
     setGroups(prev => prev.map(g => g.id === id ? { ...g, panel_access: enabled } : g));
-    const res = await fetch(`/api/roster/groups/${id}`, {
+    const res = await fetch(`/api/dph/groups/${id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ panel_access: enabled, actor: session?.username ?? 'DPS Panel' }),
+      body: JSON.stringify({ panel_access: enabled, actor: session?.username ?? 'DPH Panel' }),
     });
     if (!res.ok) {
       // Revert on failure
@@ -2893,10 +2881,10 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
   const handleToggleDivisionOversight = async (id: number, enabled: boolean) => {
     setGroups(prev => prev.map(g => g.id === id ? { ...g, division_oversight: enabled } : g));
-    const res = await fetch(`/api/roster/groups/${id}`, {
+    const res = await fetch(`/api/dph/groups/${id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ division_oversight: enabled, actor: session?.username ?? 'DPS Panel' }),
+      body: JSON.stringify({ division_oversight: enabled, actor: session?.username ?? 'DPH Panel' }),
     });
     if (!res.ok) {
       setGroups(prev => prev.map(g => g.id === id ? { ...g, division_oversight: !enabled } : g));
@@ -2906,14 +2894,15 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
   const username = session?.username ?? '';
 
-  // Staff Executive Team members (and hardcoded superadmins) get full DPS access
   const isSuperAdmin = isSuperAdminSession(session);
+
+  // Staff Executive Team members (and hardcoded superadmins) get full DPH access
   const isStaffExecutive =
     isSuperAdmin ||
     session?.staff_role?.toLowerCase() === 'executive team';
 
   const matchedUserRankGroup = (() => {
-    const userRank = (session?.dps_rank || session?.rank || '').trim().toLowerCase();
+    const userRank = (session?.dph_rank || session?.rank || '').trim().toLowerCase();
     if (!userRank) return null;
     const matchedRank = ranks.find(r => r.name.trim().toLowerCase() === userRank);
     if (!matchedRank || matchedRank.group_id == null) return null;
@@ -2957,14 +2946,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const canEditDivisionInfo = hasFullPanelAccess
     || myDivisionAccess.some(a => a.can_edit_info);
 
-  /** Access / Info grants on a division ? Department Panel, limited to those divisions. */
+  /** Access / Info grants on a division → Department Panel, limited to those divisions. */
   const canSeeDepartmentPanel = hasFullPanelAccess || myDivisionAccess.length > 0;
   const isDivisionOnlyPanelEditor = !hasFullPanelAccess && myDivisionAccess.length > 0;
 
   const rank = (() => {
     if (isLoading) return '';
     if (myRosterMember) {
-      return (myRosterMember.dps_rank || myRosterMember.rank || '').trim() || 'Unranked';
+      return (myRosterMember.dph_rank || myRosterMember.rank || '').trim() || 'Unranked';
     }
     return 'Unranked';
   })();
@@ -2987,7 +2976,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     }
   }, [activeTab, panelSection, isDivisionOnlyPanelEditor]);
 
-  const canViewDepartmentResource = (r: DpsResource) => {
+  const canViewDepartmentResource = (r: DphResource) => {
     const bypassAll = isStaffExecutive || hasFullPanelAccess || hasDivisionOversight;
     if (bypassAll) return true;
 
@@ -3004,15 +2993,15 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     }
 
     // Department resources: DPS personnel / DPS rank gates
-    const dpsRanks = Array.isArray(r.allowed_dps_ranks) ? r.allowed_dps_ranks : [];
+    const dpsRanks = Array.isArray(r.allowed_dph_ranks) ? r.allowed_dph_ranks : [];
     if (r.personnel_only || dpsRanks.length > 0) {
       // Per-member override from Edit Personnel Roster
       if (myRosterMember?.can_view_all_resources) return true;
-      const myDpsRank = (session?.dps_rank || session?.rank || myRosterMember?.dps_rank || '').trim();
-      if (!myDpsRank && !myRosterMember) return false;
+      const myDphRank = (session?.dph_rank || session?.rank || myRosterMember?.dph_rank || '').trim();
+      if (!myDphRank && !myRosterMember) return false;
       if (dpsRanks.length === 0) return true;
-      if (!myDpsRank) return false;
-      return dpsRanks.some(n => n.trim().toLowerCase() === myDpsRank.toLowerCase());
+      if (!myDphRank) return false;
+      return dpsRanks.some(n => n.trim().toLowerCase() === myDphRank.toLowerCase());
     }
 
     return true;
@@ -3046,8 +3035,8 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
   const tabTitle = activeTab === 'supervisory-panel'
     ? 'Supervisory Panel'
-    : tabs.find(t => t.id === activeTab)?.label ?? 'Department of Public Safety';
-  const tabSubtitle = getDpsTabSubtitle(activeTab);
+    : tabs.find(t => t.id === activeTab)?.label ?? 'Department of Public Health';
+  const tabSubtitle = getDphTabSubtitle(activeTab);
   const openDepartmentPanel = () => {
     if (isDivisionOnlyPanelEditor) setPanelSection('division');
     else setActiveTab('department-panel');
@@ -3055,14 +3044,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   const openSupervisoryPanel = () => setActiveTab('supervisory-panel');
   const useModernShell = shellTheme === 'modern';
 
-  const dpsTabPanels = (
+  const dphTabPanels = (
     <>
             {activeTab === 'personnel-roster' && (
               <div className="rounded-xl border border-[#131f30] bg-[#070d16] shadow-[0_22px_55px_rgba(0,0,0,0.22)] overflow-hidden">
                 <div className="flex items-center gap-4 border-b border-[#131f30] px-6 py-4">
                   <div className="relative flex-1 max-w-sm">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#526179]" />
-                    <input type="text" placeholder="Search by name, rank, callsign?"
+                    <input type="text" placeholder="Search by name, rank, callsign…"
                       value={rosterSearch} onChange={e => setRosterSearch(e.target.value)}
                       className="h-9 w-full rounded-lg border border-[#1f3050] bg-[#07111f] pl-9 pr-4 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#2f70ff]" />
                   </div>
@@ -3072,12 +3061,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                 </div>
 
                 {!rosterMetaReady ? (
-                  <PageLoadingScreen loading label="Loading?" minHeightClass="min-h-[260px]" />
+                  <PageLoadingScreen loading label="Loading…" minHeightClass="min-h-[260px]" />
                 ) : groupedRoster.length === 0 ? (
                   <div className="flex min-h-[260px] flex-col items-center justify-center gap-2">
                     <Users className="h-8 w-8 text-[#1e2e42]" />
                     <p className="text-sm font-bold text-[#3f5470]">
-                      {rosterSearch ? 'No members match your search.' : 'No members on the roster yet.'}
+                      {rosterSearch ? 'No members match your search.' : 'No ranks or members on the roster yet.'}
                     </p>
                   </div>
                 ) : (
@@ -3105,15 +3094,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                       <tbody>
                         {groupedRoster.map(group => (
                           <React.Fragment key={group.label}>
-                              {/* ?? Title group header row ???????????????????????????? */}
                               <tr
                                 className="cursor-pointer border-b border-t border-[#131f30] bg-[#0a1525] hover:bg-[#0c1830] transition-colors"
                                 onClick={() => toggleGroup(group.label)}>
                                 <td colSpan={9 + rosterDivisions.length} className="px-5 py-2.5">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {collapsed[group.label]
-                                      ? <ChevronRight className="h-3.5 w-3.5 text-[#4384ff] shrink-0" />
-                                      : <ChevronDown  className="h-3.5 w-3.5 text-[#4384ff] shrink-0" />}
+                                      ? <ChevronRight className="h-3.5 w-3.5 text-[#f87171] shrink-0" />
+                                      : <ChevronDown  className="h-3.5 w-3.5 text-[#f87171] shrink-0" />}
                                     <span className="text-xs font-black text-white">{group.label}</span>
                                     <span className="rounded-full bg-[#172235] px-2 py-0.5 text-[9px] font-black text-[#526179]">
                                       {group.members.length}
@@ -3122,7 +3110,100 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                 </td>
                               </tr>
 
-                              {!collapsed[group.label] && group.members.map(m => {
+                              {!collapsed[group.label] && (group.rankSections.length > 0
+                                ? group.rankSections.map(section => {
+                                    const rankKey = `${group.label}::${section.label}`;
+                                    const sectionRankMeta = getRankMeta(section.label);
+                                    return (
+                                      <React.Fragment key={rankKey}>
+                                        <tr
+                                          className="cursor-pointer border-b border-[#0f1b28] bg-[#08111d] hover:bg-[#0c1830] transition-colors"
+                                          onClick={() => toggleGroup(rankKey)}>
+                                          <td colSpan={9 + rosterDivisions.length} className="px-5 py-2 pl-10">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              {collapsed[rankKey]
+                                                ? <ChevronRight className="h-3.5 w-3.5 text-[#f87171] shrink-0" />
+                                                : <ChevronDown  className="h-3.5 w-3.5 text-[#f87171] shrink-0" />}
+                                              {sectionRankMeta?.insignia_url && (
+                                                <img src={sectionRankMeta.insignia_url} alt="" className="h-4 w-4 object-contain shrink-0"
+                                                  onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                              )}
+                                              <span className="text-xs font-black"
+                                                style={{ color: sectionRankMeta?.color_hex ?? '#ffffff' }}>
+                                                {section.label}
+                                              </span>
+                                              <span className="rounded-full bg-[#172235] px-2 py-0.5 text-[9px] font-black text-[#526179]">
+                                                {section.members.length}
+                                              </span>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                        {!collapsed[rankKey] && section.members.length === 0 && (
+                                          <tr className="border-b border-[#0f1b28]">
+                                            <td colSpan={9 + rosterDivisions.length} className="px-5 py-3 pl-16 text-[11px] text-[#3f5470]">
+                                              No officers at this rank.
+                                            </td>
+                                          </tr>
+                                        )}
+                                        {!collapsed[rankKey] && section.members.map(m => {
+                                          const memberRankMeta = getRankMeta(departmentRankName(m)) ?? sectionRankMeta;
+                                          const chipColor = memberRankMeta?.color_hex ?? null;
+                                          return (
+                                            <tr key={m.id} className="border-b border-[#0f1b28] hover:bg-[#081422] transition-colors">
+                                              <td className="px-5 py-3.5 pl-16">
+                                                <div className="flex items-center gap-2">
+                                                  <DiscordAvatar name={m.discord_username || m.username} discordId={m.discord_id} avatarHash={m.avatar_hash} />
+                                                  <span className="text-xs font-black text-white">{m.username || '—'}</span>
+                                                </div>
+                                              </td>
+                                              <td className="px-4 py-3.5">
+                                                <div className="flex items-center gap-1.5">
+                                                  {memberRankMeta?.insignia_url && (
+                                                    <img src={memberRankMeta.insignia_url} alt="" className="h-4 w-4 object-contain shrink-0"
+                                                      onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                                  )}
+                                                  <span className="text-[10px] font-black"
+                                                    style={{ color: chipColor ?? '#a8b7cd' }}>
+                                                    {m.dph_rank || m.rank || '—'}
+                                                  </span>
+                                                </div>
+                                              </td>
+                                              <td className="px-4 py-3.5">
+                                                <span className="inline-flex items-center rounded border border-[#3a1b1b] bg-[#120808] px-2 py-0.5 font-mono text-[10px] font-black text-[#f87171]">
+                                                  {m.callsign || '—'}
+                                                </span>
+                                              </td>
+                                              <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                                              <td className="px-4 py-3.5">
+                                                <DiscordStatusBadge
+                                                  status={m.discord_id ? (discordPresence[m.discord_id] ?? 'offline') : 'offline'}
+                                                />
+                                              </td>
+                                              <td className="px-4 py-3.5 text-[#8392aa]">{formatDate(m.appointed_date)}</td>
+                                              <td className="px-4 py-3.5">
+                                                <span className="font-mono text-[11px] text-[#526179]">{m.discord_id || '—'}</span>
+                                              </td>
+                                              {rosterDivisions.map(d => (
+                                                <td key={d.id} className="px-3 py-3.5 text-center">
+                                                  <UnitDot active={memberInDivision(m, d)} />
+                                                </td>
+                                              ))}
+                                              <td className="px-4 py-3.5">
+                                                <div className="flex flex-wrap gap-1">
+                                                  {m.certifications?.length > 0
+                                                    ? m.certifications.map(c => (
+                                                        <span key={c} className="rounded border border-[#1f3050] bg-[#0a1525] px-1.5 py-0.5 text-[9px] font-black text-[#6a8aaa]">{c}</span>
+                                                      ))
+                                                    : <span className="text-[#2a3a50]">—</span>}
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </React.Fragment>
+                                    );
+                                  })
+                                : group.members.map(m => {
                                 const memberRankMeta = getRankMeta(departmentRankName(m));
                                 const chipColor = memberRankMeta?.color_hex ?? null;
                                 return (
@@ -3130,7 +3211,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                     <td className="px-5 py-3.5 pl-10">
                                       <div className="flex items-center gap-2">
                                         <DiscordAvatar name={m.discord_username || m.username} discordId={m.discord_id} avatarHash={m.avatar_hash} />
-                                        <span className="text-xs font-black text-white">{m.username || '?'}</span>
+                                        <span className="text-xs font-black text-white">{m.username || '—'}</span>
                                       </div>
                                     </td>
                                     <td className="px-4 py-3.5">
@@ -3141,13 +3222,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                         )}
                                         <span className="text-[10px] font-black"
                                           style={{ color: chipColor ?? '#a8b7cd' }}>
-                                          {m.dps_rank || '?'}
+                                          {m.dph_rank || m.rank || '—'}
                                         </span>
                                       </div>
                                     </td>
                                     <td className="px-4 py-3.5">
-                                      <span className="inline-flex items-center rounded border border-[#1b2d44] bg-[#070d16] px-2 py-0.5 font-mono text-[10px] font-black text-[#4384ff]">
-                                        {m.callsign || '?'}
+                                      <span className="inline-flex items-center rounded border border-[#3a1b1b] bg-[#120808] px-2 py-0.5 font-mono text-[10px] font-black text-[#f87171]">
+                                        {m.callsign || '—'}
                                       </span>
                                     </td>
                                     <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
@@ -3158,7 +3239,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                     </td>
                                     <td className="px-4 py-3.5 text-[#8392aa]">{formatDate(m.appointed_date)}</td>
                                     <td className="px-4 py-3.5">
-                                      <span className="font-mono text-[11px] text-[#526179]">{m.discord_id || '?'}</span>
+                                      <span className="font-mono text-[11px] text-[#526179]">{m.discord_id || '—'}</span>
                                     </td>
                                     {rosterDivisions.map(d => (
                                       <td key={d.id} className="px-3 py-3.5 text-center">
@@ -3171,12 +3252,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                           ? m.certifications.map(c => (
                                               <span key={c} className="rounded border border-[#1f3050] bg-[#0a1525] px-1.5 py-0.5 text-[9px] font-black text-[#6a8aaa]">{c}</span>
                                             ))
-                                          : <span className="text-[#2a3a50]">?</span>}
+                                          : <span className="text-[#2a3a50]">—</span>}
                                       </div>
                                     </td>
                                   </tr>
                                 );
-                              })}
+                              }))}
                           </React.Fragment>
                         ))}
                       </tbody>
@@ -3186,20 +3267,20 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
               </div>
             )}
 
-            {/* ?? DIVISION ROSTER ???????????????????????????????????????????????? */}
+            {/* ── DIVISION ROSTER ──────────────────────────────────────────────── */}
             {activeTab === 'division-roster' && (
-              <DivisionRosterView
+              <DivisionRosterView apiBase="/api/dph" resourcesBase="/api/dph/resources"
                 members={roster}
                 loading={rosterLoading || !rosterMetaReady}
                 DiscordAvatar={DiscordAvatar}
                 viewerDiscordId={session?.discord_id ?? null}
                 bypassDivisionRestrictions={bypassDivisionRestrictions}
-                onOpenResource={(r) => handleOpenResource(r as DpsResource, false)}
+                onOpenResource={(r) => handleOpenResource(r as DphResource, false)}
               />
             )}
 
             {activeTab === 'divisions-information' && (
-              <DivisionsInformationView
+              <DivisionsInformationView apiBase="/api/dph"
                 members={roster}
                 loading={rosterLoading || !rosterMetaReady}
                 viewerDiscordId={session?.discord_id ?? null}
@@ -3207,7 +3288,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
               />
             )}
 
-            {/* ?? VEHICLE ROSTER ????????????????????????????????????????????????? */}
+            {/* ── VEHICLE ROSTER ───────────────────────────────────────────────── */}
             {activeTab === 'vehicle-roster' && (
               <div className="space-y-8">
                 {fleet.length === 0 ? (
@@ -3323,7 +3404,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
               </div>
             )}
 
-            {/* ?? EQUIPMENT ROSTER ??????????????????????????????????????????????? */}
+            {/* ── EQUIPMENT ROSTER ─────────────────────────────────────────────── */}
             {activeTab === 'equipment-roster' && (
               <div className="space-y-8">
                 {equipment.length === 0 ? (
@@ -3412,7 +3493,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
               </div>
             )}
 
-            {/* ?? EVENT CALENDAR ????????????????????????????????????????????????? */}
+            {/* ── EVENT CALENDAR ───────────────────────────────────────────────── */}
             {activeTab === 'event-calendar' && (
               <>
                 {events.length === 0 ? (
@@ -3467,7 +3548,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               {(ev.hosted_by || ev.hosting_department) && (
                                 <p className="mt-2 text-[11px] text-[#8392aa]">
                                   {ev.hosted_by ? `Hosted by ${ev.hosted_by}` : 'Hosted event'}
-                                  {ev.hosting_department ? ` ? ${ev.hosting_department}` : ''}
+                                  {ev.hosting_department ? ` · ${ev.hosting_department}` : ''}
                                 </p>
                               )}
                               {ev.purpose && <p className="mt-2 text-[11px] leading-relaxed text-[#a8b7cd]">{ev.purpose}</p>}
@@ -3481,7 +3562,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
               </>
             )}
 
-            {/* ?? INFORMATION ???????????????????????????????????????????????????? */}
+            {/* ── INFORMATION ──────────────────────────────────────────────────── */}
             {activeTab === 'information' && (
               pageInfo && pageInfo.sections.length > 0 ? (
                 <div className="space-y-3">
@@ -3539,7 +3620,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
               )
             )}
 
-            {/* ?? RESOURCES ?????????????????????????????????????????????????????? */}
+            {/* ── RESOURCES ────────────────────────────────────────────────────── */}
             {activeTab === 'resources' && (() => {
               const departmentResources = visibleResources.filter(r => r.division_id == null);
               const divisionSections = [...rosterDivisions]
@@ -3555,7 +3636,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                 r => r.division_id != null && !knownIds.has(r.division_id)
               );
 
-              const renderCard = (r: DpsResource) => (
+              const renderCard = (r: DphResource) => (
                 <button
                   key={r.id}
                   type="button"
@@ -3569,8 +3650,8 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     <p className="truncate text-sm font-black text-white">{r.title}</p>
                     <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
                       {resourceTypeLabel(r)}
-                      {r.division_only ? ' ? Division' : ''}
-                      {r.personnel_only || (Array.isArray(r.allowed_dps_ranks) && r.allowed_dps_ranks.length > 0) ? ' ? Personnel' : ''}
+                      {r.division_only ? ' · Division' : ''}
+                      {r.personnel_only || (Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0) ? ' · Personnel' : ''}
                     </p>
                   </div>
                   <p className="text-[10px] text-[#3f5470]">
@@ -3600,7 +3681,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                       <div className="flex items-end justify-between gap-3 border-b border-[#131f30] pb-3">
                         <div>
                           <h3 className="text-sm font-black uppercase tracking-[0.18em] text-[#a78bfa]">Department</h3>
-                          <p className="mt-1 text-xs text-[#526179]">Resources available across the Department of Public Safety.</p>
+                          <p className="mt-1 text-xs text-[#526179]">Resources available across the Department of Public Health.</p>
                         </div>
                         <span className="text-[10px] font-black text-[#3f5470]">{departmentResources.length}</span>
                       </div>
@@ -3643,17 +3724,17 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
               );
             })()}
 
-            {/* ?? DEPARTMENT PANEL ??????????????????????????????????????????????? */}
+            {/* ── DEPARTMENT PANEL ─────────────────────────────────────────────── */}
             {showPanelContent && (
               <>
 
-                {/* ?? Landing picker ????????????????????????????????????????????? */}
+                {/* ── Landing picker ───────────────────────────────────────────── */}
                 {panelSection === null && (
                   <div className="space-y-4">
                     {/* Section picker cards */}
                     <div className="grid gap-5 sm:grid-cols-2">
 
-                      {/* Personnel Roster card ? full panel access only */}
+                      {/* Personnel Roster card — full panel access only */}
                       {hasFullPanelAccess && (
                       <div className="group relative rounded-2xl border border-[#f4c542]/20 bg-[#070d16] p-7 shadow-[0_18px_40px_rgba(0,0,0,0.25)] transition-all hover:border-[#f4c542]/40 hover:shadow-[0_22px_55px_rgba(0,0,0,0.35)]">
                         {/* Subtle gold glow top-edge */}
@@ -3666,7 +3747,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           <div>
                             <h3 className="text-base font-black text-white">Personnel Roster</h3>
                             <p className="mt-1 text-xs text-[#526179] leading-relaxed">
-                              Manage officers, ranks, callsigns, unit assignments and certifications.
+                              Manage members, ranks, callsigns, unit assignments and certifications.
                             </p>
                           </div>
                         </div>
@@ -3674,15 +3755,15 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                         {/* Stats row */}
                         <div className="mb-6 flex gap-4">
                           <div className="flex-1 rounded-lg border border-[#131f30] bg-[#07111f] px-3 py-2.5 text-center">
-                            <p className="text-lg font-black text-white">{panelMembers.length || '?'}</p>
+                            <p className="text-lg font-black text-white">{panelMembers.length || '—'}</p>
                             <p className="mt-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Members</p>
                           </div>
                           <div className="flex-1 rounded-lg border border-[#131f30] bg-[#07111f] px-3 py-2.5 text-center">
-                            <p className="text-lg font-black text-white">{ranks.length || '?'}</p>
+                            <p className="text-lg font-black text-white">{ranks.length || '—'}</p>
                             <p className="mt-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Ranks</p>
                           </div>
                           <div className="flex-1 rounded-lg border border-[#131f30] bg-[#07111f] px-3 py-2.5 text-center">
-                            <p className="text-lg font-black text-white">{groups.length || '?'}</p>
+                            <p className="text-lg font-black text-white">{groups.length || '—'}</p>
                             <p className="mt-0.5 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Titles</p>
                           </div>
                         </div>
@@ -3741,7 +3822,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           const totalVehicles = fleet.length;
                           const assignedVehicles = fleet.filter(v => v.who_can_drive.length > 0 || v.restrict_to_divisions.length > 0).length;
                           const availableVehicles = totalVehicles - assignedVehicles;
-                          const fmt = (n: number) => fleetLoading ? '?' : String(n);
+                          const fmt = (n: number) => fleetLoading ? '—' : String(n);
                           return (
                             <div className="mb-6 flex gap-4">
                               <div className="flex-1 rounded-lg border border-[#131f30] bg-[#07111f] px-3 py-2.5 text-center">
@@ -3790,7 +3871,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           const total = equipment.length;
                           const assigned = equipment.filter(e => e.who_can_use.length > 0 || e.restrict_to_divisions.length > 0).length;
                           const unassigned = total - assigned;
-                          const fmt = (n: number) => equipmentLoading ? '?' : String(n);
+                          const fmt = (n: number) => equipmentLoading ? '—' : String(n);
                           return (
                             <div className="mb-6 flex gap-4">
                               <div className="flex-1 rounded-lg border border-[#131f30] bg-[#07111f] px-3 py-2.5 text-center">
@@ -3897,7 +3978,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   </div>
                 )}
 
-                {/* ?? Personnel section ?????????????????????????????????????????? */}
+                {/* ── Personnel section ────────────────────────────────────────── */}
                 {panelSection === 'personnel' && (
                   <div className="space-y-6">
                     {/* Back breadcrumb */}
@@ -3919,24 +4000,24 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                         <div className="ml-auto flex items-center gap-3">
                           <div className="relative">
                             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#526179]" />
-                            <input type="text" placeholder="Search officers?"
+                            <input type="text" placeholder="Search members…"
                               value={panelSearch} onChange={e => setPanelSearch(e.target.value)}
                               className="h-9 w-48 rounded-lg border border-[#1f3050] bg-[#07111f] pl-9 pr-4 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#2f70ff]" />
                           </div>
                           <button type="button" onClick={() => void handleSyncDiscordRoles()} disabled={syncingDiscord}
                             className="flex items-center gap-2 rounded-lg border border-[#3ecf8e]/35 bg-[#3ecf8e]/10 px-4 py-2 text-xs font-black text-[#3ecf8e] hover:bg-[#3ecf8e]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                             <RefreshCw className={`h-3.5 w-3.5 ${syncingDiscord ? 'animate-spin' : ''}`} />
-                            {syncingDiscord ? 'Syncing Discord?' : 'Sync Discord'}
+                            {syncingDiscord ? 'Syncing Discord…' : 'Sync Discord'}
                           </button>
                           <button type="button" onClick={handleSyncAllCallsigns} disabled={syncingCallsigns}
                             className="flex items-center gap-2 rounded-lg border border-[#2f66ee]/40 bg-[#2f66ee]/10 px-4 py-2 text-xs font-black text-[#4384ff] hover:bg-[#2f66ee]/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                             <Radio className="h-3.5 w-3.5" />
-                            {syncingCallsigns ? 'Syncing?' : 'Sync Callsigns'}
+                            {syncingCallsigns ? 'Syncing…' : 'Sync Callsigns'}
                           </button>
                           <button type="button" onClick={() => setAddOpen(true)}
                             className="flex items-center gap-2 rounded-lg bg-[#2f66ee] px-4 py-2 text-xs font-black text-white hover:bg-[#3977ff] transition-colors">
                             <Plus className="h-3.5 w-3.5" />
-                            Add Officer
+                            Add Member
                           </button>
                           <button type="button" onClick={() => { setAddTitleOpen(true); setNewGroupName(''); }}
                             className="flex items-center gap-2 rounded-lg border border-[#f4c542]/30 bg-[#f4c542]/5 px-4 py-2 text-xs font-black text-[#f4c542] hover:bg-[#f4c542]/10 transition-colors">
@@ -3950,12 +4031,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             className="flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/8 px-3 py-2 text-xs font-black text-red-300 hover:bg-red-500/15 transition-colors disabled:opacity-50"
                           >
                             <Lock className="h-3.5 w-3.5" />
-                            {clearingPermissionGrants ? 'Removing?' : 'Remove Everyones Permissions'}
+                            {clearingPermissionGrants ? 'Removing…' : 'Remove Everyones Permissions'}
                           </button>
                         </div>
                       </div>
 
-                      {/* Titles section ? inline within the same card */}
+                      {/* Titles section — inline within the same card */}
                       {(groups.length > 0 || addTitleOpen) && (
                         <div className="border-t border-[#131f30]">
                           <div className="flex items-center gap-2 px-6 py-2.5 bg-[#070d16]">
@@ -4034,7 +4115,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                             if (dragRankId !== null && dragOverRankId === null) handleRankReorder(g.id, dragRankId, null, 'after');
                                             clearDrag();
                                           }}>
-                                          {ranks.filter(r => rankBelongsToGroup(r, g)).sort((a, b) => a.sort_order - b.sort_order).map(r => {
+                                          {ranks.filter(r => r.group_id === g.id).sort((a, b) => a.sort_order - b.sort_order).map(r => {
                                             const chipColor = r.color_hex ?? null;
                                             const isDragging   = dragRankId === r.id;
                                             const isDropTarget = dragOverRankId === r.id && !isDragging;
@@ -4050,7 +4131,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                                 type="button"
                                                 draggable
                                                 data-rank-chip
-                                                title={`Drag to reorder or move to another title ? Click to edit: ${r.name}`}
+                                                title={`Drag to reorder or move to another title · Click to edit: ${r.name}`}
                                                 onClick={() => { if (!dragRankId) setEditRankId(r.id); }}
                                                 onDragStart={e => {
                                                   e.stopPropagation();
@@ -4082,7 +4163,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                                 )}
                                                 {r.name}
                                                 {r.discord_role_id && (
-                                                  <span title="Linked to a Discord role" className="opacity-60 text-[#5865f2] leading-none">?</span>
+                                                  <span title="Linked to a Discord role" className="opacity-60 text-[#5865f2] leading-none">⬡</span>
                                                 )}
                                                 <Pencil className="h-2.5 w-2.5 opacity-0 group-hover/chip:opacity-50 transition-opacity shrink-0" />
                                                 <span
@@ -4096,7 +4177,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                             );
                                           })}
                                           {/* Empty-group drop hint */}
-                                          {ranks.filter(r => rankBelongsToGroup(r, g)).length === 0 && dragRankId !== null && (
+                                          {ranks.filter(r => r.group_id === g.id).length === 0 && dragRankId !== null && (
                                             <span className="rounded border border-dashed border-[#4384ff]/40 px-2 py-0.5 text-[9px] text-[#4384ff]/60 select-none">Drop here</span>
                                           )}
                                         </div>
@@ -4104,10 +4185,10 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                           className="flex items-center gap-1 rounded border border-[#1f3050] bg-[#0a1525] px-2.5 py-1 text-[9px] font-black text-[#526179] hover:border-[#2f70ff] hover:text-[#4384ff] transition-colors shrink-0">
                                           <Plus className="h-3 w-3" />Add Rank
                                         </button>
-                                        {/* Panel access toggle ? always visible */}
+                                        {/* Panel access toggle — always visible */}
                                         <button
                                           type="button"
-                                          title={g.panel_access ? 'Department Panel access ON ? click to disable' : 'Department Panel access OFF ? click to enable'}
+                                          title={g.panel_access ? 'Department Panel access ON — click to disable' : 'Department Panel access OFF — click to enable'}
                                           onClick={() => handleTogglePanelAccess(g.id, !g.panel_access)}
                                           className={`flex items-center gap-1 rounded border px-2 py-1 text-[9px] font-black transition-colors shrink-0 ${
                                             g.panel_access
@@ -4117,12 +4198,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                           <Shield className="h-3 w-3" />
                                           Panel
                                         </button>
-                                        {/* Division oversight ? see all restricted division resources & rosters */}
+                                        {/* Division oversight — see all restricted division resources & rosters */}
                                         <button
                                           type="button"
                                           title={g.division_oversight
-                                            ? 'Division oversight ON ? this title can view all division resources and rosters (including restricted). Click to disable.'
-                                            : 'Division oversight OFF ? click to let this title view all division resources and rosters even when restricted.'}
+                                            ? 'Division oversight ON — this title can view all division resources and rosters (including restricted). Click to disable.'
+                                            : 'Division oversight OFF — click to let this title view all division resources and rosters even when restricted.'}
                                           onClick={() => handleToggleDivisionOversight(g.id, !g.division_oversight)}
                                           className={`flex items-center gap-1 rounded border px-2 py-1 text-[9px] font-black transition-colors shrink-0 ${
                                             g.division_oversight
@@ -4157,13 +4238,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                   {addRankGroupId === g.id && (
                                     <div className="flex flex-col gap-2 px-6 py-2.5 bg-[#060c18] border-t border-[#0c1525]">
                                       <div className="flex items-center gap-2">
-                                        <input autoFocus type="text" placeholder="Rank name?"
+                                        <input autoFocus type="text" placeholder="Rank name…"
                                           value={newRankName} onChange={e => setNewRankName(e.target.value)}
                                           onKeyDown={e => { if (e.key === 'Enter') handleAddRankToGroup(g.id); if (e.key === 'Escape') { setAddRankGroupId(null); setNewRankDiscordRoleId(''); } }}
                                           className="flex-1 h-8 rounded border border-[#1f3050] bg-[#07111f] px-3 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#2f70ff]" />
                                         <button type="button" onClick={() => handleAddRankToGroup(g.id)} disabled={addingRank || !newRankName.trim()}
                                           className="rounded border border-[#2f66ee] bg-[#2f66ee]/10 px-3 py-1.5 text-[10px] font-black text-[#4384ff] hover:bg-[#2f66ee]/20 transition-colors disabled:opacity-40">
-                                          {addingRank ? 'Adding?' : 'Add'}
+                                          {addingRank ? 'Adding…' : 'Add'}
                                         </button>
                                         <button type="button" onClick={() => { setAddRankGroupId(null); setNewRankDiscordRoleId(''); }}
                                           className="rounded p-1.5 text-[#526179] hover:text-white transition-colors">
@@ -4179,13 +4260,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                           onChange={e => setNewRankDiscordRoleId(e.target.value)}
                                           className="h-8 w-full rounded border border-[#1f3050] bg-[#07111f] px-3 text-xs font-semibold text-white outline-none focus:border-[#2f70ff] cursor-pointer"
                                         >
-                                          <option value="">? No Discord role linked ?</option>
+                                          <option value="">— No Discord role linked —</option>
                                           {dpsGuildRoles.map(r => (
                                             <option key={r.id} value={r.id}>{r.name}</option>
                                           ))}
                                         </select>
                                         <p className="mt-1 text-[10px] text-[#3f5470]">
-                                          Optional ? members with this DPS Discord role are synced onto the roster.
+                                          Optional — members with this DPS Discord role are synced onto the roster.
                                         </p>
                                       </div>
                                     </div>
@@ -4196,13 +4277,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
                               {addTitleOpen && (
                                 <div className="flex items-center gap-2 px-6 py-3 bg-[#060c18]">
-                                  <input autoFocus type="text" placeholder="Title name?"
+                                  <input autoFocus type="text" placeholder="Title name…"
                                     value={newGroupName} onChange={e => setNewGroupName(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') handleAddGroup(); if (e.key === 'Escape') setAddTitleOpen(false); }}
                                     className="flex-1 h-8 rounded border border-[#f4c542]/30 bg-[#07111f] px-3 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#f4c542]/60" />
                                   <button type="button" onClick={handleAddGroup} disabled={addingGroup || !newGroupName.trim()}
                                     className="rounded border border-[#f4c542]/40 bg-[#f4c542]/10 px-3 py-1.5 text-[10px] font-black text-[#f4c542] hover:bg-[#f4c542]/20 transition-colors disabled:opacity-40">
-                                    {addingGroup ? 'Creating?' : 'Create'}
+                                    {addingGroup ? 'Creating…' : 'Create'}
                                   </button>
                                   <button type="button" onClick={() => setAddTitleOpen(false)}
                                     className="rounded p-1.5 text-[#526179] hover:text-white transition-colors">
@@ -4220,12 +4301,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           <span className="text-xs text-[#3f5470]">No titles yet.</span>
                           <button type="button" onClick={() => { setAddTitleOpen(true); setNewGroupName(''); }}
                             className="text-xs font-black text-[#f4c542] hover:underline">
-                            Add your first title ?
+                            Add your first title →
                           </button>
                         </div>
                       )}
 
-                      {/* Officers table */}
+                      {/* Members table */}
                       <div className="border-t border-[#131f30]">
                         <button
                           type="button"
@@ -4234,7 +4315,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           aria-expanded={!panelMembersCollapsed}
                         >
                           <Users className="h-3.5 w-3.5 shrink-0 text-[#f4c542]" />
-                          <span className="text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Officers</span>
+                          <span className="text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Members</span>
                           <span className="rounded-full bg-[#0f1b28] px-1.5 py-0.5 text-[9px] font-black text-[#3f5470]">{filteredPanel.length}</span>
                           {panelMembersCollapsed
                             ? <ChevronDown className="ml-auto h-4 w-4 shrink-0 text-[#526179]" />
@@ -4245,7 +4326,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                       filteredPanel.length === 0 ? (
                         <div className="flex min-h-[200px] flex-col items-center justify-center gap-2">
                           <Users className="h-8 w-8 text-[#1e2e42]" />
-                          <p className="text-sm font-bold text-[#3f5470]">No officers found.</p>
+                          <p className="text-sm font-bold text-[#3f5470]">No members found.</p>
                         </div>
                       ) : (
                         <div className="overflow-x-auto">
@@ -4275,18 +4356,18 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                   </td>
                                   <td className="px-4 py-3.5">
                                     <div className="flex items-center gap-1.5">
-                                      {(() => { const ins = ranks.find(r => r.name.toLowerCase() === (m.dps_rank || m.rank)?.toLowerCase())?.insignia_url; return ins ? <img src={ins} alt="" className="h-4 w-4 object-contain shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : null; })()}
-                                      <span className="capitalize text-[#a8b7cd]">{m.dps_rank || m.rank || '?'}</span>
+                                      {(() => { const ins = ranks.find(r => r.name.toLowerCase() === (m.dph_rank || m.rank)?.toLowerCase())?.insignia_url; return ins ? <img src={ins} alt="" className="h-4 w-4 object-contain shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} /> : null; })()}
+                                      <span className="capitalize text-[#a8b7cd]">{m.dph_rank || m.rank || '—'}</span>
                                     </div>
                                   </td>
-                                  <td className="px-4 py-3.5 font-black text-[#4384ff]">{m.callsign || '?'}</td>
+                                  <td className="px-4 py-3.5 font-black text-[#4384ff]">{m.callsign || '—'}</td>
                                   <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
                                   <td className="px-4 py-3.5">
                                     <div className="flex flex-wrap gap-1">
                                       {rosterDivisions.filter(d => memberInDivision(m, d)).map(d => (
                                         <span key={d.id} title={d.name} className="rounded border border-[#f4c542]/20 bg-[#f4c542]/10 px-1.5 py-0.5 text-[9px] font-black text-[#f4c542]">{divisionShortName(d)}</span>
                                       ))}
-                                      {!rosterDivisions.some(d => memberInDivision(m, d)) && <span className="text-[#2a3a50]">?</span>}
+                                      {!rosterDivisions.some(d => memberInDivision(m, d)) && <span className="text-[#2a3a50]">—</span>}
                                     </div>
                                   </td>
                                   <td className="px-4 py-3.5 text-[#8392aa]">{formatDate(m.appointed_date)}</td>
@@ -4326,8 +4407,8 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     <PermissionAccessOverview
                       title="Department Permission Access"
                       description="Department Panel (by title), all-resources grants, plus division editor access."
-                      accentTextClass="text-[#f4c542]"
-                      accentBorderClass="border-[#f4c542]/20"
+                      accentTextClass="text-[#ff7070]"
+                      accentBorderClass="border-[#ff5d5d]/20"
                       rows={departmentPermissionOverviewRows}
                       emptyMessage="No personnel with department permission grants match your filters."
                     />
@@ -4335,13 +4416,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                 )}
 
                 {panelSection === 'division' && (
-                  <DivisionPanelSection
+                  <DivisionPanelSection apiBase="/api/dph" resourcesBase="/api/dph/resources" personNoun="member"
                     members={panelMembers}
                     membersLoading={panelLoading}
                     DiscordAvatar={DiscordAvatar}
                     fullAccess={hasFullPanelAccess}
                     divisionAccess={myDivisionAccess}
-                    actor={session?.username ?? 'DPS Panel'}
+                    actor={session?.username ?? 'DPH Panel'}
                     onBack={() => {
                       if (isDivisionOnlyPanelEditor) {
                         setActiveTab('personnel-roster');
@@ -4352,7 +4433,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     }}
                     onMembersChanged={() => {
                       fetchPanelMembers({ silent: true });
-                      fetch('/api/roster/divisions', { headers: { accept: 'application/json' } })
+                      fetch('/api/dph/divisions', { headers: { accept: 'application/json' } })
                         .then(r => r.json())
                         .then(divs => {
                           const rows = Array.isArray(divs) ? (divs as RosterDivision[]) : [];
@@ -4360,7 +4441,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           setDivisionStats(s => ({ ...s, divisions: rows.length }));
                         })
                         .catch(() => {});
-                      fetch('/api/roster/division-ranks', { headers: { accept: 'application/json' } })
+                      fetch('/api/dph/division-ranks', { headers: { accept: 'application/json' } })
                         .then(r => r.json())
                         .then(divRanks => {
                           setDivisionRanksForEdit(Array.isArray(divRanks) ? divRanks : []);
@@ -4368,13 +4449,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                         })
                         .catch(() => {});
                       if (roster.length > 0) {
-                        fetch('/api/roster', { headers: { accept: 'application/json' } })
+                        fetch('/api/dph', { headers: { accept: 'application/json' } })
                           .then(r => r.json())
                           .then((rows) => setRoster(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : []))
                           .catch(() => {});
                       }
                     }}
-                    onOpenResource={(r) => handleOpenResource(r as DpsResource, true)}
+                    onOpenResource={(r) => handleOpenResource(r as DphResource, true)}
                     onAddResource={(divId) => {
                       setAddResourceStep(0);
                       setNewResourceName('');
@@ -4392,7 +4473,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   />
                 )}
 
-                {/* ?? Vehicle section ???????????????????????????????????????????? */}
+                {/* ── Vehicle section ──────────────────────────────────────────── */}
                 {panelSection === 'vehicle' && (() => {
                   const filteredFleet = fleet.filter(v => {
                     const q = vehiclePanelSearch.toLowerCase();
@@ -4404,7 +4485,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     if (!newCategoryName.trim()) return;
                     setAddingCategory(true);
                     try {
-                      await fetch('/api/roster/fleet/categories', {
+                      await fetch('/api/dph/fleet/categories', {
                         method: 'POST', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({ name: newCategoryName.trim() }),
                       });
@@ -4417,7 +4498,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   const handleRenameCategory = async (id: number) => {
                     if (!editingCategoryName.trim()) return;
                     try {
-                      await fetch(`/api/roster/fleet/categories/${id}`, {
+                      await fetch(`/api/dph/fleet/categories/${id}`, {
                         method: 'PATCH', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({ name: editingCategoryName.trim() }),
                       });
@@ -4428,7 +4509,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   const handleDeleteCategory = async (id: number, name: string) => {
                     if (!confirm(`Delete title "${name}" and all its vehicles?`)) return;
                     try {
-                      await fetch(`/api/roster/fleet/categories/${id}`, { method: 'DELETE' });
+                      await fetch(`/api/dph/fleet/categories/${id}`, { method: 'DELETE' });
                       fetchFleetPanel();
                     } catch { toast.error('Failed to delete title.'); }
                   };
@@ -4441,7 +4522,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
                     setFleetCategories(reordered);
                     try {
-                      await fetch('/api/roster/fleet/categories/reorder', {
+                      await fetch('/api/dph/fleet/categories/reorder', {
                         method: 'POST', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({ ordered: reordered.map(c => c.id) }),
                       });
@@ -4454,7 +4535,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     if (!newVehicleForm.name.trim()) return;
                     setAddingVehicleInCat(true);
                     try {
-                      await fetch('/api/roster/fleet', {
+                      await fetch('/api/dph/fleet', {
                         method: 'POST', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({
                           name:                  newVehicleForm.name.trim(),
@@ -4468,7 +4549,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           restrict_to_divisions: newVehicleForm.restrictToDivisions,
                           liveries:              newVehicleForm.liveries.split(',').map(s => s.trim()).filter(Boolean),
                           notes:                 newVehicleForm.notes.trim() || null,
-                          actor:                 session?.username ?? 'DPS Panel',
+                          actor:                 session?.username ?? 'DPH Panel',
                         }),
                       });
                       setAddVehicleCatId(null);
@@ -4481,7 +4562,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   const handleDeleteVehicle = async (id: number, name: string) => {
                     if (!confirm(`Remove "${name}" from the roster?`)) return;
                     try {
-                      await fetch(`/api/roster/fleet/${id}`, { method: 'DELETE', headers: { 'x-actor': session?.username ?? 'DPS Panel' } });
+                      await fetch(`/api/dph/fleet/${id}`, { method: 'DELETE', headers: { 'x-actor': session?.username ?? 'DPH Panel' } });
                       fetchFleetPanel();
                     } catch { toast.error('Failed to remove vehicle.'); }
                   };
@@ -4490,7 +4571,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     if (!editVehicleItem) return;
                     setSavingVehicle(true);
                     try {
-                      await fetch(`/api/roster/fleet/${editVehicleItem.id}`, {
+                      await fetch(`/api/dph/fleet/${editVehicleItem.id}`, {
                         method: 'PATCH', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({
                           name:                  editVehicleItem.name,
@@ -4504,7 +4585,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           restrict_to_divisions: editVehicleItem.restrict_to_divisions,
                           liveries:              editVehicleItem.liveries,
                           notes:                 editVehicleItem.notes || null,
-                          actor:                 session?.username ?? 'DPS Panel',
+                          actor:                 session?.username ?? 'DPH Panel',
                         }),
                       });
                       setEditVehicleItem(null); fetchFleetPanel();
@@ -4562,7 +4643,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                       <button type="button" onClick={() => setAddRankDropOpen(o => !o)}
                                         className="w-full flex items-center justify-between rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-left outline-none focus:border-[#4384ff] transition-colors hover:border-[#2f50a0]">
                                         <span className={selected.length === 0 ? 'text-[#3f5470]' : 'text-white'}>
-                                          {selected.length === 0 ? 'Select ranks?' : selected.join(', ')}
+                                          {selected.length === 0 ? 'Select ranks…' : selected.join(', ')}
                                         </span>
                                         <ChevronDown className="h-3.5 w-3.5 text-[#526179] shrink-0 ml-2" />
                                       </button>
@@ -4612,7 +4693,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               </div>
                               <div className="col-span-2">
                                 <label className="mb-1.5 block text-[9px] font-black uppercase tracking-[0.18em] text-[#526179]">Notes</label>
-                                <textarea rows={3} placeholder="Any additional notes about this vehicle?"
+                                <textarea rows={3} placeholder="Any additional notes about this vehicle…"
                                   value={newVehicleForm.notes} onChange={e => setNewVehicleForm(f => ({ ...f, notes: e.target.value }))}
                                   className="w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#4384ff] resize-none" />
                               </div>
@@ -4622,7 +4703,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             <button type="button" onClick={() => setAddVehicleCatId(null)} className="rounded-lg border border-[#1f3050] px-4 py-2 text-xs font-black text-[#526179] hover:text-white transition-colors">Cancel</button>
                             <button type="button" onClick={handleAddVehicleToCategory} disabled={addingVehicleInCat || !newVehicleForm.name.trim()}
                               className="rounded-lg bg-[#2f66ee] px-4 py-2 text-xs font-black text-white hover:bg-[#3977ff] transition-colors disabled:opacity-50">
-                              {addingVehicleInCat ? 'Adding?' : 'Add Vehicle'}
+                              {addingVehicleInCat ? 'Adding…' : 'Add Vehicle'}
                             </button>
                           </div>
                         </div>
@@ -4668,7 +4749,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                       <button type="button" onClick={() => setEditRankDropOpen(o => !o)}
                                         className="w-full flex items-center justify-between rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-left outline-none focus:border-[#4384ff] transition-colors hover:border-[#2f50a0]">
                                         <span className={selected.length === 0 ? 'text-[#3f5470]' : 'text-white'}>
-                                          {selected.length === 0 ? 'Select ranks?' : selected.join(', ')}
+                                          {selected.length === 0 ? 'Select ranks…' : selected.join(', ')}
                                         </span>
                                         <ChevronDown className="h-3.5 w-3.5 text-[#526179] shrink-0 ml-2" />
                                       </button>
@@ -4719,7 +4800,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               </div>
                               <div className="col-span-2">
                                 <label className="mb-1.5 block text-[9px] font-black uppercase tracking-[0.18em] text-[#526179]">Notes</label>
-                                <textarea rows={3} placeholder="Any additional notes about this vehicle?"
+                                <textarea rows={3} placeholder="Any additional notes about this vehicle…"
                                   value={editVehicleItem.notes ?? ''}
                                   onChange={e => setEditVehicleItem({ ...editVehicleItem, notes: e.target.value })}
                                   className="w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#4384ff] resize-none" />
@@ -4730,7 +4811,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             <button type="button" onClick={() => setEditVehicleItem(null)} className="rounded-lg border border-[#1f3050] px-4 py-2 text-xs font-black text-[#526179] hover:text-white transition-colors">Cancel</button>
                             <button type="button" onClick={handleSaveVehicle} disabled={savingVehicle}
                               className="rounded-lg bg-[#2f66ee] px-4 py-2 text-xs font-black text-white hover:bg-[#3977ff] transition-colors disabled:opacity-50">
-                              {savingVehicle ? 'Saving?' : 'Save Changes'}
+                              {savingVehicle ? 'Saving…' : 'Save Changes'}
                             </button>
                           </div>
                         </div>
@@ -4747,7 +4828,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                         <div className="ml-auto flex items-center gap-3">
                           <div className="relative">
                             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#526179]" />
-                            <input type="text" placeholder="Search vehicles?"
+                            <input type="text" placeholder="Search vehicles…"
                               value={vehiclePanelSearch} onChange={e => setVehiclePanelSearch(e.target.value)}
                               className="h-9 w-48 rounded-lg border border-[#1f3050] bg-[#07111f] pl-9 pr-4 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#2f70ff]" />
                           </div>
@@ -4759,7 +4840,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                         </div>
                       </div>
 
-                      {/* Titles section ? categories with vehicle chips */}
+                      {/* Titles section — categories with vehicle chips */}
                       {(fleetCategories.length > 0 || addCategoryOpen) && (
                         <div className="border-b border-[#131f30]">
                           <div className="flex items-center gap-2 px-6 py-2.5 bg-[#070d16]">
@@ -4800,7 +4881,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                       <>
                                         <GripVertical className="h-3.5 w-3.5 shrink-0 opacity-0 group-hover/row:opacity-40 transition-opacity text-[#526179]" />
                                         <span className="flex-1 text-xs font-black text-[#a8b7cd]">{cat.name}</span>
-                                        {/* Vehicle chips ? draggable to reorder / move between categories */}
+                                        {/* Vehicle chips — draggable to reorder / move between categories */}
                                         <div className="flex flex-wrap gap-1 mr-2">
                                           {fleet.filter(v => v.category === cat.name).sort((a, b) => a.sort_order - b.sort_order).map(v => {
                                             const chipDragging   = dragVehicleId === v.id;
@@ -4809,7 +4890,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                             return (
                                               <button key={v.id} type="button"
                                                 draggable
-                                                title={`Drag to reorder ? Click to edit: ${v.name}`}
+                                                title={`Drag to reorder · Click to edit: ${v.name}`}
                                                 onDragStart={e => {
                                                   setDragVehicleId(v.id);
                                                   e.dataTransfer.effectAllowed = 'move';
@@ -4889,13 +4970,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               {/* New title inline form */}
                               {addCategoryOpen && (
                                 <div className="flex items-center gap-2 px-6 py-3 bg-[#060c18]">
-                                  <input autoFocus type="text" placeholder="Title name?"
+                                  <input autoFocus type="text" placeholder="Title name…"
                                     value={newCategoryName} onChange={e => setNewCategoryName(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') handleAddCategory(); if (e.key === 'Escape') setAddCategoryOpen(false); }}
                                     className="flex-1 h-8 rounded border border-[#4384ff]/30 bg-[#07111f] px-3 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#4384ff]/60" />
                                   <button type="button" onClick={handleAddCategory} disabled={addingCategory || !newCategoryName.trim()}
                                     className="rounded border border-[#4384ff]/40 bg-[#4384ff]/10 px-3 py-1.5 text-[10px] font-black text-[#4384ff] hover:bg-[#4384ff]/20 transition-colors disabled:opacity-40">
-                                    {addingCategory ? 'Creating?' : 'Create'}
+                                    {addingCategory ? 'Creating…' : 'Create'}
                                   </button>
                                   <button type="button" onClick={() => setAddCategoryOpen(false)}
                                     className="rounded p-1.5 text-[#526179] hover:text-white transition-colors">
@@ -4912,11 +4993,11 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                         <div className="border-b border-[#131f30] px-6 py-4 flex items-center gap-3">
                           <span className="text-xs text-[#3f5470]">No titles yet.</span>
                           <button type="button" onClick={() => { setAddCategoryOpen(true); setNewCategoryName(''); }}
-                            className="text-xs font-black text-[#4384ff] hover:underline">Add your first title ?</button>
+                            className="text-xs font-black text-[#4384ff] hover:underline">Add your first title →</button>
                         </div>
                       )}
 
-                      {/* Vehicles section ? like Members (only show when there are vehicles) */}
+                      {/* Vehicles section — like Members (only show when there are vehicles) */}
                       {fleet.length > 0 && (
                         <div className="border-t border-[#131f30]">
                           <div className="flex items-center gap-2 px-6 py-2.5 bg-[#070d16]">
@@ -4953,14 +5034,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                     <div className="flex flex-wrap gap-1">
                                       {v.who_can_drive.length > 0
                                         ? v.who_can_drive.map(r => { const ins = ranks.find(x => x.name.toLowerCase() === r.toLowerCase())?.insignia_url; return <span key={r} className="inline-flex items-center gap-1 rounded border border-[#4384ff]/30 bg-[#4384ff]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#6fa3ff]">{ins && <img src={ins} alt="" className="h-3 w-3 object-contain shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}{r}</span>; })
-                                        : <span className="text-[#2a3a50]">?</span>}
+                                        : <span className="text-[#2a3a50]">—</span>}
                                     </div>
                                   </td>
                                   <td className="px-4 py-3.5">
                                     <div className="flex flex-wrap gap-1">
                                       {v.liveries.length > 0
                                         ? v.liveries.map(l => <span key={l} className="rounded border border-[#1f3050] bg-[#0a1525] px-1.5 py-0.5 text-[9px] font-semibold text-[#526179]">{l}</span>)
-                                        : <span className="text-[#2a3a50]">?</span>}
+                                        : <span className="text-[#2a3a50]">—</span>}
                                     </div>
                                   </td>
                                   <td className="px-4 py-3.5">
@@ -4986,8 +5067,8 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   );
                 })()}
 
-                {/* ?? Event Calendar section ????????????????????????????????????? */}
-                {/* ?? Equipment Roster section ??????????????????????????????????? */}
+                {/* ── Event Calendar section ───────────────────────────────────── */}
+                {/* ── Equipment Roster section ─────────────────────────────────── */}
                 {panelSection === 'equipment' && (() => {
                   const filteredEquipment = equipment.filter(e => {
                     const q = equipmentPanelSearch.toLowerCase();
@@ -4999,7 +5080,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     if (!newEqCategoryName.trim()) return;
                     setAddingEqCategory(true);
                     try {
-                      await fetch('/api/roster/equipment/categories', {
+                      await fetch('/api/dph/equipment/categories', {
                         method: 'POST', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({ name: newEqCategoryName.trim() }),
                       });
@@ -5012,7 +5093,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   const handleRenameEqCategory = async (id: number) => {
                     if (!editingEqCategoryName.trim()) return;
                     try {
-                      await fetch(`/api/roster/equipment/categories/${id}`, {
+                      await fetch(`/api/dph/equipment/categories/${id}`, {
                         method: 'PATCH', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({ name: editingEqCategoryName.trim() }),
                       });
@@ -5023,7 +5104,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   const handleDeleteEqCategory = async (id: number, name: string) => {
                     if (!confirm(`Delete title "${name}" and all its equipment?`)) return;
                     try {
-                      await fetch(`/api/roster/equipment/categories/${id}`, { method: 'DELETE' });
+                      await fetch(`/api/dph/equipment/categories/${id}`, { method: 'DELETE' });
                       fetchEquipmentPanel();
                     } catch { toast.error('Failed to delete title.'); }
                   };
@@ -5036,7 +5117,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]];
                     setEquipmentCategories(reordered);
                     try {
-                      await fetch('/api/roster/equipment/categories/reorder', {
+                      await fetch('/api/dph/equipment/categories/reorder', {
                         method: 'POST', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({ ordered: reordered.map(c => c.id) }),
                       });
@@ -5049,7 +5130,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     if (!newEquipmentForm.name.trim()) return;
                     setAddingEquipmentInCat(true);
                     try {
-                      await fetch('/api/roster/equipment', {
+                      await fetch('/api/dph/equipment', {
                         method: 'POST', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({
                           name:                  newEquipmentForm.name.trim(),
@@ -5061,7 +5142,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           who_can_use:           newEquipmentForm.restrictToRanks.split(',').map(s => s.trim()).filter(Boolean),
                           restrict_to_divisions: newEquipmentForm.restrictToDivisions,
                           notes:                 newEquipmentForm.notes.trim() || null,
-                          actor:                 session?.username ?? 'DPS Panel',
+                          actor:                 session?.username ?? 'DPH Panel',
                         }),
                       });
                       setAddEquipmentCatId(null);
@@ -5074,7 +5155,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   const handleDeleteEquipment = async (id: number, name: string) => {
                     if (!confirm(`Remove "${name}" from the roster?`)) return;
                     try {
-                      await fetch(`/api/roster/equipment/${id}`, { method: 'DELETE', headers: { 'x-actor': session?.username ?? 'DPS Panel' } });
+                      await fetch(`/api/dph/equipment/${id}`, { method: 'DELETE', headers: { 'x-actor': session?.username ?? 'DPH Panel' } });
                       fetchEquipmentPanel();
                     } catch { toast.error('Failed to remove equipment.'); }
                   };
@@ -5083,7 +5164,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                     if (!editEquipmentItem) return;
                     setSavingEquipment(true);
                     try {
-                      await fetch(`/api/roster/equipment/${editEquipmentItem.id}`, {
+                      await fetch(`/api/dph/equipment/${editEquipmentItem.id}`, {
                         method: 'PATCH', headers: { 'content-type': 'application/json' },
                         body: JSON.stringify({
                           name:                  editEquipmentItem.name,
@@ -5095,7 +5176,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                           who_can_use:           editEquipmentItem.who_can_use,
                           restrict_to_divisions: editEquipmentItem.restrict_to_divisions,
                           notes:                 editEquipmentItem.notes || null,
-                          actor:                 session?.username ?? 'DPS Panel',
+                          actor:                 session?.username ?? 'DPH Panel',
                         }),
                       });
                       setEditEquipmentItem(null); fetchEquipmentPanel();
@@ -5147,7 +5228,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                       <button type="button" onClick={() => setAddEqRankDropOpen(o => !o)}
                                         className="w-full flex items-center justify-between rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-left outline-none focus:border-[#fb923c] transition-colors hover:border-[#7a3a10]">
                                         <span className={selected.length === 0 ? 'text-[#3f5470]' : 'text-white'}>
-                                          {selected.length === 0 ? 'Select ranks?' : selected.join(', ')}
+                                          {selected.length === 0 ? 'Select ranks…' : selected.join(', ')}
                                         </span>
                                         <ChevronDown className="h-3.5 w-3.5 text-[#526179] shrink-0 ml-2" />
                                       </button>
@@ -5191,7 +5272,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               </div>
                               <div className="col-span-2">
                                 <label className="mb-1.5 block text-[9px] font-black uppercase tracking-[0.18em] text-[#526179]">Notes</label>
-                                <textarea rows={3} placeholder="Any additional notes about this equipment?"
+                                <textarea rows={3} placeholder="Any additional notes about this equipment…"
                                   value={newEquipmentForm.notes} onChange={e => setNewEquipmentForm(f => ({ ...f, notes: e.target.value }))}
                                   className="w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#fb923c] resize-none" />
                               </div>
@@ -5201,7 +5282,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             <button type="button" onClick={() => setAddEquipmentCatId(null)} className="rounded-lg border border-[#1f3050] px-4 py-2 text-xs font-black text-[#526179] hover:text-white transition-colors">Cancel</button>
                             <button type="button" onClick={handleAddEquipmentToCategory} disabled={addingEquipmentInCat || !newEquipmentForm.name.trim()}
                               className="rounded-lg bg-[#c2651e] px-4 py-2 text-xs font-black text-white hover:bg-[#e07830] transition-colors disabled:opacity-50">
-                              {addingEquipmentInCat ? 'Adding?' : 'Add Equipment'}
+                              {addingEquipmentInCat ? 'Adding…' : 'Add Equipment'}
                             </button>
                           </div>
                         </div>
@@ -5241,7 +5322,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                       <button type="button" onClick={() => setEditEqRankDropOpen(o => !o)}
                                         className="w-full flex items-center justify-between rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-left outline-none focus:border-[#fb923c] transition-colors hover:border-[#7a3a10]">
                                         <span className={selected.length === 0 ? 'text-[#3f5470]' : 'text-white'}>
-                                          {selected.length === 0 ? 'Select ranks?' : selected.join(', ')}
+                                          {selected.length === 0 ? 'Select ranks…' : selected.join(', ')}
                                         </span>
                                         <ChevronDown className="h-3.5 w-3.5 text-[#526179] shrink-0 ml-2" />
                                       </button>
@@ -5285,7 +5366,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               </div>
                               <div className="col-span-2">
                                 <label className="mb-1.5 block text-[9px] font-black uppercase tracking-[0.18em] text-[#526179]">Notes</label>
-                                <textarea rows={3} placeholder="Any additional notes about this equipment?"
+                                <textarea rows={3} placeholder="Any additional notes about this equipment…"
                                   value={editEquipmentItem.notes ?? ''}
                                   onChange={e => setEditEquipmentItem({ ...editEquipmentItem, notes: e.target.value })}
                                   className="w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#fb923c] resize-none" />
@@ -5296,7 +5377,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             <button type="button" onClick={() => setEditEquipmentItem(null)} className="rounded-lg border border-[#1f3050] px-4 py-2 text-xs font-black text-[#526179] hover:text-white transition-colors">Cancel</button>
                             <button type="button" onClick={handleSaveEquipment} disabled={savingEquipment}
                               className="rounded-lg bg-[#c2651e] px-4 py-2 text-xs font-black text-white hover:bg-[#e07830] transition-colors disabled:opacity-50">
-                              {savingEquipment ? 'Saving?' : 'Save Changes'}
+                              {savingEquipment ? 'Saving…' : 'Save Changes'}
                             </button>
                           </div>
                         </div>
@@ -5313,7 +5394,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                         <div className="ml-auto flex items-center gap-3">
                           <div className="relative">
                             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#526179]" />
-                            <input type="text" placeholder="Search equipment?"
+                            <input type="text" placeholder="Search equipment…"
                               value={equipmentPanelSearch} onChange={e => setEquipmentPanelSearch(e.target.value)}
                               className="h-9 w-48 rounded-lg border border-[#1f3050] bg-[#07111f] pl-9 pr-4 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#fb923c]" />
                           </div>
@@ -5366,7 +5447,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                       <>
                                         <GripVertical className="h-3.5 w-3.5 shrink-0 opacity-0 group-hover/row:opacity-40 transition-opacity text-[#526179]" />
                                         <span className="flex-1 text-xs font-black text-[#a8b7cd]">{cat.name}</span>
-                                        {/* Equipment chips ? draggable */}
+                                        {/* Equipment chips — draggable */}
                                         <div className="flex flex-wrap gap-1 mr-2">
                                           {equipment.filter(e => e.category === cat.name).sort((a, b) => a.sort_order - b.sort_order).map(item => {
                                             const chipDragging   = dragEquipmentId === item.id;
@@ -5375,7 +5456,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                             return (
                                               <button key={item.id} type="button"
                                                 draggable
-                                                title={`Drag to reorder ? Click to edit: ${item.name}`}
+                                                title={`Drag to reorder · Click to edit: ${item.name}`}
                                                 onDragStart={e => {
                                                   setDragEquipmentId(item.id);
                                                   e.dataTransfer.effectAllowed = 'move';
@@ -5455,13 +5536,13 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               {/* New title inline form */}
                               {addEqCategoryOpen && (
                                 <div className="flex items-center gap-2 px-6 py-3 bg-[#060c18]">
-                                  <input autoFocus type="text" placeholder="Title name?"
+                                  <input autoFocus type="text" placeholder="Title name…"
                                     value={newEqCategoryName} onChange={e => setNewEqCategoryName(e.target.value)}
                                     onKeyDown={e => { if (e.key === 'Enter') handleAddEqCategory(); if (e.key === 'Escape') setAddEqCategoryOpen(false); }}
                                     className="flex-1 h-8 rounded border border-[#fb923c]/30 bg-[#07111f] px-3 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#fb923c]/60" />
                                   <button type="button" onClick={handleAddEqCategory} disabled={addingEqCategory || !newEqCategoryName.trim()}
                                     className="rounded border border-[#fb923c]/40 bg-[#fb923c]/10 px-3 py-1.5 text-[10px] font-black text-[#fb923c] hover:bg-[#fb923c]/20 transition-colors disabled:opacity-40">
-                                    {addingEqCategory ? 'Creating?' : 'Create'}
+                                    {addingEqCategory ? 'Creating…' : 'Create'}
                                   </button>
                                   <button type="button" onClick={() => setAddEqCategoryOpen(false)}
                                     className="rounded p-1.5 text-[#526179] hover:text-white transition-colors">
@@ -5478,7 +5559,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                         <div className="border-b border-[#131f30] px-6 py-4 flex items-center gap-3">
                           <span className="text-xs text-[#3f5470]">No titles yet.</span>
                           <button type="button" onClick={() => { setAddEqCategoryOpen(true); setNewEqCategoryName(''); }}
-                            className="text-xs font-black text-[#fb923c] hover:underline">Add your first title ?</button>
+                            className="text-xs font-black text-[#fb923c] hover:underline">Add your first title →</button>
                         </div>
                       )}
 
@@ -5518,7 +5599,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                     <div className="flex flex-wrap gap-1">
                                       {item.who_can_use.length > 0
                                         ? item.who_can_use.map(r => { const ins = ranks.find(x => x.name.toLowerCase() === r.toLowerCase())?.insignia_url; return <span key={r} className="inline-flex items-center gap-1 rounded border border-[#fb923c]/30 bg-[#fb923c]/10 px-1.5 py-0.5 text-[9px] font-semibold text-[#fdba74]">{ins && <img src={ins} alt="" className="h-3 w-3 object-contain shrink-0" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />}{r}</span>; })
-                                        : <span className="text-[#2a3a50]">?</span>}
+                                        : <span className="text-[#2a3a50]">—</span>}
                                     </div>
                                   </td>
                                   <td className="px-4 py-3.5">
@@ -5544,7 +5625,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   );
                 })()}
 
-                {/* ?? Resources section ??????????????????????????????????????????? */}
+                {/* ── Resources section ─────────────────────────────────────────── */}
                 {panelSection === 'resources' && (
                   <div className="space-y-6">
                     <button type="button" onClick={() => setPanelSection(null)}
@@ -5597,14 +5678,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               <div className="flex-1 min-w-0">
                                 <p className="truncate text-sm font-black text-white">{r.title}</p>
                                 <p className="text-[10px] text-[#3f5470]">
-                                  {resourceTypeLabel(r)} ? Updated {new Date(r.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  {resourceTypeLabel(r)} · Updated {new Date(r.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                 </p>
-                                {(r.personnel_only || (Array.isArray(r.allowed_dps_ranks) && r.allowed_dps_ranks.length > 0) || r.division_only) && (
+                                {(r.personnel_only || (Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0) || r.division_only) && (
                                   <p className="mt-1 text-[10px] font-semibold text-[#7c8ba5]">
                                     {r.division_only ? 'Division only' : null}
-                                    {r.personnel_only || (Array.isArray(r.allowed_dps_ranks) && r.allowed_dps_ranks.length > 0) ? (r.division_only ? ' ? ' : '') + 'DPS personnel' : null}
-                                    {Array.isArray(r.allowed_dps_ranks) && r.allowed_dps_ranks.length > 0
-                                      ? ` ? Ranks: ${r.allowed_dps_ranks.join(', ')}`
+                                    {r.personnel_only || (Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0) ? (r.division_only ? ' · ' : '') + 'DPH personnel' : null}
+                                    {Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0
+                                      ? ` · Ranks: ${r.allowed_dph_ranks.join(', ')}`
                                       : null}
                                   </p>
                                 )}
@@ -5656,7 +5737,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               setEventForm({
                                 title: '', event_date: '', event_time: '', location: '', purpose: '',
                                 hosted_by: session?.username ?? '',
-                                hosting_department: 'Department of Public Safety',
+                                hosting_department: 'Department of Public Health',
                                 is_public: false,
                               });
                             }}
@@ -5694,7 +5775,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             </div>
                             <div className="sm:col-span-2">
                               <label className={labelCls}>Where will the event take place?</label>
-                              <input type="text" value={eventForm.location} placeholder="e.g. DPS HQ, Training Grounds, Online"
+                              <input type="text" value={eventForm.location} placeholder="e.g. DPH HQ, Training Grounds, Online"
                                 onChange={e => setEventForm(p => ({ ...p, location: e.target.value }))}
                                 className={inputCls} />
                             </div>
@@ -5706,14 +5787,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             </div>
                             <div>
                               <label className={labelCls}>Hosting department</label>
-                              <input type="text" value={eventForm.hosting_department} placeholder="Department of Public Safety"
+                              <input type="text" value={eventForm.hosting_department} placeholder="Department of Public Health"
                                 onChange={e => setEventForm(p => ({ ...p, hosting_department: e.target.value }))}
                                 className={inputCls} />
                             </div>
                             <div className="sm:col-span-2">
                               <label className={labelCls}>What is the event for?</label>
                               <textarea value={eventForm.purpose} rows={3}
-                                placeholder="Describe the event's purpose, agenda, or any relevant details?"
+                                placeholder="Describe the event's purpose, agenda, or any relevant details…"
                                 onChange={e => setEventForm(p => ({ ...p, purpose: e.target.value }))}
                                 className="w-full resize-none rounded-lg border border-[#1f3050] bg-[#07111f] px-3 py-2 text-xs font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#2f70ff]" />
                             </div>
@@ -5749,7 +5830,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                               onClick={async () => {
                                 setSavingEvent(true);
                                 try {
-                                  const url = editingEvent ? `/api/roster/events/${editingEvent.id}` : '/api/roster/events';
+                                  const url = editingEvent ? `/api/dph/events/${editingEvent.id}` : '/api/dph/events';
                                   const r = await fetch(url, {
                                     method: editingEvent ? 'PATCH' : 'POST',
                                     headers: { 'content-type': 'application/json' },
@@ -5763,7 +5844,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                 finally { setSavingEvent(false); }
                               }}
                               className="flex items-center gap-1.5 rounded-lg bg-[#a78bfa] px-4 py-2 text-xs font-black text-[#0d1422] hover:bg-[#c4b5fd] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                              {savingEvent ? 'Saving?' : (editingEvent ? 'Save Changes' : 'Add Event')}
+                              {savingEvent ? 'Saving…' : (editingEvent ? 'Save Changes' : 'Add Event')}
                             </button>
                             <button type="button"
                               onClick={() => { setShowEventForm(false); setEditingEvent(null); }}
@@ -5805,11 +5886,11 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                       : <span className="rounded-full border border-[#1f3050] bg-[#0d1a28] px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-[#3f5470]">Internal</span>
                                     }
                                   </div>
-                                  <p className="mt-0.5 text-[10px] text-[#526179]">{dateStr}{timeStr ? ` ? ${timeStr}` : ''}</p>
+                                  <p className="mt-0.5 text-[10px] text-[#526179]">{dateStr}{timeStr ? ` · ${timeStr}` : ''}</p>
                                   {(ev.hosted_by || ev.hosting_department) && (
                                     <p className="mt-0.5 text-[10px] text-[#526179]">
                                       {ev.hosted_by ? `Hosted by ${ev.hosted_by}` : 'Hosted event'}
-                                      {ev.hosting_department ? ` ? ${ev.hosting_department}` : ''}
+                                      {ev.hosting_department ? ` · ${ev.hosting_department}` : ''}
                                     </p>
                                   )}
                                   {ev.location && <p className="mt-0.5 flex items-center gap-1 text-[10px] text-[#3f5470]"><MapPin className="h-2.5 w-2.5 shrink-0" />{ev.location}</p>}
@@ -5827,7 +5908,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                         location: ev.location ?? '',
                                         purpose: ev.purpose ?? '',
                                         hosted_by: ev.hosted_by ?? '',
-                                        hosting_department: ev.hosting_department ?? 'Department of Public Safety',
+                                        hosting_department: ev.hosting_department ?? 'Department of Public Health',
                                         is_public: ev.is_public,
                                       });
                                     }}
@@ -5840,7 +5921,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                       if (!confirm(`Delete "${ev.title}"?`)) return;
                                       setDeletingEventId(ev.id);
                                       try {
-                                        const r = await fetch(`/api/roster/events/${ev.id}`, { method: 'DELETE' });
+                                        const r = await fetch(`/api/dph/events/${ev.id}`, { method: 'DELETE' });
                                         if (!r.ok) throw new Error();
                                         toast.success('Event deleted.');
                                         fetchEvents();
@@ -5860,7 +5941,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   </div>
                 )}
 
-                {/* ?? Information section ???????????????????????????????????????? */}
+                {/* ── Information section ──────────────────────────────────────── */}
                 {panelSection === 'information' && (
                   <div className="space-y-6">
                     {/* Back breadcrumb */}
@@ -5923,7 +6004,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                       </div>
                     )}
 
-                    {/* ?? Edit Index Page Info ???????????????????????????????????? */}
+                    {/* ── Edit Index Page Info ──────────────────────────────────── */}
                     {infoSubSection === 'index' && (
                       <div className="relative rounded-2xl border border-[#22d3ee]/20 bg-[#070d16] shadow-[0_18px_40px_rgba(0,0,0,0.25)]">
                         <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-2xl bg-gradient-to-r from-transparent via-[#22d3ee]/40 to-transparent" />
@@ -5933,58 +6014,45 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             <p className="mt-1 text-xs text-[#526179]">Shown publicly on the Departments tab of the index page.</p>
                           </div>
                           <button type="button" onClick={() => setInfoSubSection(null)}
-                            className="text-xs font-black text-[#526179] hover:text-white transition-colors">? Back</button>
+                            className="text-xs font-black text-[#526179] hover:text-white transition-colors">← Back</button>
                         </div>
-                        <div className="px-8 py-6">
-                          <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
-                            <div className="space-y-5">
-                              <IndexInfoEditFields
-                                form={indexInfoForm}
-                                setForm={setIndexInfoForm}
-                                rosterDivisions={rosterDivisions}
-                                labelCls={labelCls}
-                                accent="#22d3ee"
-                                descriptionPlaceholder="A brief overview of the Department of Public Safety?"
-                              />
-                              <button type="button"
-                                disabled={savingInfo || !indexInfoForm.description.trim()}
-                                onClick={async () => {
-                                  setSavingInfo(true);
-                                  try {
-                                    const divisions = [...rosterDivisions]
-                                      .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
-                                      .map(d => {
-                                        const key = (d.unit_key ?? '').trim().toUpperCase();
-                                        return key ? `${d.name} (${key})` : d.name;
-                                      });
-                                    const r = await fetch('/api/roster/content/index_info', {
-                                      method: 'PUT', headers: { 'content-type': 'application/json' },
-                                      body: JSON.stringify(indexInfoSavePayload(indexInfoForm, divisions)),
-                                    });
-                                    if (!r.ok) throw new Error();
-                                    toast.success('Index page info saved.');
-                                  } catch { toast.error('Failed to save.'); }
-                                  finally { setSavingInfo(false); }
-                                }}
-                                className="flex items-center gap-1.5 rounded-lg bg-[#22d3ee] px-5 py-2 text-xs font-black text-[#0d1422] hover:bg-[#67e8f9] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                                {savingInfo ? 'Saving?' : 'Save Index Info'}
-                              </button>
-                            </div>
-                            <InfoEditPreviewFrame
-                              title="Live Preview"
-                              hint="How the DPS panel will appear on the public index Departments tab. Changes show here before you save."
-                            >
-                              <IndexInfoLivePreview
-                                form={indexInfoForm}
-                                rosterDivisions={rosterDivisions}
-                              />
-                            </InfoEditPreviewFrame>
-                          </div>
+                        <div className="space-y-5 px-8 py-6">
+                          <IndexInfoEditFields
+                            form={indexInfoForm}
+                            setForm={setIndexInfoForm}
+                            rosterDivisions={rosterDivisions}
+                            labelCls={labelCls}
+                            accent="#22d3ee"
+                            descriptionPlaceholder="A brief overview of the Department of Public Health…"
+                          />
+                          <button type="button"
+                            disabled={savingInfo || !indexInfoForm.description.trim()}
+                            onClick={async () => {
+                              setSavingInfo(true);
+                              try {
+                                const divisions = [...rosterDivisions]
+                                  .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+                                  .map(d => {
+                                    const key = (d.unit_key ?? '').trim().toUpperCase();
+                                    return key ? `${d.name} (${key})` : d.name;
+                                  });
+                                const r = await fetch('/api/dph/content/index_info', {
+                                  method: 'PUT', headers: { 'content-type': 'application/json' },
+                                  body: JSON.stringify(indexInfoSavePayload(indexInfoForm, divisions)),
+                                });
+                                if (!r.ok) throw new Error();
+                                toast.success('Index page info saved.');
+                              } catch { toast.error('Failed to save.'); }
+                              finally { setSavingInfo(false); }
+                            }}
+                            className="flex items-center gap-1.5 rounded-lg bg-[#22d3ee] px-5 py-2 text-xs font-black text-[#0d1422] hover:bg-[#67e8f9] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                            {savingInfo ? 'Saving…' : 'Save Index Info'}
+                          </button>
                         </div>
                       </div>
                     )}
 
-                    {/* ?? Edit DPS Page Info ?????????????????????????????????????? */}
+                    {/* ── Edit DPS Page Info ────────────────────────────────────── */}
                     {infoSubSection === 'page' && (
                       <div className="relative rounded-2xl border border-[#22d3ee]/20 bg-[#070d16] shadow-[0_18px_40px_rgba(0,0,0,0.25)]">
                         <div className="pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-2xl bg-gradient-to-r from-transparent via-[#22d3ee]/40 to-transparent" />
@@ -5994,43 +6062,36 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                             <p className="mt-1 text-xs text-[#526179]">Shown in the Information tab of the DPS portal for logged-in members.</p>
                           </div>
                           <button type="button" onClick={() => setInfoSubSection(null)}
-                            className="text-xs font-black text-[#526179] hover:text-white transition-colors">? Back</button>
+                            className="text-xs font-black text-[#526179] hover:text-white transition-colors">← Back</button>
                         </div>
                         {(
-                          <div className="px-8 py-6">
-                            <div className="grid gap-6 xl:grid-cols-2 xl:items-start">
-                              <div className="space-y-4">
-                                <ContentBlocksEditor
-                                  sections={pageInfoSections as ContentBlock[]}
-                                  onChange={next => setPageInfoSections(next as PageBlock[])}
-                                  accent="#22d3ee"
-                                />
-                                <button type="button"
-                                  disabled={savingInfo || pageInfoSections.length === 0}
-                                  onClick={async () => {
-                                    setSavingInfo(true);
-                                    try {
-                                      const r = await fetch('/api/roster/content/page_info', {
-                                        method: 'PUT', headers: { 'content-type': 'application/json' },
-                                        body: JSON.stringify({ sections: pageInfoSections }),
-                                      });
-                                      if (!r.ok) throw new Error();
-                                      setPageInfo({ sections: pageInfoSections });
-                                      toast.success('DPS page info saved.');
-                                    } catch { toast.error('Failed to save.'); }
-                                    finally { setSavingInfo(false); }
-                                  }}
-                                  className="flex items-center gap-1.5 rounded-lg bg-[#22d3ee] px-5 py-2 text-xs font-black text-[#0d1422] hover:bg-[#67e8f9] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                                  {savingInfo ? 'Saving?' : 'Save DPS Page Info'}
-                                </button>
-                              </div>
-                              <InfoEditPreviewFrame
-                                title="Live Preview"
-                                hint="How this content will appear in the DPS portal Information tab. Changes show here before you save."
-                              >
-                                <DpsPageInfoLivePreview sections={pageInfoSections as ContentBlock[]} />
-                              </InfoEditPreviewFrame>
-                            </div>
+                          <div className="space-y-4 px-8 py-6">
+                            {/* Block list */}
+                            <ContentBlocksEditor
+                              sections={pageInfoSections as ContentBlock[]}
+                              onChange={next => setPageInfoSections(next as PageBlock[])}
+                              accent="#22d3ee"
+                            />
+
+                            {/* Save */}
+                            <button type="button"
+                              disabled={savingInfo || pageInfoSections.length === 0}
+                              onClick={async () => {
+                                setSavingInfo(true);
+                                try {
+                                  const r = await fetch('/api/dph/content/page_info', {
+                                    method: 'PUT', headers: { 'content-type': 'application/json' },
+                                    body: JSON.stringify({ sections: pageInfoSections }),
+                                  });
+                                  if (!r.ok) throw new Error();
+                                  setPageInfo({ sections: pageInfoSections });
+                                  toast.success('DPS page info saved.');
+                                } catch { toast.error('Failed to save.'); }
+                                finally { setSavingInfo(false); }
+                              }}
+                              className="flex items-center gap-1.5 rounded-lg bg-[#22d3ee] px-5 py-2 text-xs font-black text-[#0d1422] hover:bg-[#67e8f9] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                              {savingInfo ? 'Saving…' : 'Save DPS Page Info'}
+                            </button>
                           </div>
                         )}
                       </div>
@@ -6079,7 +6140,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
       )}
 
       {useModernShell ? (
-        <DpsModernShell
+        <DphModernShell
           tabs={tabs}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
@@ -6103,8 +6164,8 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
           onDepartmentPanel={openDepartmentPanel}
           navigate={navigate}
         >
-          {dpsTabPanels}
-        </DpsModernShell>
+          {dphTabPanels}
+        </DphModernShell>
       ) : (
         <main className="min-h-screen bg-[#02060b] text-white">
       {/* Mobile top bar */}
@@ -6129,11 +6190,11 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
         <aside className={`border-b border-[#131f30] bg-[#02060b] px-5 py-5 lg:fixed lg:inset-y-0 lg:left-0 lg:flex lg:w-[265px] lg:flex-col lg:border-b-0 lg:border-r lg:border-[#131f30] lg:transition-transform lg:duration-300 ${sidebarOpen ? 'lg:translate-x-0' : 'lg:-translate-x-full'}`}>
           <div className="lg:shrink-0">
             <div className="flex items-start justify-between gap-2">
-              <h1 className="text-xl font-black tracking-[-0.04em] text-white">Dept. of Public Safety</h1>
+              <h1 className="text-xl font-black tracking-[-0.04em] text-white">Dept. of Public Health</h1>
   
             </div>
             {isLoading ? (
-              <p className="mt-2 text-xs font-bold text-[#526179]">Loading?</p>
+              <p className="mt-2 text-xs font-bold text-[#526179]">Loading…</p>
             ) : (
               <>
                 <p className="mt-2 text-sm font-black leading-none text-[#4384ff]">{username}</p>
@@ -6157,7 +6218,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
             </nav>
           </div>
 
-          {session && (isSuperAdmin || canSeeDepartmentPanel || canAccessDpsCad(session)) && (
+          {session && (isSuperAdmin || canSeeDepartmentPanel) && (
             <div className="shrink-0 border-t border-[#131f30] px-4 py-4">
               <p className="mb-2 px-2 text-[9px] font-black uppercase tracking-[0.24em] text-[#3f5470]">Department tools</p>
               <div className="space-y-0.5">
@@ -6165,8 +6226,8 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   <button type="button" onClick={openSupervisoryPanel}
                     className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs font-bold transition-colors ${
                       activeTab === 'supervisory-panel'
-                        ? 'text-[#67b0ff] hover:bg-white/5'
-                        : 'text-[#7a90aa] hover:bg-[#070d16] hover:text-[#4384ff]'
+                        ? 'text-[#6ee7b7] hover:bg-white/5'
+                        : 'text-[#7a90aa] hover:bg-[#070d16] hover:text-[#34d399]'
                     }`}>
                     <Shield className="h-3.5 w-3.5 shrink-0" />
                     Supervisory Panel
@@ -6174,25 +6235,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                 )}
 
                 {canSeeDepartmentPanel && (
-                  <button type="button" onClick={() => {
-                    if (isDivisionOnlyPanelEditor) setPanelSection('division');
-                    else setActiveTab('department-panel');
-                  }}
+                  <button type="button" onClick={openDepartmentPanel}
                     className={`flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs font-bold transition-colors ${
                       activeTab === 'department-panel'
                         ? 'text-[#f4c542] hover:bg-white/5'
-                        : 'text-[#7a90aa] hover:bg-[#070d16] hover:text-[#4384ff]'
+                        : 'text-[#7a90aa] hover:bg-[#070d16] hover:text-[#34d399]'
                     }`}>
                     <Settings className="h-3.5 w-3.5 shrink-0" />
                     Department Panel
-                  </button>
-                )}
-
-                {canAccessDpsCad(session) && (
-                  <button type="button" onClick={() => navigate('/dps_cad')}
-                    className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs font-bold text-[#7a90aa] transition-colors hover:bg-[#070d16] hover:text-[#4384ff]">
-                    <Monitor className="h-3.5 w-3.5 shrink-0" />
-                    DPS CAD
                   </button>
                 )}
               </div>
@@ -6218,12 +6268,12 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
         {/* Main content */}
         <section className={`flex min-h-screen flex-1 flex-col lg:transition-all lg:duration-300 ${sidebarOpen ? 'lg:ml-[265px]' : 'lg:ml-0'}`}>
           <header className="relative z-40 hidden items-center border-b border-[#131f30] bg-[#02060b]/90 px-9 py-4 backdrop-blur-md lg:grid lg:grid-cols-3">
-            {/* Left ? logo */}
+            {/* Left — logo */}
             <p className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em] text-white">
               <DojrpShield className="h-5 w-5" /><DojrpLogo />
             </p>
 
-            {/* Center ? terminal status */}
+            {/* Center — terminal status */}
             <div className="flex justify-center">
               <div className={`flex items-center gap-2 rounded-full border px-4 py-2 ${cadOnline === false ? 'border-[#3a1920] bg-[#19070b]' : 'border-[#173053] bg-[#071120]'}`}>
                 <span className={`h-2 w-2 rounded-full ${cadOnline === false ? 'bg-[#ff5d5d]' : 'bg-[#4384ff]'}`} />
@@ -6233,7 +6283,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
               </div>
             </div>
 
-            {/* Right ? profile avatar with dropdown */}
+            {/* Right — profile avatar with dropdown */}
             <div className="relative z-50 flex justify-end" ref={profileRef}>
               <button
                 type="button"
@@ -6258,7 +6308,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                 <div className="absolute right-0 top-11 z-[80] w-56 rounded-xl border border-[#1b2738] bg-[#0b1422] py-1 shadow-[0_16px_48px_rgba(0,0,0,0.5)]">
                   <div className="border-b border-[#131f30] px-4 py-3">
                     <p className="text-xs font-black text-white">{session?.username}</p>
-                    <p className="mt-0.5 text-[10px] font-semibold text-[#526179]">{rank || 'Unranked'}</p>
+                    <p className="mt-0.5 text-[10px] font-semibold text-[#526179]">{session?.dph_rank ?? session?.rank ?? 'Member'}</p>
                   </div>
                   <button
                     type="button"
@@ -6276,17 +6326,17 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
 
           <div className="flex-1 px-5 py-7 sm:px-8 sm:py-9">
             {pageLoading ? (
-              <PageLoadingScreen loading label="Loading?" accent="#f4c542" />
+              <PageLoadingScreen loading label="Loading…" accent="#f4c542" />
             ) : (
             <>
             <div className="mb-8">
-              <h2 className="text-3xl font-black leading-none tracking-[-0.05em] text-white sm:text-4xl">Department of Public Safety</h2>
+              <h2 className="text-3xl font-black leading-none tracking-[-0.05em] text-white sm:text-4xl">Department of Public Health</h2>
               <p className="mt-2 text-sm text-[#8392aa]">{tabSubtitle}</p>
             </div>
 
 
-            {/* ?? PERSONNEL ROSTER ??????????????????????????????????????????????? */}
-            {dpsTabPanels}
+            {/* ── PERSONNEL ROSTER ─────────────────────────────────────────────── */}
+            {dphTabPanels}
             </>
             )}
 
@@ -6296,9 +6346,9 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
     </main>
       )}
 
-      {/* ?? Document Editor overlay ???????????????????????????????????????????? */}
+      {/* ── Document Editor overlay ──────────────────────────────────────────── */}
       {openDocId !== null && (
-        <DocumentEditor
+        <DocumentEditor apiBase="/api/dph/resources"
           key={`${openDocId}-${openDocCanEdit ? 'edit' : 'view'}`}
           resourceId={openDocId}
           canEdit={openDocCanEdit}
@@ -6306,7 +6356,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
         />
       )}
 
-      {/* ?? PDF resource viewer overlay ??????????????????????????????????????? */}
+      {/* ── PDF resource viewer overlay ─────────────────────────────────────── */}
       {openPdf !== null && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black/85">
           <div className="flex items-center justify-between border-b border-[#1e2d42] bg-[#070d16] px-5 py-3">
@@ -6317,21 +6367,21 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
             </button>
           </div>
           <PdfViewer
-            fileUrl={resourceFileUrl('dps', openPdf.id, openPdf)}
+            fileUrl={resourceFileUrl('dph', openPdf.id, openPdf)}
             downloadName={`${openPdf.title}.pdf`}
             liveRefreshMs={googleFileIdFromResource(openPdf) || openPdf.type === 'google_doc' ? 45_000 : undefined}
           />
         </div>
       )}
 
-      {/* ?? Add Resource dialog ? Step 1: Name ???????????????????????????????? */}
+      {/* ── Add Resource dialog — Step 1: Name ──────────────────────────────── */}
       {addResourceStep === 1 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
           <div className="w-full max-w-sm rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-black text-white">New Resource</h3>
-                <p className="mt-0.5 text-xs text-[#526179]">Step 1 of 2 ? Name your resource</p>
+                <p className="mt-0.5 text-xs text-[#526179]">Step 1 of 2 — Name your resource</p>
               </div>
               <button type="button" onClick={resetAddResourceDialog}
                 className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white">
@@ -6362,7 +6412,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   disabled={!newResourceName.trim()}
                   onClick={() => setAddResourceStep(2)}
                   className="flex-1 h-10 rounded-lg bg-[#2f66ee] text-xs font-black text-white hover:bg-[#3977ff] disabled:opacity-40">
-                  Next ?
+                  Next →
                 </button>
               </div>
             </div>
@@ -6370,14 +6420,14 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
         </div>
       )}
 
-      {/* ?? Add Resource dialog ? Step 2: Type ???????????????????????????????? */}
+      {/* ── Add Resource dialog — Step 2: Type ──────────────────────────────── */}
       {addResourceStep === 2 && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4">
           <div className="w-full max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-black text-white">New Resource</h3>
-                <p className="mt-0.5 text-xs text-[#526179]">Step 2 of 2 ? Type & visibility</p>
+                <p className="mt-0.5 text-xs text-[#526179]">Step 2 of 2 — Type & visibility</p>
               </div>
               <button type="button" onClick={resetAddResourceDialog}
                 className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white">
@@ -6427,7 +6477,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                 </div>
               </div>
 
-              {/* File picker ? shown when File Upload is selected */}
+              {/* File picker — shown when File Upload is selected */}
               {newResourceType === 'file' && (
                 <div className="space-y-2">
                   <label className="flex h-11 cursor-pointer items-center gap-3 rounded-lg border border-dashed border-[#2a3b56] bg-[#07111f] px-3 text-xs font-bold text-[#a8b7cd] hover:border-[#34d399]/60">
@@ -6438,7 +6488,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                       onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
                     />
                     <FileText className="h-4 w-4 shrink-0 text-[#34d399]" />
-                    <span className="truncate">{uploadFile ? uploadFile.name : 'Choose a file? (Supported formats: PDF, DOCX)'}</span>
+                    <span className="truncate">{uploadFile ? uploadFile.name : 'Choose a file… (Supported formats: PDF, DOCX)'}</span>
                   </label>
                   {uploadFile?.name.toLowerCase().endsWith('.docx') && (
                     <p className="text-[11px] text-[#5a7290]">This document will automatically be converted to PDF.</p>
@@ -6543,18 +6593,18 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                   <label className="mt-2 flex cursor-pointer items-start gap-3">
                     <input
                       type="checkbox"
-                      checked={newResourcePersonnelOnly || newResourceAllowedDpsRanks.length > 0}
+                      checked={newResourcePersonnelOnly || newResourceAllowedDphRanks.length > 0}
                       onChange={e => {
                         const on = e.target.checked;
                         setNewResourcePersonnelOnly(on);
-                        if (!on) setNewResourceAllowedDpsRanks([]);
+                        if (!on) setNewResourceAllowedDphRanks([]);
                       }}
                       className="mt-0.5 h-4 w-4 rounded border-[#2a3b56] bg-[#070d16] text-[#2f66ee] focus:ring-[#2f66ee]"
                     />
                     <span>
                       <span className="block text-sm font-bold text-white">DPS personnel only</span>
                       <span className="mt-0.5 block text-xs text-[#526179]">
-                        Hide from the public site ? only Department of Public Safety personnel can see it.
+                        Hide from the public site — only Department of Public Health personnel can see it.
                       </span>
                     </span>
                   </label>
@@ -6571,7 +6621,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                       {[...ranks]
                         .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
                         .map(rank => {
-                          const checked = newResourceAllowedDpsRanks.some(
+                          const checked = newResourceAllowedDphRanks.some(
                             n => n.toLowerCase() === rank.name.toLowerCase()
                           );
                           return (
@@ -6583,7 +6633,7 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
                                 type="checkbox"
                                 checked={checked}
                                 onChange={() => {
-                                  setNewResourceAllowedDpsRanks(prev => {
+                                  setNewResourceAllowedDphRanks(prev => {
                                     if (checked) {
                                       return prev.filter(n => n.toLowerCase() !== rank.name.toLowerCase());
                                     }
@@ -6606,15 +6656,15 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
             <div className="flex gap-3">
               <button type="button" onClick={() => setAddResourceStep(1)}
                 className="flex-1 h-10 rounded-lg border border-[#1e2d42] text-xs font-bold text-[#a8b7cd] hover:bg-white/5">
-                ? Back
+                ← Back
               </button>
               <button type="button"
                 disabled={creatingResource || (newResourceType === 'file' && !uploadFile)}
                 onClick={newResourceType === 'file' ? handleUploadResource : newResourceType === 'google_doc' ? handleCreateGoogleResource : handleCreateResource}
                 className="flex-1 h-10 rounded-lg bg-[#2f66ee] text-xs font-black text-white hover:bg-[#3977ff] disabled:opacity-40">
                 {creatingResource
-                  ? (uploadStatus ?? 'Creating?')
-                  : newResourceType === 'file' ? 'Upload ?' : newResourceType === 'google_doc' ? 'Link Google Doc ?' : 'Create & Edit ?'}
+                  ? (uploadStatus ?? 'Creating…')
+                  : newResourceType === 'file' ? 'Upload →' : newResourceType === 'google_doc' ? 'Link Google Doc →' : 'Create & Edit →'}
               </button>
             </div>
           </div>
@@ -6624,4 +6674,4 @@ const DepartmentOfPublicSafety = ({ shellTheme = 'classic' }: { shellTheme?: Dps
   );
 };
 
-export default DepartmentOfPublicSafety;
+export default DepartmentOfPublicHealth;

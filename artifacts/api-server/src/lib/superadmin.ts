@@ -23,6 +23,29 @@ export function isSuperAdminDiscordId(discordId: string | null | undefined): boo
   return getSuperAdminDiscordIds().has(discordId);
 }
 
+export type SuperAdminAccessFlags = {
+  can_access_iab: boolean;
+  can_access_system_logs: boolean;
+  can_access_terms_privacy: boolean;
+  can_access_terminal_offline: boolean;
+  can_access_doc_dps_cad: boolean;
+};
+
+/** Grant every portal / lock-restricted flag on session payloads for superadmins. */
+export function applySuperAdminSessionOverrides<
+  T extends { discord_id?: string | null } & Partial<SuperAdminAccessFlags>,
+>(session: T): T {
+  if (!isSuperAdminDiscordId(session.discord_id)) return session;
+  return {
+    ...session,
+    can_access_iab: true,
+    can_access_system_logs: true,
+    can_access_terms_privacy: true,
+    can_access_terminal_offline: true,
+    can_access_doc_dps_cad: true,
+  };
+}
+
 /** Ensure Executive Team group exists with full portal flags; never overwrite roster ranks. */
 export async function ensureSuperAdminAccess(discordId: string, profileId: number): Promise<void> {
   if (!isSuperAdminDiscordId(discordId)) return;
@@ -45,10 +68,15 @@ export async function ensureSuperAdminAccess(discordId: string, profileId: numbe
     );
   }
 
-  // Whitelist for offline CAD sign-in only — keep whatever staff roster rank they already have.
+  // Whitelist + full access flags — keep whatever staff roster rank they already have.
   await pool.query(
     `UPDATE cad_user_profiles
      SET whitelisted = TRUE,
+         can_access_iab = TRUE,
+         can_access_system_logs = TRUE,
+         can_access_terms_privacy = TRUE,
+         can_access_terminal_offline = TRUE,
+         can_access_doc_dps_cad = TRUE,
          updated_at  = NOW()
      WHERE id = $1`,
     [profileId],
