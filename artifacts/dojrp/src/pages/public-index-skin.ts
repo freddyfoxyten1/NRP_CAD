@@ -2,6 +2,7 @@ const BASE = (import.meta.env.BASE_URL as string) ?? '/';
 
 export const DPS_SEAL_URL = `${BASE}dps-seal.png`;
 export const DPH_SEAL_URL = `${BASE}dph-seal.png`;
+export const IAB_SEAL_URL = `${BASE}iab-seal.png?v=4`;
 export const DPS_INDEX_BANNER_URL = `${BASE}dps-index-banner.png`;
 export const DPH_INDEX_BANNER_URL = `${BASE}dph-index-banner.png`;
 
