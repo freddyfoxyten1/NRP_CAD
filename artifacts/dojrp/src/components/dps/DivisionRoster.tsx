@@ -4,6 +4,7 @@ import {
   GripVertical, Info, Layers, Pencil, Plus, Radio, RefreshCw, Search, Settings, Trash2, UserMinus, UserPlus, Users, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { isPdfLikeResource, resourceTypeLabel } from '@/lib/resource-type';
 import ImageInput from '@/components/shared/ImageInput';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
 
@@ -94,6 +95,8 @@ export type DivisionRosterMember = {
     can_edit_roster?: boolean;
     can_edit_info?: boolean;
   }>;
+  /** Division ids where the member holds the linked membership Discord role. */
+  division_discord_links?: number[];
   status: string;
   appointed_date: string | null;
   certifications?: string[];
@@ -104,6 +107,8 @@ type DivisionResource = {
   title: string;
   type: 'document' | 'pdf' | string;
   logo_url: string | null;
+  google_file_id?: string | null;
+  header_config?: unknown;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -162,6 +167,18 @@ function assignmentForDivision(m: DivisionRosterMember, division: DpsDivision) {
   return memberAssignments(m).find(a =>
     a.division_id === division.id || a.division_name.toLowerCase() === division.name.toLowerCase()
   ) ?? null;
+}
+
+function memberInDivisionRoster(m: DivisionRosterMember, division: DpsDivision): boolean {
+  const hasDiscordLink = Boolean(division.discord_role_id?.trim());
+  if (hasDiscordLink) {
+    if (Array.isArray(m.division_discord_links)) {
+      if (m.division_discord_links.includes(division.id)) return true;
+      if (m.division_discord_links.length > 0) return false;
+    }
+    return assignmentForDivision(m, division) != null;
+  }
+  return assignmentForDivision(m, division) != null;
 }
 
 import { compareCallsigns } from '@/lib/roster-sort';
@@ -322,7 +339,7 @@ export function DivisionRosterView({
       .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 
   const membersInDivision = (division: DpsDivision) =>
-    members.filter(m => assignmentForDivision(m, division) != null);
+    members.filter(m => memberInDivisionRoster(m, division));
 
   const getDpsRankMeta = (name: string | null | undefined) =>
     getPersonnelRankMeta(personnelRanks, name);
@@ -342,13 +359,13 @@ export function DivisionRosterView({
     // Avoid flashing empty / kicking users out while the roster is still loading
     if (loading) return true;
     if (!viewerMember) return false;
-    return assignmentForDivision(viewerMember, division) != null;
+    return memberInDivisionRoster(viewerMember, division);
   };
 
   // If selection is no longer allowed after membership resolves, return to cards
   useEffect(() => {
     if (loading || selectedDivision == null || bypassDivisionRestrictions) return;
-    if (!viewerMember || assignmentForDivision(viewerMember, selectedDivision) == null) {
+    if (!viewerMember || !memberInDivisionRoster(viewerMember, selectedDivision)) {
       setSelectedDivisionId(null);
       setPanelMode('roster');
     }
@@ -547,7 +564,7 @@ export function DivisionRosterView({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-black text-white">{r.title}</p>
                     <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
-                      {r.type === 'pdf' ? 'PDF' : 'Document'}
+                      {resourceTypeLabel(r)}
                     </p>
                   </div>
                   <p className="text-[10px] text-[#3f5470]">
@@ -934,12 +951,12 @@ export function DivisionsInformationView({
     if (bypassDivisionRestrictions) return true;
     if (loading) return true;
     if (!viewerMember) return false;
-    return assignmentForDivision(viewerMember, division) != null;
+    return memberInDivisionRoster(viewerMember, division);
   };
 
   useEffect(() => {
     if (loading || selectedDivision == null || bypassDivisionRestrictions) return;
-    if (!viewerMember || assignmentForDivision(viewerMember, selectedDivision) == null) {
+    if (!viewerMember || !memberInDivisionRoster(viewerMember, selectedDivision)) {
       setSelectedDivisionId(null);
     }
   }, [loading, selectedDivision, bypassDivisionRestrictions, viewerMember]);
@@ -2053,7 +2070,7 @@ export function DivisionPanelSection({
   };
 
   const membersInDivision = (division: DpsDivision) =>
-    members.filter(m => assignmentForDivision(m, division) != null);
+    members.filter(m => memberInDivisionRoster(m, division));
 
   const openDivision = (id: number, mode: DivisionPanelMode) => {
     const access = accessForDivision(id);
@@ -2678,7 +2695,7 @@ export function DivisionPanelSection({
                   <div className="flex-1 min-w-0">
                     <p className="truncate text-sm font-black text-white">{r.title}</p>
                     <p className="text-[10px] text-[#3f5470]">
-                      {r.type === 'pdf' ? 'PDF' : 'Document'} · Updated{' '}
+                      {resourceTypeLabel(r)} · Updated{' '}
                       {new Date(r.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </p>
                     {(r.division_only || (Array.isArray(r.allowed_ranks) && r.allowed_ranks.length > 0)) && (
@@ -2696,8 +2713,8 @@ export function DivisionPanelSection({
                     onClick={() => onOpenResource(r, true)}
                     className="flex items-center gap-1 rounded-lg border border-[#34d399]/30 bg-[#34d399]/8 px-3 py-1.5 text-[11px] font-black text-[#34d399] hover:bg-[#34d399]/15 transition-colors"
                   >
-                    {r.type === 'pdf' ? <BookOpen className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-                    {r.type === 'pdf' ? 'View' : 'Edit'}
+                    {isPdfLikeResource(r) ? <BookOpen className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                    {isPdfLikeResource(r) ? 'View' : 'Edit'}
                   </button>
                   <button
                     type="button"

@@ -19,19 +19,46 @@ export function rankBelongsToGroup(
   return gid != null && id != null && gid === id;
 }
 
+/** Match preview proxy GET timeout (12s) with a small buffer for slow VPS responses. */
+export const ROSTER_FETCH_TIMEOUT_MS = 15_000;
+
+export function isFetchTimeoutError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === "AbortError" || err.name === "TimeoutError") return true;
+  const msg = err.message.toLowerCase();
+  return msg.includes("signal timed out")
+    || msg.includes("aborted")
+    || msg.includes("timeout");
+}
+
+export function rosterFetchErrorMessage(err: unknown, label: string): string {
+  if (isFetchTimeoutError(err)) {
+    return `Failed to load ${label}. The server took too long to respond — try again.`;
+  }
+  if (err instanceof Error && err.message.trim()) return err.message;
+  return `Failed to load ${label}.`;
+}
+
 export async function fetchRosterJson<T>(url: string, label: string): Promise<T> {
-  const res = await fetch(url, { headers: { accept: "application/json" } });
-  let data: unknown;
   try {
-    data = await res.json();
-  } catch {
-    throw new Error(`Failed to load ${label}.`);
+    const res = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(ROSTER_FETCH_TIMEOUT_MS),
+    });
+    let data: unknown;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`Failed to load ${label}.`);
+    }
+    if (!res.ok) {
+      const msg = (data as { error?: string })?.error;
+      throw new Error(msg ?? `Failed to load ${label}.`);
+    }
+    return data as T;
+  } catch (err) {
+    throw new Error(rosterFetchErrorMessage(err, label));
   }
-  if (!res.ok) {
-    const msg = (data as { error?: string })?.error;
-    throw new Error(msg ?? `Failed to load ${label}.`);
-  }
-  return data as T;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

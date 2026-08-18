@@ -31,6 +31,8 @@ import dphDivisionsRouter from "./dph-divisions";
 import dphResourcesRouter from "./dph-resources";
 import resourcesRouter from "./resources";
 import resourceFilesRouter from "./resource-files";
+import googleRouter from "./google";
+import googleResourcesRouter from "./google-resources";
 import imageUploadRouter from "./image-upload";
 import publicRouter from "./public";
 
@@ -59,6 +61,8 @@ router.use(docRouter);
 // Division / resource sub-routers first so their /dph/<segment>/... paths are
 // matched before dphRouter's single-segment /dph/:id handlers.
 router.use(dphDivisionsRouter);
+router.use(googleResourcesRouter);
+router.use(googleRouter);
 router.use(dphResourcesRouter);
 router.use(dphRouter);
 router.use(resourcesRouter);

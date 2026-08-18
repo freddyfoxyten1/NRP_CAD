@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { isUniqueViolation, isMongoStore, pool } from "@workspace/db";
+import { isUniqueViolation, isMongoStore, pool, getCollection, nextId } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
 import { wantsDiscordRolesRefresh } from "../lib/discord-guild-roles-cache.js";
 import {
@@ -21,6 +21,13 @@ import {
   setDphMemberDivisionAssignments,
   type DphDivisionAssignment,
 } from "../lib/dph-divisions.js";
+import {
+  buildDivisionDiscordMembershipMap,
+  divisionDiscordLinksForMember,
+  loadDivisionLinkConfig,
+  type DivisionDiscordEnrichment,
+} from "../lib/division-discord-qualify.js";
+import { fetchDphDivisionGuildMembers } from "../lib/dph-discord.js";
 import { syncDphDivisionDiscordRoles, pruneDphDivisionRosterDebounced } from "./dph-divisions.js";
 import {
   clearAllDphPermissionGrants,
@@ -31,6 +38,46 @@ import {
 import { normalizeGroupRow, normalizeRankRow } from "../lib/roster-normalize.js";
 
 const router = Router();
+
+const DEFAULT_DPH_RANK_GROUPS = [
+  { name: "Command Staff", sort_order: 0, panel_access: true },
+  { name: "Personnel", sort_order: 1, panel_access: false },
+] as const;
+
+/** Idempotent default title groups — runs on Mongo (Postgres migration skips when mongo). */
+async function ensureDefaultDphRankGroups(): Promise<void> {
+  try {
+    if (isMongoStore()) {
+      const col = await getCollection("dph_rank_groups");
+      for (const g of DEFAULT_DPH_RANK_GROUPS) {
+        const escaped = g.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const exists = await col.findOne({
+          name: { $regex: new RegExp(`^${escaped}$`, "i") },
+        });
+        if (exists) continue;
+        const id = await nextId("dph_rank_groups");
+        await col.insertOne({
+          id,
+          name: g.name,
+          sort_order: g.sort_order,
+          panel_access: g.panel_access,
+          division_oversight: false,
+        });
+      }
+      return;
+    }
+    for (const g of DEFAULT_DPH_RANK_GROUPS) {
+      await pool.query(
+        `INSERT INTO dph_rank_groups (name, sort_order, panel_access)
+         SELECT $1, $2, $3
+         WHERE NOT EXISTS (SELECT 1 FROM dph_rank_groups WHERE lower(name) = lower($1))`,
+        [g.name, g.sort_order, g.panel_access],
+      );
+    }
+  } catch (err) {
+    console.error("[dph] default rank groups seed failed:", err);
+  }
+}
 
 // ── One-time migration: create dph tables ─────────────────────────────────────
 (async () => {
@@ -231,21 +278,13 @@ const router = Router();
 
     await migrateLegacyDphDivisionAssignments();
 
-    // Seed default rank groups (idempotent)
-    await pool.query(`
-      INSERT INTO dph_rank_groups (name, sort_order, panel_access)
-      SELECT 'Command Staff', 0, true
-      WHERE NOT EXISTS (SELECT 1 FROM dph_rank_groups WHERE lower(name) = 'command staff')
-    `);
-    await pool.query(`
-      INSERT INTO dph_rank_groups (name, sort_order, panel_access)
-      SELECT 'Personnel', 1, false
-      WHERE NOT EXISTS (SELECT 1 FROM dph_rank_groups WHERE lower(name) = 'personnel')
-    `);
+    await ensureDefaultDphRankGroups();
   } catch (e) {
     console.error("dph tables migration failed:", e);
   }
 })();
+
+void ensureDefaultDphRankGroups();
 
 async function removeDphRosterMember(profileId: number): Promise<void> {
   await pool.query(`DELETE FROM dph_user_divisions WHERE profile_id = $1`, [profileId]);
@@ -642,6 +681,82 @@ const rankOrderSubquery = `
   )
 `;
 
+const dphDivisionDiscordMembershipCache: {
+  map: Map<string, number[]>;
+  linkedDivisionIds: Set<number>;
+  warm: boolean;
+  fetchedAt: number;
+} = {
+  map: new Map(),
+  linkedDivisionIds: new Set(),
+  warm: false,
+  fetchedAt: 0,
+};
+const DPH_DIVISION_MEMBERSHIP_MAP_TTL_MS = 5 * 60 * 1000;
+let _dphMembershipCacheRefreshRunning: Promise<void> | null = null;
+
+async function refreshDphDivisionDiscordMembershipCacheFromMembers(
+  members: Array<{ user: { id: string }; roles: string[] }>,
+): Promise<void> {
+  if (!process.env.DISCORD_BOT_TOKEN) return;
+  try {
+    const config = await loadDivisionLinkConfig("dph_divisions", "dph_division_ranks");
+    if (config.membershipRoleByDiv.size === 0) return;
+    dphDivisionDiscordMembershipCache.map = buildDivisionDiscordMembershipMap(
+      members,
+      config.membershipRoleByDiv,
+    );
+    dphDivisionDiscordMembershipCache.linkedDivisionIds = config.linkedDivisionIds;
+    dphDivisionDiscordMembershipCache.warm = true;
+    dphDivisionDiscordMembershipCache.fetchedAt = Date.now();
+  } catch (err) {
+    console.warn("[dph] division discord membership cache refresh failed:", err);
+  }
+}
+
+async function refreshDphDivisionDiscordMembershipCache(force = false): Promise<void> {
+  if (!process.env.DISCORD_BOT_TOKEN) return;
+  const fresh =
+    !force &&
+    dphDivisionDiscordMembershipCache.warm &&
+    Date.now() - dphDivisionDiscordMembershipCache.fetchedAt < DPH_DIVISION_MEMBERSHIP_MAP_TTL_MS;
+  if (fresh) return;
+
+  if (!_dphMembershipCacheRefreshRunning) {
+    _dphMembershipCacheRefreshRunning = (async () => {
+      const members = await fetchDphDivisionGuildMembers();
+      await refreshDphDivisionDiscordMembershipCacheFromMembers(members);
+    })().finally(() => { _dphMembershipCacheRefreshRunning = null; });
+  }
+  await _dphMembershipCacheRefreshRunning;
+}
+
+function kickDphDivisionDiscordMembershipCacheRefresh(): void {
+  const stale =
+    !dphDivisionDiscordMembershipCache.warm ||
+    Date.now() - dphDivisionDiscordMembershipCache.fetchedAt >= DPH_DIVISION_MEMBERSHIP_MAP_TTL_MS;
+  if (!stale || _dphMembershipCacheRefreshRunning) return;
+  void refreshDphDivisionDiscordMembershipCache();
+}
+
+async function getDphDivisionDiscordEnrichmentForRoster(): Promise<DivisionDiscordEnrichment> {
+  kickDphDivisionDiscordMembershipCacheRefresh();
+  let linkedDivisionIds = dphDivisionDiscordMembershipCache.linkedDivisionIds;
+  if (!dphDivisionDiscordMembershipCache.warm) {
+    try {
+      const linkConfig = await loadDivisionLinkConfig("dph_divisions", "dph_division_ranks");
+      linkedDivisionIds = linkConfig.linkedDivisionIds;
+    } catch {
+      linkedDivisionIds = new Set();
+    }
+  }
+  return {
+    map: dphDivisionDiscordMembershipCache.map,
+    warm: dphDivisionDiscordMembershipCache.warm,
+    linkedDivisionIds,
+  };
+}
+
 // ── GET personnel (pass ?all=1 to include inactive) ───────────────────────────
 router.get("/dph", async (req, res) => {
   try {
@@ -657,6 +772,8 @@ router.get("/dph", async (req, res) => {
     } catch (pruneErr) {
       req.log.warn({ err: pruneErr }, "dph GET division prune failed");
     }
+
+    const discordEnrichment = await getDphDivisionDiscordEnrichmentForRoster();
 
     const where = includeAll ? "" : "WHERE lower(d.status) != 'inactive'";
     const result = await pool.query(
@@ -711,9 +828,15 @@ router.get("/dph", async (req, res) => {
       req.log.warn({ err: assignErr }, "dph GET division assignments load failed");
     }
 
-    res.json(uniqueRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null }) => {
+    res.json(uniqueRows.map((row: Record<string, unknown> & { id: number; division_rank: string | null; discord_id?: string | null }) => {
       const assignments = assignmentMap.get(row.id) ?? [];
       const primary = assignments[0];
+      const discordId = String(row.discord_id ?? "").trim();
+      const division_discord_links = divisionDiscordLinksForMember(
+        discordId,
+        assignments,
+        discordEnrichment,
+      );
       return {
         ...row,
         pob: Boolean(row.pob),
@@ -724,6 +847,7 @@ router.get("/dph", async (req, res) => {
         can_view_all_resources: Boolean(row.can_view_all_resources),
         can_access_iab: Boolean(row.can_access_iab),
         division_assignments: assignments,
+        division_discord_links,
         division_rank: primary?.division_rank ?? row.division_rank ?? null,
         division_name: primary?.division_name ?? null,
         division_names: assignments.map(a => a.division_name),
@@ -1552,6 +1676,7 @@ const GROUP_COLS = `id, name, sort_order, COALESCE(panel_access, false) AS panel
 // ── GET groups ────────────────────────────────────────────────────────────────
 router.get("/dph/groups", async (_req, res) => {
   try {
+    await ensureDefaultDphRankGroups();
     const result = await pool.query(
       `SELECT ${GROUP_COLS} FROM dph_rank_groups ORDER BY sort_order, id`
     );

@@ -17,6 +17,12 @@ import DojrpLogo from "@/components/shared/DojrpLogo";
 import { PageLoadingScreen } from "@/components/shared/LoadingProgress";
 import StoreProductCard, { type StoreProduct } from "@/components/shared/StoreProductCard";
 import LoginModal from "@/components/overlays/LoginModal";
+import { googleFileIdFromResource, isPdfLikeResource, resourceFileUrl, resourceTypeLabel } from "@/lib/resource-type";
+import {
+  departmentResourcePath,
+  findResourceByLinkSlug,
+  parseResourcePathname,
+} from "@/lib/resource-url";
 import { SimpleLoading } from "@/components/shared/LoadingProgress";
 
 const DpsPublicRosterModal = lazy(() => import("@/components/overlays/DpsPublicRosterModal"));
@@ -315,8 +321,10 @@ type PublicDivision = {
 type DpsResource = {
   id: number;
   title: string;
-  type: "document" | "pdf";
+  type: "document" | "pdf" | "google_doc";
   logo_url: string | null;
+  google_file_id?: string | null;
+  header_config?: unknown;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -665,12 +673,50 @@ const PublicView = () => {
       .finally(() => setDphResourcesLoading(false));
   }, [dphResourcesOpen]);
 
-  const openResource = (r: DpsResource, apiBase = "/api/resources") => {
+  const resourceDeepLink = useMemo(() => parseResourcePathname(location.pathname), [location.pathname]);
+
+  useEffect(() => {
+    if (!resourceDeepLink || resourceDeepLink.mode !== "public") return;
+    const department = resourceDeepLink.department;
+    if (department === "staff") return;
+    const apiBase = department === "dph" ? "/api/dph/resources" : "/api/resources";
+    setResourceApiBase(apiBase);
+    void fetchJsonArray<DpsResource>(`${apiBase}?public=true`).then(rows => {
+      const list = rows.filter(isPublicDepartmentResource);
+      const resource = findResourceByLinkSlug(list, resourceDeepLink.linkSlug);
+      if (!resource) return;
+      if (isPdfLikeResource(resource)) {
+        setOpenPdf(resource);
+        setOpenDocId(null);
+      } else {
+        setOpenDocId(resource.id);
+        setOpenPdf(null);
+      }
+    });
+  }, [resourceDeepLink]);
+
+  const closePublicResource = useCallback(() => {
+    setOpenPdf(null);
+    setOpenDocId(null);
+    if (resourceDeepLink && window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/");
+  }, [navigate, resourceDeepLink]);
+
+  const openResource = (r: DpsResource, department: "dps" | "dph", apiBase = "/api/resources") => {
     setResourcesOpen(false);
     setDphResourcesOpen(false);
     setResourceApiBase(apiBase);
-    if (r.type === "pdf") setOpenPdf(r);
-    else setOpenDocId(r.id);
+    navigate(departmentResourcePath(department, "public", r.title, r.id));
+    if (isPdfLikeResource(r)) {
+      setOpenPdf(r);
+      setOpenDocId(null);
+    } else {
+      setOpenDocId(r.id);
+      setOpenPdf(null);
+    }
   };
 
   // Home content is mostly static — don't block the whole page on Discord/ERLC stats.
@@ -1693,7 +1739,7 @@ const PublicView = () => {
                     <button
                       key={r.id}
                       type="button"
-                      onClick={() => openResource(r, "/api/resources")}
+                      onClick={() => openResource(r, "dps", "/api/resources")}
                       className="flex flex-col gap-2 rounded-xl border border-[#1e2d42] bg-[#070d16] p-4 text-left transition-all hover:border-[#2f66ee]/40 hover:bg-[#0a1525]"
                     >
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#2f66ee]/20 bg-[#2f66ee]/8">
@@ -1702,7 +1748,7 @@ const PublicView = () => {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-black text-white">{r.title}</p>
                         <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
-                          {r.type === "pdf" ? "PDF" : "Document"}
+                          {resourceTypeLabel(r)}
                         </p>
                       </div>
                       <p className="text-[10px] text-[#3f5470]">
@@ -1762,7 +1808,7 @@ const PublicView = () => {
                     <button
                       key={r.id}
                       type="button"
-                      onClick={() => openResource(r, "/api/dph/resources")}
+                      onClick={() => openResource(r, "dph", "/api/dph/resources")}
                       className="flex flex-col gap-2 rounded-xl border border-[#1e2d42] bg-[#070d16] p-4 text-left transition-all hover:border-[#ef4444]/40 hover:bg-[#140a0a]"
                     >
                       <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-[#ef4444]/20 bg-[#ef4444]/8">
@@ -1771,7 +1817,7 @@ const PublicView = () => {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-black text-white">{r.title}</p>
                         <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
-                          {r.type === "pdf" ? "PDF" : "Document"}
+                          {resourceTypeLabel(r)}
                         </p>
                       </div>
                       <p className="text-[10px] text-[#3f5470]">
@@ -1797,7 +1843,7 @@ const PublicView = () => {
             resourceId={openDocId}
             canEdit={false}
             apiBase={resourceApiBase}
-            onClose={() => setOpenDocId(null)}
+            onClose={closePublicResource}
           />
         </Suspense>
       )}
@@ -1808,7 +1854,7 @@ const PublicView = () => {
             <p className="truncate text-sm font-black text-white">{openPdf.title}</p>
             <button
               type="button"
-              onClick={() => setOpenPdf(null)}
+              onClick={closePublicResource}
               className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white"
               aria-label="Close PDF"
             >
@@ -1817,8 +1863,13 @@ const PublicView = () => {
           </div>
           <Suspense fallback={<SimpleLoading label="Loading PDF…" minHeightClass="min-h-[50vh]" />}>
             <PdfViewer
-              fileUrl={`${resourceApiBase}/${openPdf.id}/file`}
+              fileUrl={resourceFileUrl(
+                resourceApiBase.includes("/dph/") ? "dph" : resourceApiBase.includes("/staff/") ? "staff" : "dps",
+                openPdf.id,
+                openPdf,
+              )}
               downloadName={`${openPdf.title}.pdf`}
+              liveRefreshMs={googleFileIdFromResource(openPdf) || openPdf.type === "google_doc" ? 45_000 : undefined}
             />
           </Suspense>
         </div>

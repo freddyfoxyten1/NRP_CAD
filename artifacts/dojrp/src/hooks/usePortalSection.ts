@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { isResourceSection } from "@/lib/resource-url";
 
 /** Build a shareable portal section path: `/dps_information`, `/admin_members`, … */
 export function portalSectionPath(base: string, section: string): string {
@@ -85,6 +86,9 @@ export function usePortalSection<T extends string>(options: {
     const next = resolve();
     setSectionState(next);
 
+    // Resource share links (/dps_edit_resource_title-id) are valid sub-paths — never rewrite them.
+    if (rawSection && isResourceSection(rawSection)) return;
+
     const legacy = searchParams.get("tab")?.trim();
     if (legacy && validSet.has(legacy)) {
       navigate(portalSectionPath(base, legacy), { replace: true });
@@ -96,6 +100,7 @@ export function usePortalSection<T extends string>(options: {
       navigate(portalSectionPath(base, next), { replace: true });
     }
   }, [
+    rawSection,
     resolve,
     searchParams,
     validSet,

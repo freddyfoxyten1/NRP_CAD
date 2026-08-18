@@ -13,6 +13,11 @@ import {
 } from 'lucide-react';
 import DocumentEditor from '@/components/editor/DocumentEditor';
 import PdfViewer from '@/components/shared/PdfViewer';
+import GoogleDocPicker, { type GoogleDocSelection } from '@/components/resources/GoogleDocPicker';
+import { googleFileIdFromResource, isPdfLikeResource, resourceFileUrl, resourceTypeLabel } from '@/lib/resource-type';
+import { persistGoogleDocResource } from '@/lib/persist-google-doc';
+import { readApiJson } from '@/lib/fetch-api-json';
+import { useResourceDeepLink } from '@/hooks/useResourceDeepLink';
 import ImageInput, { imageStyle, DEFAULT_ADJUST, type ImageAdjust } from '@/components/shared/ImageInput';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
@@ -31,7 +36,8 @@ import { isSuperAdminSession } from '@/lib/superadmin';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import { usePhoneSSE } from '@/hooks/usePhoneSSE';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
-import { buildPersonnelRosterTree, dedupeRosterMembersById, sortByRankThenCallsign } from '@/lib/roster-sort';
+import { buildPersonnelRosterTree, dedupeRosterMembersById, dedupeTitleRanksByName, sortByRankThenCallsign } from '@/lib/roster-sort';
+import { fetchRosterArray } from '@/lib/roster-fetch';
 import { collectDepartmentPermissions } from '@/lib/permission-access';
 import { PermissionAccessOverview, type PermissionAccessOverviewRow } from '@/components/shared/PermissionAccessOverview';
 
@@ -85,6 +91,37 @@ type DphGroup = {
   division_oversight?: boolean;
 };
 
+type DivisionRankRow = { id: number; name: string; division_id: number | null };
+
+let dphRosterMetadataPromise: Promise<{
+  groups: DphGroup[];
+  ranks: DphRank[];
+  divs: RosterDivision[];
+  divRanks: DivisionRankRow[];
+}> | null = null;
+
+function loadDphRosterMetadata() {
+  if (!dphRosterMetadataPromise) {
+    dphRosterMetadataPromise = Promise.allSettled([
+      fetchRosterArray<DphGroup>('/api/dph/groups', 'groups'),
+      fetchRosterArray<DphRank>('/api/dph/ranks', 'ranks'),
+      fetchRosterArray<RosterDivision>('/api/dph/divisions', 'divisions'),
+      fetchRosterArray<DivisionRankRow>('/api/dph/division-ranks', 'division ranks'),
+    ])
+      .then(([groups, ranks, divs, divRanks]) => ({
+        groups: groups.status === 'fulfilled' ? groups.value : [],
+        ranks: dedupeTitleRanksByName(ranks.status === 'fulfilled' ? ranks.value : []),
+        divs: divs.status === 'fulfilled' ? divs.value : [],
+        divRanks: divRanks.status === 'fulfilled' ? divRanks.value : [],
+      }))
+      .catch((err) => {
+        dphRosterMetadataPromise = null;
+        throw err;
+      });
+  }
+  return dphRosterMetadataPromise;
+}
+
 type DphEvent = {
   id: number;
   title: string;
@@ -101,8 +138,10 @@ type DphEvent = {
 type DphResource = {
   id: number;
   title: string;
-  type: 'document' | 'pdf';
+  type: 'document' | 'pdf' | 'google_doc';
   logo_url: string | null;
+  google_file_id?: string | null;
+  header_config?: unknown;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -171,6 +210,8 @@ type RosterMember = {
     can_edit_roster?: boolean;
     can_edit_info?: boolean;
   }>;
+  /** Division ids where the member holds the linked membership Discord role. */
+  division_discord_links?: number[];
   staff_role?: string | null;
   status: string;
   appointed_date: string | null;
@@ -209,6 +250,9 @@ function normalizeRosterMember(m: RosterMember): RosterMember {
           can_edit_info: Boolean(a.can_edit_info),
         }))
       : m.division_assignments,
+    division_discord_links: Array.isArray(m.division_discord_links)
+      ? m.division_discord_links.map(Number)
+      : m.division_discord_links,
   };
 }
 
@@ -259,6 +303,17 @@ function divisionShortName(d: Pick<RosterDivision, 'name' | 'unit_key'>): string
 }
 
 function memberInDivision(m: RosterMember, d: RosterDivision): boolean {
+  const hasDiscordLink = Boolean(d.discord_role_id?.trim());
+  if (hasDiscordLink) {
+    if (Array.isArray(m.division_discord_links)) {
+      if (m.division_discord_links.includes(d.id)) return true;
+      if (m.division_discord_links.length > 0) return false;
+    }
+    if (Array.isArray(m.division_assignments) && m.division_assignments.some(a =>
+      a.division_id === d.id || a.division_name.toLowerCase() === d.name.toLowerCase()
+    )) return true;
+    return false;
+  }
   if (Array.isArray(m.division_assignments) && m.division_assignments.some(a =>
     a.division_id === d.id || a.division_name.toLowerCase() === d.name.toLowerCase()
   )) return true;
@@ -1501,8 +1556,11 @@ const DepartmentOfPublicHealth = () => {
     base: 'dph',
     valid: DPH_SECTIONS,
     defaultSection: 'personnel-roster',
-    resolveParent: (raw) =>
-      (raw === 'department-panel' || raw.startsWith('department-panel-') ? 'department-panel' : null),
+    resolveParent: (raw) => {
+      if (raw === 'department-panel' || raw.startsWith('department-panel-')) return 'department-panel';
+      if (raw.startsWith('resources-') || raw.startsWith('edit_resource_') || raw.startsWith('public_resource_')) return 'resources';
+      return null;
+    },
   });
   const panelSection = useMemo((): PanelSection | null => {
     const parsed = parseNestedPortalSection(rawSection, 'department-panel');
@@ -1525,6 +1583,7 @@ const DepartmentOfPublicHealth = () => {
   // Personnel roster
   const [roster,        setRoster]        = useState<RosterMember[]>([]);
   const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterMetaReady, setRosterMetaReady] = useState(false);
   const [rosterSearch,  setRosterSearch]  = useState('');
   const [collapsed,     setCollapsed]     = useState<Record<string, boolean>>({});
 
@@ -1658,8 +1717,9 @@ const DepartmentOfPublicHealth = () => {
   const [addResourceStep,     setAddResourceStep]     = useState<0 | 1 | 2>(0); // 0=closed, 1=name, 2=type
   const [newResourceName,     setNewResourceName]     = useState('');
   const [creatingResource,    setCreatingResource]    = useState(false);
-  const [newResourceType,     setNewResourceType]     = useState<'document' | 'file'>('document');
+  const [newResourceType,     setNewResourceType]     = useState<'document' | 'file' | 'google_doc'>('document');
   const [uploadFile,          setUploadFile]          = useState<File | null>(null);
+  const [googleDocSelection,  setGoogleDocSelection]  = useState<GoogleDocSelection | null>(null);
   const [uploadStatus,        setUploadStatus]        = useState<string | null>(null);
   const [openPdf,             setOpenPdf]             = useState<DphResource | null>(null);
   const [openDocId,           setOpenDocId]           = useState<number | null>(null);
@@ -1697,6 +1757,7 @@ const DepartmentOfPublicHealth = () => {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify({ id: s.id, email: s.email }),
+          signal: AbortSignal.timeout(6_000),
         });
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { active: boolean; account?: CadSession };
@@ -1756,22 +1817,19 @@ const DepartmentOfPublicHealth = () => {
 
   // ── Mount: load groups + ranks so the Department Panel access check works ─────
   useEffect(() => {
-    Promise.all([
-      fetch('/api/dph/groups', { headers: { accept: 'application/json' } }).then(r => r.json()),
-      fetch('/api/dph/ranks',  { headers: { accept: 'application/json' } }).then(r => r.json()),
-      fetch('/api/dph/divisions', { headers: { accept: 'application/json' } }).then(r => r.json()),
-      fetch('/api/dph/division-ranks', { headers: { accept: 'application/json' } }).then(r => r.json()),
-    ]).then(([grps, rnks, divs, divRanks]) => {
-      setGroups(Array.isArray(grps) ? grps : []);
-      setRanks(Array.isArray(rnks) ? rnks : []);
-      setDivisionRanksForEdit(Array.isArray(divRanks) ? divRanks : []);
-      const divisionRows = Array.isArray(divs) ? (divs as RosterDivision[]) : [];
-      setRosterDivisions(divisionRows);
-      setDivisionStats({
-        divisions: divisionRows.length,
-        ranks: Array.isArray(divRanks) ? divRanks.length : 0,
-      });
-    }).catch(() => { /* silent — button just won't show until data is available */ });
+    loadDphRosterMetadata()
+      .then((meta) => {
+        setGroups(meta.groups);
+        setRanks(meta.ranks);
+        setDivisionRanksForEdit(meta.divRanks);
+        setRosterDivisions(meta.divs);
+        setDivisionStats({
+          divisions: meta.divs.length,
+          ranks: meta.divRanks.length,
+        });
+      })
+      .catch(() => { /* silent — button just won't show until data is available */ })
+      .finally(() => setRosterMetaReady(true));
   }, []);
 
   // ── Roster for membership checks on Resources tab ────────────────────────────
@@ -1792,46 +1850,32 @@ const DepartmentOfPublicHealth = () => {
     let cancelled = false;
     setRosterLoading(true);
 
-    const loadJson = async <T,>(url: string): Promise<T | null> => {
-      try {
-        const r = await fetch(url, { headers: { accept: 'application/json' } });
-        if (!r.ok) return null;
-        return await r.json() as T;
-      } catch {
-        return null;
-      }
-    };
-
     void (async () => {
+      const metaP = loadDphRosterMetadata();
       try {
-        const [members, grps, rnks, divRanks, divs] = await Promise.all([
-          loadJson<RosterMember[]>('/api/dph'),
-          loadJson<DphGroup[]>('/api/dph/groups'),
-          loadJson<DphRank[]>('/api/dph/ranks'),
-          loadJson<{ id: number; name: string; division_id: number | null }[]>('/api/dph/division-ranks'),
-          loadJson<RosterDivision[]>('/api/dph/divisions'),
-        ]);
+        const members = await fetchRosterArray<RosterMember>('/api/dph', 'roster');
         if (cancelled) return;
-        if (!Array.isArray(members)) {
-          setRoster([]);
-          toast.error('Failed to load roster.');
-        } else {
-          setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
-        }
-        if (Array.isArray(grps)) setGroups(grps);
-        if (Array.isArray(rnks)) setRanks(rnks);
-        if (Array.isArray(divRanks)) setDivisionRanksForEdit(divRanks);
-        if (Array.isArray(divs)) {
-          setRosterDivisions(divs);
-          setDivisionStats(s => ({ ...s, divisions: divs.length, ranks: Array.isArray(divRanks) ? divRanks.length : s.ranks }));
-        }
-      } catch {
+        setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
+      } catch (err) {
         if (!cancelled) {
           setRoster([]);
-          toast.error('Failed to load roster.');
+          toast.error(err instanceof Error ? err.message : 'Failed to load roster.');
         }
       } finally {
         if (!cancelled) setRosterLoading(false);
+      }
+      try {
+        const meta = await metaP;
+        if (cancelled) return;
+        setGroups(meta.groups);
+        setRanks(meta.ranks);
+        setDivisionRanksForEdit(meta.divRanks);
+        setRosterDivisions(meta.divs);
+        setDivisionStats({ divisions: meta.divs.length, ranks: meta.divRanks.length });
+      } catch {
+        /* members already painted — titles apply when metadata arrives */
+      } finally {
+        if (!cancelled) setRosterMetaReady(true);
       }
     })();
 
@@ -1841,27 +1885,30 @@ const DepartmentOfPublicHealth = () => {
   // ── Department panel fetch (all members including inactive) ───────────────────
   const fetchPanelMembers = (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setPanelLoading(true);
-    fetch('/api/dph?all=1', { headers: { accept: 'application/json' } })
-      .then(r => r.json())
-      .then((rows) => setPanelMembers(Array.isArray(rows) ? dedupeRosterMembersById((rows as RosterMember[]).map(normalizeRosterMember)) : []))
-      .catch(() => {
+    fetchRosterArray<RosterMember>('/api/dph?all=1', 'members')
+      .then((rows) => setPanelMembers(dedupeRosterMembersById(rows.map(normalizeRosterMember))))
+      .catch((err) => {
         if (!opts?.silent) {
           setPanelMembers([]);
-          toast.error('Failed to load members.');
+          toast.error(err instanceof Error ? err.message : 'Failed to load members.');
         }
       })
       .finally(() => { if (!opts?.silent) setPanelLoading(false); });
   };
-  const fetchRanks = () => {
-    setRanksLoading(true);
-    fetch('/api/dph/ranks', { headers: { accept: 'application/json' } })
-      .then(r => r.json())
-      .then((rows) => setRanks(Array.isArray(rows) ? rows : []))
-      .catch(() => {
-        setRanks([]);
-        toast.error('Failed to load ranks.');
+  const fetchRanks = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setRanksLoading(true);
+    fetchRosterArray<DphRank>('/api/dph/ranks', 'ranks')
+      .then((rows) => setRanks(dedupeTitleRanksByName(rows)))
+      .catch((err) => {
+        if (opts?.silent) return;
+        setRanks((prev) => {
+          if (prev.length === 0) {
+            toast.error(err instanceof Error ? err.message : 'Failed to load ranks.');
+          }
+          return prev;
+        });
       })
-      .finally(() => setRanksLoading(false));
+      .finally(() => { if (!opts?.silent) setRanksLoading(false); });
   };
   const handleSyncAllCallsigns = async () => {
     setSyncingCallsigns(true);
@@ -1879,7 +1926,7 @@ const DepartmentOfPublicHealth = () => {
     }
   };
 
-  /** Pull DPS Discord guild members and apply linked-rank add/remove to the roster. */
+  /** Pull DPH Discord guild members and apply linked-rank add/remove to the roster. */
   const handleSyncDiscordRoles = async (opts?: { silent?: boolean }) => {
     setSyncingDiscord(true);
     try {
@@ -1890,8 +1937,8 @@ const DepartmentOfPublicHealth = () => {
         error?: string;
       };
       if (!res.ok) throw new Error(data.error ?? 'Discord sync failed.');
-      fetchPanelMembers();
-      fetchRanks();
+      fetchPanelMembers({ silent: opts?.silent });
+      fetchRanks({ silent: opts?.silent });
       if (!opts?.silent) {
         const assigned = (data.assigned ?? 0) + (data.divisions?.assigned ?? 0);
         const removed = (data.removed ?? 0) + (data.divisions?.removed ?? 0);
@@ -1911,16 +1958,20 @@ const DepartmentOfPublicHealth = () => {
       setSyncingDiscord(false);
     }
   };
-  const fetchGroups = () => {
-    setGroupsLoading(true);
-    fetch('/api/dph/groups', { headers: { accept: 'application/json' } })
-      .then(r => r.json())
-      .then((rows) => setGroups(Array.isArray(rows) ? rows : []))
-      .catch(() => {
-        setGroups([]);
-        toast.error('Failed to load groups.');
+  const fetchGroups = (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setGroupsLoading(true);
+    fetchRosterArray<DphGroup>('/api/dph/groups', 'groups')
+      .then((rows) => setGroups(rows))
+      .catch((err) => {
+        if (opts?.silent) return;
+        setGroups((prev) => {
+          if (prev.length === 0) {
+            toast.error(err instanceof Error ? err.message : 'Failed to load groups.');
+          }
+          return prev;
+        });
       })
-      .finally(() => setGroupsLoading(false));
+      .finally(() => { if (!opts?.silent) setGroupsLoading(false); });
   };
   const fetchEvents = () => {
     setEventsLoading(true);
@@ -2009,20 +2060,28 @@ const DepartmentOfPublicHealth = () => {
 
   useEffect(() => {
     if (!session) return;
+    if (activeTab !== 'department-panel') return;
     if (panelMembers.length > 0 || roster.length > 0) return;
     fetchPanelMembers({ silent: true });
-  }, [session?.discord_id, session?.username, session?.id]);
+  }, [session?.discord_id, session?.username, session?.id, activeTab]);
 
   useEffect(() => {
+    // These fetches only feed the department panel; running them on the roster
+    // tabs starved the roster request of browser connections.
+    if (activeTab !== 'department-panel') return;
+    const cleanups: Array<() => void> = [];
     if (panelSection === 'personnel') {
       fetchPanelMembers(); fetchRanks(); fetchGroups();
-      // Sync linked Discord roles from the DPS guild into the roster
-      void handleSyncDiscordRoles({ silent: true });
-      // Load DPS guild roles for the Discord-role dropdown in the rank edit modal
-      fetch('/api/dph/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
-        .then(r => r.ok ? r.json() : [])
-        .then((rows: DphDiscordRole[]) => setDpsGuildRoles(rows))
-        .catch(() => { /* non-fatal — dropdown just stays empty */ });
+      // Discord sync and guild roles are refinements — let the panel paint first.
+      const idle = window.setTimeout(() => {
+        void handleSyncDiscordRoles({ silent: true });
+        // Load DPH guild roles for the Discord-role dropdown in the rank edit modal
+        fetch('/api/dph/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
+          .then(r => r.ok ? r.json() : [])
+          .then((rows: DphDiscordRole[]) => setDpsGuildRoles(rows))
+          .catch(() => { /* non-fatal — dropdown just stays empty */ });
+      }, 400);
+      cleanups.push(() => window.clearTimeout(idle));
     }
     if (panelSection === 'division' || panelSection === null) {
       // Silent refresh when re-entering division edit so the panel does not flicker
@@ -2050,18 +2109,22 @@ const DepartmentOfPublicHealth = () => {
         })
         .catch(() => {});
     }
-    if (panelSection === 'vehicle' || panelSection === null) { fetchFleetPanel(); fetchRanks(); }
+    if (panelSection === 'vehicle' || panelSection === null) {
+      fetchFleetPanel();
+      fetchRanks({ silent: true });
+    }
     if (panelSection === 'equipment' || panelSection === null) { fetchEquipmentPanel(); }
     if (panelSection === 'resources') { fetchResources(); }
     if (panelSection === 'information') { fetchIndexInfo(); fetchPageInfo(); }
     if (panelSection !== 'information') setInfoSubSection(null);
-  }, [panelSection]);
+    return () => { for (const fn of cleanups) fn(); };
+  }, [panelSection, activeTab]);
 
   useEffect(() => {
     if (editRankId === null && addRankGroupId == null) return;
     fetch('/api/dph/discord-roles?refresh=1', { headers: { accept: 'application/json' } })
       .then(r => r.ok ? r.json() : [])
-      .then((rows: DpsDiscordRole[]) => setDpsGuildRoles(rows))
+      .then((rows: DphDiscordRole[]) => setDpsGuildRoles(rows))
       .catch(() => {});
   }, [editRankId, addRankGroupId]);
 
@@ -2078,6 +2141,38 @@ const DepartmentOfPublicHealth = () => {
   useEffect(() => {
     if (activeTab === 'resources') fetchResources();
   }, [activeTab]);
+
+  const openResourceState = useCallback((r: DphResource, canEdit: boolean) => {
+    if (isPdfLikeResource(r)) {
+      setOpenPdf(r);
+      setOpenDocId(null);
+      setOpenDocCanEdit(false);
+      return;
+    }
+    setOpenPdf(null);
+    setOpenDocId(r.id);
+    setOpenDocCanEdit(canEdit);
+  }, []);
+
+  const { openResourceUrl, closeResourceUrl } = useResourceDeepLink({
+    department: 'dph',
+    resources,
+    resourcesLoaded: !resourcesLoading,
+    onOpen: openResourceState,
+  });
+
+  const handleOpenResource = (r: DphResource, canEdit: boolean) => {
+    openResourceUrl(r, canEdit);
+    openResourceState(r, canEdit);
+  };
+
+  const handleCloseResource = () => {
+    setOpenPdf(null);
+    setOpenDocId(null);
+    setOpenDocCanEdit(false);
+    closeResourceUrl();
+    fetchResources();
+  };
 
   // Close profile dropdown on outside click
   useEffect(() => {
@@ -2122,8 +2217,8 @@ const DepartmentOfPublicHealth = () => {
         setDivisionResourcesTick(t => t + 1);
       }
       resetAddResourceDialog();
-      setOpenDocId(doc.id);
-      setOpenDocCanEdit(true);
+      openResourceUrl(doc, true);
+      openResourceState(doc, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create resource.');
     } finally {
@@ -2137,6 +2232,7 @@ const DepartmentOfPublicHealth = () => {
     setNewResourceName('');
     setNewResourceType('document');
     setUploadFile(null);
+    setGoogleDocSelection(null);
     setUploadStatus(null);
     setResourceTargetDivisionId(null);
     setNewResourceDivisionOnly(true);
@@ -2185,10 +2281,48 @@ const DepartmentOfPublicHealth = () => {
     }
   };
 
-  const handleOpenResource = (r: DphResource, canEdit: boolean) => {
-    if (r.type === 'pdf') { setOpenPdf(r); return; }
-    setOpenDocId(r.id);
-    setOpenDocCanEdit(canEdit);
+  const handleCreateGoogleResource = async () => {
+    if (!newResourceName.trim() || !googleDocSelection) {
+      toast.error('Paste a Google Doc share link.');
+      return;
+    }
+    setCreatingResource(true);
+    try {
+      const body = await persistGoogleDocResource({
+        department: 'dph',
+        title: newResourceName.trim() || googleDocSelection.title,
+        createdBy: session?.username,
+        fileId: googleDocSelection.fileId,
+        url: googleDocSelection.url,
+        visibility: {
+          division_id: resourceTargetDivisionId,
+          ...(resourceTargetDivisionId != null
+            ? {
+                division_only: newResourceDivisionOnly,
+                allowed_ranks: newResourceAllowedRanks,
+              }
+            : {
+                personnel_only: newResourcePersonnelOnly || newResourceAllowedDphRanks.length > 0,
+                allowed_dph_ranks: newResourceAllowedDphRanks,
+              }),
+        },
+      });
+      const saved = body as DphResource;
+      if (resourceTargetDivisionId == null) {
+        setResources(p => [saved, ...p]);
+        fetchResources();
+      } else {
+        setDivisionResourcesTick(t => t + 1);
+      }
+      resetAddResourceDialog();
+      openResourceUrl(saved, true);
+      openResourceState(saved, true);
+      toast.success('Google Doc saved. Public preview stays live with the original document.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save Google Doc.');
+    } finally {
+      setCreatingResource(false);
+    }
   };
 
   const handleDeleteResource = async (id: number) => {
@@ -2816,14 +2950,15 @@ const DepartmentOfPublicHealth = () => {
   // Only gate the session bootstrap and tab-specific data. Panel landing cards
   // render immediately — their section fetches run after the user picks one.
   const pageLoading = isLoading || (
-    activeTab === 'personnel-roster' || activeTab === 'division-roster' || activeTab === 'divisions-information' ? rosterLoading
+    activeTab === 'personnel-roster' ? rosterLoading
+    : activeTab === 'division-roster' || activeTab === 'divisions-information' ? (rosterLoading && roster.length === 0)
     : activeTab === 'vehicle-roster' ? fleetLoading
     : activeTab === 'equipment-roster' ? equipmentLoading
     : activeTab === 'event-calendar' ? eventsLoading
     : activeTab === 'information' ? infoLoading
     : activeTab === 'resources' ? resourcesLoading
     : activeTab === 'department-panel' ? (
-      panelSection === 'personnel' ? (panelLoading || ranksLoading || groupsLoading)
+      panelSection === 'personnel' ? panelLoading
       : panelSection === 'division' ? false
       : panelSection === 'vehicle' ? (fleetLoading || categoriesLoading)
       : panelSection === 'equipment' ? (equipmentLoading || eqCategoriesLoading)
@@ -3055,7 +3190,9 @@ const DepartmentOfPublicHealth = () => {
                   </span>
                 </div>
 
-                {groupedRoster.length === 0 ? (
+                {!rosterMetaReady ? (
+                  <PageLoadingScreen loading label="Loading…" minHeightClass="min-h-[260px]" />
+                ) : groupedRoster.length === 0 ? (
                   <div className="flex min-h-[260px] flex-col items-center justify-center gap-2">
                     <Users className="h-8 w-8 text-[#1e2e42]" />
                     <p className="text-sm font-bold text-[#3f5470]">
@@ -3253,7 +3390,7 @@ const DepartmentOfPublicHealth = () => {
             {activeTab === 'division-roster' && (
               <DivisionRosterView apiBase="/api/dph" resourcesBase="/api/dph/resources"
                 members={roster}
-                loading={rosterLoading}
+                loading={rosterLoading || !rosterMetaReady}
                 DiscordAvatar={DiscordAvatar}
                 viewerDiscordId={session?.discord_id ?? null}
                 bypassDivisionRestrictions={bypassDivisionRestrictions}
@@ -3262,9 +3399,9 @@ const DepartmentOfPublicHealth = () => {
             )}
 
             {activeTab === 'divisions-information' && (
-              <DivisionsInformationView apiBase="/api/dph" resourcesBase="/api/dph/resources"
+              <DivisionsInformationView apiBase="/api/dph"
                 members={roster}
-                loading={rosterLoading}
+                loading={rosterLoading || !rosterMetaReady}
                 viewerDiscordId={session?.discord_id ?? null}
                 bypassDivisionRestrictions={bypassDivisionRestrictions}
               />
@@ -3631,7 +3768,7 @@ const DepartmentOfPublicHealth = () => {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-black text-white">{r.title}</p>
                     <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
-                      {r.type === 'pdf' ? 'PDF' : 'Document'}
+                      {resourceTypeLabel(r)}
                       {r.division_only ? ' · Division' : ''}
                       {r.personnel_only || (Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0) ? ' · Personnel' : ''}
                     </p>
@@ -5660,7 +5797,7 @@ const DepartmentOfPublicHealth = () => {
                               <div className="flex-1 min-w-0">
                                 <p className="truncate text-sm font-black text-white">{r.title}</p>
                                 <p className="text-[10px] text-[#3f5470]">
-                                  {r.type === 'pdf' ? 'PDF' : 'Document'} · Updated {new Date(r.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  {resourceTypeLabel(r)} · Updated {new Date(r.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                 </p>
                                 {(r.personnel_only || (Array.isArray(r.allowed_dph_ranks) && r.allowed_dph_ranks.length > 0) || r.division_only) && (
                                   <p className="mt-1 text-[10px] font-semibold text-[#7c8ba5]">
@@ -5675,8 +5812,8 @@ const DepartmentOfPublicHealth = () => {
                               <button type="button"
                                 onClick={() => handleOpenResource(r, true)}
                                 className="flex items-center gap-1 rounded-lg border border-[#34d399]/30 bg-[#34d399]/8 px-3 py-1.5 text-[11px] font-black text-[#34d399] hover:bg-[#34d399]/15 transition-colors">
-                                {r.type === 'pdf' ? <BookOpen className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-                                {r.type === 'pdf' ? 'View' : 'Edit'}
+                                {isPdfLikeResource(r) ? <BookOpen className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                                {isPdfLikeResource(r) ? 'View' : 'Edit'}
                               </button>
                               <button type="button"
                                 onClick={() => handleDeleteResource(r.id)}
@@ -6156,11 +6293,7 @@ const DepartmentOfPublicHealth = () => {
           key={`${openDocId}-${openDocCanEdit ? 'edit' : 'view'}`}
           resourceId={openDocId}
           canEdit={openDocCanEdit}
-          onClose={() => {
-            setOpenDocId(null);
-            setOpenDocCanEdit(false);
-            fetchResources();
-          }}
+          onClose={handleCloseResource}
         />
       )}
 
@@ -6169,14 +6302,15 @@ const DepartmentOfPublicHealth = () => {
         <div className="fixed inset-0 z-50 flex flex-col bg-black/85">
           <div className="flex items-center justify-between border-b border-[#1e2d42] bg-[#070d16] px-5 py-3">
             <p className="truncate text-sm font-black text-white">{openPdf.title}</p>
-            <button type="button" onClick={() => setOpenPdf(null)}
+            <button type="button" onClick={handleCloseResource}
               className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
               <X className="h-4 w-4" />
             </button>
           </div>
           <PdfViewer
-            fileUrl={`/api/dph/resources/${openPdf.id}/file`}
+            fileUrl={resourceFileUrl('dph', openPdf.id, openPdf)}
             downloadName={`${openPdf.title}.pdf`}
+            liveRefreshMs={googleFileIdFromResource(openPdf) || openPdf.type === 'google_doc' ? 45_000 : undefined}
           />
         </div>
       )}
@@ -6229,8 +6363,8 @@ const DepartmentOfPublicHealth = () => {
 
       {/* ── Add Resource dialog — Step 2: Type ──────────────────────────────── */}
       {addResourceStep === 2 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-black text-white">New Resource</h3>
@@ -6301,6 +6435,29 @@ const DepartmentOfPublicHealth = () => {
                     <p className="text-[11px] text-[#5a7290]">This document will automatically be converted to PDF.</p>
                   )}
                 </div>
+              )}
+
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setNewResourceType('google_doc')}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setNewResourceType('google_doc'); }}
+                className={`group relative flex cursor-pointer items-start gap-4 rounded-xl border-2 p-4 transition-colors ${newResourceType === 'google_doc' ? 'border-[#8eb0ff] bg-[#8eb0ff]/8 ring-2 ring-[#8eb0ff]/30' : 'border-[#1e2d42] hover:border-[#8eb0ff]/50'}`}
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#8eb0ff]/30 bg-[#8eb0ff]/15">
+                  <Globe className="h-5 w-5 text-[#8eb0ff]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-white">Google Doc</p>
+                  <p className="mt-0.5 text-xs text-[#526179]">Paste a share link. Edits in Google appear in Public Preview without re-uploading.</p>
+                </div>
+                <div className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${newResourceType === 'google_doc' ? 'border-[#8eb0ff] bg-[#8eb0ff]' : 'border-[#3f5470]'}`}>
+                  {newResourceType === 'google_doc' && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </div>
+              </div>
+
+              {newResourceType === 'google_doc' && (
+                <GoogleDocPicker createdBy={session?.username} onChange={setGoogleDocSelection} />
               )}
             </div>
 
@@ -6444,11 +6601,11 @@ const DepartmentOfPublicHealth = () => {
               </button>
               <button type="button"
                 disabled={creatingResource || (newResourceType === 'file' && !uploadFile)}
-                onClick={newResourceType === 'file' ? handleUploadResource : handleCreateResource}
+                onClick={newResourceType === 'file' ? handleUploadResource : newResourceType === 'google_doc' ? handleCreateGoogleResource : handleCreateResource}
                 className="flex-1 h-10 rounded-lg bg-[#2f66ee] text-xs font-black text-white hover:bg-[#3977ff] disabled:opacity-40">
                 {creatingResource
                   ? (uploadStatus ?? 'Creating…')
-                  : newResourceType === 'file' ? 'Upload →' : 'Create & Edit →'}
+                  : newResourceType === 'file' ? 'Upload →' : newResourceType === 'google_doc' ? 'Link Google Doc →' : 'Create & Edit →'}
               </button>
             </div>
           </div>

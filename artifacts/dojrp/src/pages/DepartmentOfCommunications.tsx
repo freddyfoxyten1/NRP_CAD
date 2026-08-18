@@ -723,6 +723,7 @@ const DepartmentOfCommunications = () => {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify({ id: s.id, email: s.email }),
+          signal: AbortSignal.timeout(6_000),
         });
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { active: boolean; account?: CadSession };

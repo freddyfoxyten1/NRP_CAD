@@ -75,7 +75,7 @@ function probe(url) {
       resolve(res.statusCode >= 200 && res.statusCode < 400);
     });
     req.on("error", () => resolve(false));
-    req.setTimeout(2000, () => {
+    req.setTimeout(4000, () => {
       req.destroy();
       resolve(false);
     });
@@ -261,9 +261,13 @@ process.on("SIGTERM", () => shutdown(0));
 
 await ensureRemoteApiReady();
 
-await (usingRemoteApi
-  ? (console.log(`Using live VPS API (GitHub deploy data): ${remoteApiUrl}`), Promise.resolve(true))
-  : ensureApi());
+if (usingRemoteApi) {
+  console.log(`Using live VPS API (GitHub deploy data): ${remoteApiUrl}`);
+  // Unpublished Google Doc routes are not on the VPS yet — serve them locally.
+  await ensureApi("local API for unpublished routes");
+} else {
+  await ensureApi();
+}
 
 const shouldBuildFrontend = needsFrontendBuild();
 console.log(shouldBuildFrontend ? "Building frontend…" : "Frontend build is up to date — skipping rebuild.");
@@ -281,7 +285,7 @@ if (shouldBuildFrontend) {
   }
 }
 
-if (!usingRemoteApi && !(await isApiHealthy())) {
+if (!(await isApiHealthy())) {
   console.warn("API stopped during build; restarting…");
   await ensureApi();
 }
@@ -301,21 +305,27 @@ if (ready) {
       "",
       "═══════════════════════════════════════════════════════════════",
       usingRemoteApi
-        ? "  DOJCAD test preview — local files + VPS Mongo"
-        : "  DOJCAD test preview — local files before VPS release",
+        ? "  DOJCAD test preview — unpublished files + live VPS"
+        : "  DOJCAD test preview — unpublished files (local API)",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site:  http://localhost:${PREVIEW_PORT}/`,
       usingRemoteApi
         ? `  API:   ${remoteApiUrl}/api/healthz  (VPS + Mongo)`
         : `  API:   http://localhost:${API_PORT}/api/healthz  (local Mongo from .env)`,
+      usingRemoteApi
+        ? `  Local: http://localhost:${API_PORT}/api  (unpublished Google Doc routes)`
+        : "",
       "",
       usingRemoteApi
-        ? "  Unpublished UI. Live Mongo from the VPS. Sign-in returns here."
+        ? "  Local files only — nothing is committed, pushed, or published."
         : "  Unpublished files. Sign-in returns here, not cad.dojrblx.com.",
+      usingRemoteApi
+        ? "  Data/login use the live VPS at cad.dojrblx.com. Sign-in returns here."
+        : "",
       "",
-      "  Live reload while editing: bun run dev",
-      "  Production data check:    bun run preview:live",
+      "  Live reload while editing: bun run dev:live",
+      "  Rebuild this preview:     bun run preview",
       "",
       `  Discord sign-in redirect: ${previewRedirectUri}`,
       "  Add that URI in the Discord Developer Portal if sign-in fails.",

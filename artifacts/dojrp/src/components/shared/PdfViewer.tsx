@@ -22,6 +22,8 @@ interface PdfViewerProps {
   fileUrl: string;
   /** Filename used for the download button. */
   downloadName?: string;
+  /** When set, refetch the file on this interval so live Google Docs stay current. */
+  liveRefreshMs?: number;
 }
 
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
@@ -111,7 +113,7 @@ const PdfPageCanvas = ({
   );
 };
 
-const PdfViewer = ({ fileUrl, downloadName = 'document.pdf' }: PdfViewerProps) => {
+const PdfViewer = ({ fileUrl, downloadName = 'document.pdf', liveRefreshMs }: PdfViewerProps) => {
   const [doc, setDoc]           = useState<PDFDocumentProxy | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput]     = useState('1');
@@ -119,33 +121,71 @@ const PdfViewer = ({ fileUrl, downloadName = 'document.pdf' }: PdfViewerProps) =
   const [fitWidth, setFitWidth] = useState(0);
   const [aspectRatio, setAspectRatio] = useState(11 / 8.5); // updated from page 1
   const [scrollRoot, setScrollRoot]   = useState<HTMLDivElement | null>(null);
-  const [error, setError]       = useState(false);
+  const [error, setError]       = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const pageRefs     = useRef<(HTMLDivElement | null)[]>([]);
+  const etagRef      = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!liveRefreshMs || liveRefreshMs < 5_000) return;
+    const timer = window.setInterval(() => setReloadToken(n => n + 1), liveRefreshMs);
+    return () => window.clearInterval(timer);
+  }, [liveRefreshMs, fileUrl]);
 
   // ── Load the document ───────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    setDoc(null);
-    setError(false);
-    setCurrentPage(1);
-    setPageInput('1');
-    const loadingTask = pdfjsLib.getDocument({ url: fileUrl });
-    loadingTask.promise
-      .then(async d => {
+    let loadingTask: ReturnType<typeof pdfjsLib.getDocument> | null = null;
+    if (reloadToken === 0) {
+      setDoc(null);
+      setError(null);
+      setCurrentPage(1);
+      setPageInput('1');
+      etagRef.current = null;
+    }
+
+    (async () => {
+      try {
+        const headers: Record<string, string> = { accept: 'application/pdf, application/json' };
+        if (etagRef.current) headers['If-None-Match'] = etagRef.current;
+        const res = await fetch(fileUrl, { headers, cache: 'no-store' });
+        if (res.status === 304) return;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({})) as { error?: string };
+          throw new Error(body.error ?? (
+            res.status === 401 ? 'Google access expired. Reconnect the Google account.'
+              : res.status === 403 ? 'This Google account can no longer open that document.'
+                : res.status === 404 ? 'That document was deleted or is no longer available.'
+                  : res.status === 429 ? 'Google is rate-limiting requests. Try again shortly.'
+                    : 'Could not display this document.'
+          ));
+        }
+        const revision = res.headers.get('etag') || res.headers.get('x-google-revision');
+        if (revision) etagRef.current = revision;
+        const data = await res.arrayBuffer();
+        loadingTask = pdfjsLib.getDocument({ data });
+        const d = await loadingTask.promise;
         if (cancelled) return;
-        // Use page 1's shape to size placeholders for not-yet-rendered pages.
         try {
           const first = await d.getPage(1);
           const vp = first.getViewport({ scale: 1 });
           if (!cancelled) setAspectRatio(vp.height / vp.width);
         } catch { /* keep default aspect */ }
-        if (!cancelled) setDoc(d);
-      })
-      .catch(() => { if (!cancelled) setError(true); });
-    // Destroying the loading task also frees the document and its worker data.
-    return () => { cancelled = true; loadingTask.destroy(); };
-  }, [fileUrl]);
+        if (!cancelled) {
+          setError(null);
+          setDoc(d);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Could not display this PDF.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      loadingTask?.destroy();
+    };
+  }, [fileUrl, reloadToken]);
 
   // ── Track container width so pages fill the space at 1x zoom ───────────────
   useEffect(() => {
@@ -245,7 +285,7 @@ const PdfViewer = ({ fileUrl, downloadName = 'document.pdf' }: PdfViewerProps) =
       <div ref={el => { containerRef.current = el; setScrollRoot(el); }} className="min-h-0 flex-1 overflow-auto bg-[#060a12] p-4">
         {error ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-            <p className="text-sm font-black text-red-400">Could not display this PDF.</p>
+            <p className="text-sm font-black text-red-400">{error}</p>
             <a href={fileUrl} download={downloadName} className="text-xs font-bold text-[#4384ff] underline">Download it instead</a>
           </div>
         ) : !doc || !fitWidth ? (

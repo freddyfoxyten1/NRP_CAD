@@ -13,6 +13,11 @@ import {
 } from 'lucide-react';
 import DocumentEditor from '@/components/editor/DocumentEditor';
 import PdfViewer from '@/components/shared/PdfViewer';
+import GoogleDocPicker, { type GoogleDocSelection } from '@/components/resources/GoogleDocPicker';
+import { googleFileIdFromResource, isPdfLikeResource, resourceFileUrl, resourceTypeLabel } from '@/lib/resource-type';
+import { persistGoogleDocResource } from '@/lib/persist-google-doc';
+import { readApiJson } from '@/lib/fetch-api-json';
+import { useResourceDeepLink } from '@/hooks/useResourceDeepLink';
 import ImageInput, { imageStyle, DEFAULT_ADJUST, type ImageAdjust } from '@/components/shared/ImageInput';
 import { toast } from 'sonner';
 import DojrpLogo from '@/components/shared/DojrpLogo';
@@ -103,8 +108,10 @@ type DpsEvent = {
 type DpsResource = {
   id: number;
   title: string;
-  type: 'document' | 'pdf';
+  type: 'document' | 'pdf' | 'google_doc';
   logo_url: string | null;
+  google_file_id?: string | null;
+  header_config?: unknown;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -308,17 +315,17 @@ let rosterMetadataPromise: Promise<{
 
 function loadRosterMetadata() {
   if (!rosterMetadataPromise) {
-    rosterMetadataPromise = Promise.all([
+    rosterMetadataPromise = Promise.allSettled([
       fetchRosterArray<DpsGroup>('/api/roster/groups', 'groups'),
       fetchRosterArray<DpsRank>('/api/roster/ranks', 'ranks'),
       fetchRosterArray<RosterDivision>('/api/roster/divisions', 'divisions'),
       fetchRosterArray<DivisionRankRow>('/api/roster/division-ranks', 'division ranks'),
     ])
       .then(([groups, ranks, divs, divRanks]) => ({
-        groups,
-        ranks: dedupeTitleRanksByName(ranks),
-        divs,
-        divRanks,
+        groups: groups.status === 'fulfilled' ? groups.value : [],
+        ranks: dedupeTitleRanksByName(ranks.status === 'fulfilled' ? ranks.value : []),
+        divs: divs.status === 'fulfilled' ? divs.value : [],
+        divRanks: divRanks.status === 'fulfilled' ? divRanks.value : [],
       }))
       .catch((err) => {
         rosterMetadataPromise = null;
@@ -1551,8 +1558,11 @@ const DepartmentOfPublicSafety = () => {
     base: 'dps',
     valid: DPS_SECTIONS,
     defaultSection: 'personnel-roster',
-    resolveParent: (raw) =>
-      (raw === 'department-panel' || raw.startsWith('department-panel-') ? 'department-panel' : null),
+    resolveParent: (raw) => {
+      if (raw === "department-panel" || raw.startsWith("department-panel-")) return "department-panel";
+      if (raw.startsWith("resources-") || raw.startsWith("edit_resource_") || raw.startsWith("public_resource_")) return "resources";
+      return null;
+    },
   });
   const panelSection = useMemo((): PanelSection | null => {
     const parsed = parseNestedPortalSection(rawSection, 'department-panel');
@@ -1575,6 +1585,7 @@ const DepartmentOfPublicSafety = () => {
   // Personnel roster
   const [roster,        setRoster]        = useState<RosterMember[]>([]);
   const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterMetaReady, setRosterMetaReady] = useState(false);
   const [rosterSearch,  setRosterSearch]  = useState('');
   const [collapsed,     setCollapsed]     = useState<Record<string, boolean>>({});
 
@@ -1708,8 +1719,9 @@ const DepartmentOfPublicSafety = () => {
   const [addResourceStep,     setAddResourceStep]     = useState<0 | 1 | 2>(0); // 0=closed, 1=name, 2=type
   const [newResourceName,     setNewResourceName]     = useState('');
   const [creatingResource,    setCreatingResource]    = useState(false);
-  const [newResourceType,     setNewResourceType]     = useState<'document' | 'file'>('document');
+  const [newResourceType,     setNewResourceType]     = useState<'document' | 'file' | 'google_doc'>('document');
   const [uploadFile,          setUploadFile]          = useState<File | null>(null);
+  const [googleDocSelection,  setGoogleDocSelection]  = useState<GoogleDocSelection | null>(null);
   const [uploadStatus,        setUploadStatus]        = useState<string | null>(null);
   const [openPdf,             setOpenPdf]             = useState<DpsResource | null>(null);
   const [openDocId,           setOpenDocId]           = useState<number | null>(null);
@@ -1747,6 +1759,7 @@ const DepartmentOfPublicSafety = () => {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           body: JSON.stringify({ id: s.id, email: s.email }),
+          signal: AbortSignal.timeout(6_000),
         });
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { active: boolean; account?: CadSession };
@@ -1815,7 +1828,8 @@ const DepartmentOfPublicSafety = () => {
           ranks: divRanks.length,
         });
       })
-      .catch(() => { /* silent — button just won't show until data is available */ });
+      .catch(() => { /* silent — button just won't show until data is available */ })
+      .finally(() => setRosterMetaReady(true));
   }, []);
 
   // ── Roster for membership checks on Resources tab ────────────────────────────
@@ -1834,18 +1848,11 @@ const DepartmentOfPublicSafety = () => {
     setRosterLoading(true);
 
     void (async () => {
+      const metaP = loadRosterMetadata();
       try {
-        const [members, meta] = await Promise.all([
-          fetchRosterArray<RosterMember>('/api/roster', 'roster'),
-          loadRosterMetadata(),
-        ]);
+        const members = await fetchRosterArray<RosterMember>('/api/roster', 'roster');
         if (cancelled) return;
         setRoster(dedupeRosterMembersById(members.map(normalizeRosterMember)));
-        setGroups(meta.groups);
-        setRanks(meta.ranks);
-        setDivisionRanksForEdit(meta.divRanks);
-        setRosterDivisions(meta.divs);
-        setDivisionStats({ divisions: meta.divs.length, ranks: meta.divRanks.length });
       } catch (err) {
         if (!cancelled) {
           setRoster([]);
@@ -1853,6 +1860,19 @@ const DepartmentOfPublicSafety = () => {
         }
       } finally {
         if (!cancelled) setRosterLoading(false);
+      }
+      try {
+        const meta = await metaP;
+        if (cancelled) return;
+        setGroups(meta.groups);
+        setRanks(meta.ranks);
+        setDivisionRanksForEdit(meta.divRanks);
+        setRosterDivisions(meta.divs);
+        setDivisionStats({ divisions: meta.divs.length, ranks: meta.divRanks.length });
+      } catch {
+        /* members already painted — titles apply when metadata arrives */
+      } finally {
+        if (!cancelled) setRosterMetaReady(true);
       }
     })();
 
@@ -1878,8 +1898,12 @@ const DepartmentOfPublicSafety = () => {
       .then((rows) => setRanks(dedupeTitleRanksByName(rows)))
       .catch((err) => {
         if (opts?.silent) return;
-        setRanks([]);
-        toast.error(err instanceof Error ? err.message : 'Failed to load ranks.');
+        setRanks((prev) => {
+          if (prev.length === 0) {
+            toast.error(err instanceof Error ? err.message : 'Failed to load ranks.');
+          }
+          return prev;
+        });
       })
       .finally(() => { if (!opts?.silent) setRanksLoading(false); });
   };
@@ -2104,6 +2128,38 @@ const DepartmentOfPublicSafety = () => {
     if (activeTab === 'resources') fetchResources();
   }, [activeTab]);
 
+  const openResourceState = useCallback((r: DpsResource, canEdit: boolean) => {
+    if (isPdfLikeResource(r)) {
+      setOpenPdf(r);
+      setOpenDocId(null);
+      setOpenDocCanEdit(false);
+      return;
+    }
+    setOpenPdf(null);
+    setOpenDocId(r.id);
+    setOpenDocCanEdit(canEdit);
+  }, []);
+
+  const { openResourceUrl, closeResourceUrl } = useResourceDeepLink({
+    department: 'dps',
+    resources,
+    resourcesLoaded: !resourcesLoading,
+    onOpen: openResourceState,
+  });
+
+  const handleOpenResource = (r: DpsResource, canEdit: boolean) => {
+    openResourceUrl(r, canEdit);
+    openResourceState(r, canEdit);
+  };
+
+  const handleCloseResource = () => {
+    setOpenPdf(null);
+    setOpenDocId(null);
+    setOpenDocCanEdit(false);
+    closeResourceUrl();
+    fetchResources();
+  };
+
   // Close profile dropdown on outside click
   useEffect(() => {
     if (!profileOpen) return;
@@ -2147,8 +2203,8 @@ const DepartmentOfPublicSafety = () => {
         setDivisionResourcesTick(t => t + 1);
       }
       resetAddResourceDialog();
-      setOpenDocId(doc.id);
-      setOpenDocCanEdit(true);
+      openResourceUrl(doc, true);
+      openResourceState(doc, true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create resource.');
     } finally {
@@ -2162,6 +2218,7 @@ const DepartmentOfPublicSafety = () => {
     setNewResourceName('');
     setNewResourceType('document');
     setUploadFile(null);
+    setGoogleDocSelection(null);
     setUploadStatus(null);
     setResourceTargetDivisionId(null);
     setNewResourceDivisionOnly(true);
@@ -2210,10 +2267,48 @@ const DepartmentOfPublicSafety = () => {
     }
   };
 
-  const handleOpenResource = (r: DpsResource, canEdit: boolean) => {
-    if (r.type === 'pdf') { setOpenPdf(r); return; }
-    setOpenDocId(r.id);
-    setOpenDocCanEdit(canEdit);
+  const handleCreateGoogleResource = async () => {
+    if (!newResourceName.trim() || !googleDocSelection) {
+      toast.error('Paste a Google Doc share link.');
+      return;
+    }
+    setCreatingResource(true);
+    try {
+      const body = await persistGoogleDocResource({
+        department: 'dps',
+        title: newResourceName.trim() || googleDocSelection.title,
+        createdBy: session?.username,
+        fileId: googleDocSelection.fileId,
+        url: googleDocSelection.url,
+        visibility: {
+          division_id: resourceTargetDivisionId,
+          ...(resourceTargetDivisionId != null
+            ? {
+                division_only: newResourceDivisionOnly,
+                allowed_ranks: newResourceAllowedRanks,
+              }
+            : {
+                personnel_only: newResourcePersonnelOnly || newResourceAllowedDpsRanks.length > 0,
+                allowed_dps_ranks: newResourceAllowedDpsRanks,
+              }),
+        },
+      });
+      const saved = body as DpsResource;
+      if (resourceTargetDivisionId == null) {
+        setResources(p => [saved, ...p]);
+        fetchResources();
+      } else {
+        setDivisionResourcesTick(t => t + 1);
+      }
+      resetAddResourceDialog();
+      openResourceUrl(saved, true);
+      openResourceState(saved, true);
+      toast.success('Google Doc saved. Public preview stays live with the original document.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save Google Doc.');
+    } finally {
+      setCreatingResource(false);
+    }
   };
 
   const handleDeleteResource = async (id: number) => {
@@ -2863,14 +2958,15 @@ const DepartmentOfPublicSafety = () => {
   // Only gate the session bootstrap and tab-specific data. Panel landing cards
   // render immediately — their section fetches run after the user picks one.
   const pageLoading = isLoading || (
-    activeTab === 'personnel-roster' || activeTab === 'division-roster' || activeTab === 'divisions-information' ? rosterLoading
+    activeTab === 'personnel-roster' ? rosterLoading
+    : activeTab === 'division-roster' || activeTab === 'divisions-information' ? (rosterLoading && roster.length === 0)
     : activeTab === 'vehicle-roster' ? fleetLoading
     : activeTab === 'equipment-roster' ? equipmentLoading
     : activeTab === 'event-calendar' ? eventsLoading
     : activeTab === 'information' ? infoLoading
     : activeTab === 'resources' ? resourcesLoading
     : activeTab === 'department-panel' ? (
-      panelSection === 'personnel' ? (panelLoading || ranksLoading || groupsLoading)
+      panelSection === 'personnel' ? panelLoading
       : panelSection === 'division' ? false
       : panelSection === 'vehicle' ? (fleetLoading || categoriesLoading)
       : panelSection === 'equipment' ? (equipmentLoading || eqCategoriesLoading)
@@ -3110,7 +3206,9 @@ const DepartmentOfPublicSafety = () => {
                   </span>
                 </div>
 
-                {groupedRoster.length === 0 ? (
+                {!rosterMetaReady ? (
+                  <PageLoadingScreen loading label="Loading…" minHeightClass="min-h-[260px]" />
+                ) : groupedRoster.length === 0 ? (
                   <div className="flex min-h-[260px] flex-col items-center justify-center gap-2">
                     <Users className="h-8 w-8 text-[#1e2e42]" />
                     <p className="text-sm font-bold text-[#3f5470]">
@@ -3221,7 +3319,7 @@ const DepartmentOfPublicSafety = () => {
             {activeTab === 'division-roster' && (
               <DivisionRosterView
                 members={roster}
-                loading={rosterLoading}
+                loading={rosterLoading || !rosterMetaReady}
                 DiscordAvatar={DiscordAvatar}
                 viewerDiscordId={session?.discord_id ?? null}
                 bypassDivisionRestrictions={bypassDivisionRestrictions}
@@ -3232,7 +3330,7 @@ const DepartmentOfPublicSafety = () => {
             {activeTab === 'divisions-information' && (
               <DivisionsInformationView
                 members={roster}
-                loading={rosterLoading}
+                loading={rosterLoading || !rosterMetaReady}
                 viewerDiscordId={session?.discord_id ?? null}
                 bypassDivisionRestrictions={bypassDivisionRestrictions}
               />
@@ -3599,7 +3697,7 @@ const DepartmentOfPublicSafety = () => {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-black text-white">{r.title}</p>
                     <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
-                      {r.type === 'pdf' ? 'PDF' : 'Document'}
+                      {resourceTypeLabel(r)}
                       {r.division_only ? ' · Division' : ''}
                       {r.personnel_only || (Array.isArray(r.allowed_dps_ranks) && r.allowed_dps_ranks.length > 0) ? ' · Personnel' : ''}
                     </p>
@@ -5628,7 +5726,7 @@ const DepartmentOfPublicSafety = () => {
                               <div className="flex-1 min-w-0">
                                 <p className="truncate text-sm font-black text-white">{r.title}</p>
                                 <p className="text-[10px] text-[#3f5470]">
-                                  {r.type === 'pdf' ? 'PDF' : 'Document'} · Updated {new Date(r.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  {resourceTypeLabel(r)} · Updated {new Date(r.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                                 </p>
                                 {(r.personnel_only || (Array.isArray(r.allowed_dps_ranks) && r.allowed_dps_ranks.length > 0) || r.division_only) && (
                                   <p className="mt-1 text-[10px] font-semibold text-[#7c8ba5]">
@@ -5643,8 +5741,8 @@ const DepartmentOfPublicSafety = () => {
                               <button type="button"
                                 onClick={() => handleOpenResource(r, true)}
                                 className="flex items-center gap-1 rounded-lg border border-[#34d399]/30 bg-[#34d399]/8 px-3 py-1.5 text-[11px] font-black text-[#34d399] hover:bg-[#34d399]/15 transition-colors">
-                                {r.type === 'pdf' ? <BookOpen className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-                                {r.type === 'pdf' ? 'View' : 'Edit'}
+                                {isPdfLikeResource(r) ? <BookOpen className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                                {isPdfLikeResource(r) ? 'View' : 'Edit'}
                               </button>
                               <button type="button"
                                 onClick={() => handleDeleteResource(r.id)}
@@ -6124,11 +6222,7 @@ const DepartmentOfPublicSafety = () => {
           key={`${openDocId}-${openDocCanEdit ? 'edit' : 'view'}`}
           resourceId={openDocId}
           canEdit={openDocCanEdit}
-          onClose={() => {
-            setOpenDocId(null);
-            setOpenDocCanEdit(false);
-            fetchResources();
-          }}
+          onClose={handleCloseResource}
         />
       )}
 
@@ -6137,14 +6231,15 @@ const DepartmentOfPublicSafety = () => {
         <div className="fixed inset-0 z-50 flex flex-col bg-black/85">
           <div className="flex items-center justify-between border-b border-[#1e2d42] bg-[#070d16] px-5 py-3">
             <p className="truncate text-sm font-black text-white">{openPdf.title}</p>
-            <button type="button" onClick={() => setOpenPdf(null)}
+            <button type="button" onClick={handleCloseResource}
               className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white" aria-label="Close">
               <X className="h-4 w-4" />
             </button>
           </div>
           <PdfViewer
-            fileUrl={`/api/resources/${openPdf.id}/file`}
+            fileUrl={resourceFileUrl('dps', openPdf.id, openPdf)}
             downloadName={`${openPdf.title}.pdf`}
+            liveRefreshMs={googleFileIdFromResource(openPdf) || openPdf.type === 'google_doc' ? 45_000 : undefined}
           />
         </div>
       )}
@@ -6197,8 +6292,8 @@ const DepartmentOfPublicSafety = () => {
 
       {/* ── Add Resource dialog — Step 2: Type ──────────────────────────────── */}
       {addResourceStep === 2 && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-md max-h-[90vh] overflow-y-auto overflow-x-hidden rounded-2xl border border-[#1e2d42] bg-[#070d16] p-7 shadow-2xl">
             <div className="mb-5 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-black text-white">New Resource</h3>
@@ -6269,6 +6364,29 @@ const DepartmentOfPublicSafety = () => {
                     <p className="text-[11px] text-[#5a7290]">This document will automatically be converted to PDF.</p>
                   )}
                 </div>
+              )}
+
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={() => setNewResourceType('google_doc')}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setNewResourceType('google_doc'); }}
+                className={`group relative flex cursor-pointer items-start gap-4 rounded-xl border-2 p-4 transition-colors ${newResourceType === 'google_doc' ? 'border-[#8eb0ff] bg-[#8eb0ff]/8 ring-2 ring-[#8eb0ff]/30' : 'border-[#1e2d42] hover:border-[#8eb0ff]/50'}`}
+              >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#8eb0ff]/30 bg-[#8eb0ff]/15">
+                  <Globe className="h-5 w-5 text-[#8eb0ff]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-white">Google Doc</p>
+                  <p className="mt-0.5 text-xs text-[#526179]">Paste a share link. Edits in Google appear in Public Preview without re-uploading.</p>
+                </div>
+                <div className={`mt-0.5 h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${newResourceType === 'google_doc' ? 'border-[#8eb0ff] bg-[#8eb0ff]' : 'border-[#3f5470]'}`}>
+                  {newResourceType === 'google_doc' && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </div>
+              </div>
+
+              {newResourceType === 'google_doc' && (
+                <GoogleDocPicker createdBy={session?.username} onChange={setGoogleDocSelection} />
               )}
             </div>
 
@@ -6412,11 +6530,11 @@ const DepartmentOfPublicSafety = () => {
               </button>
               <button type="button"
                 disabled={creatingResource || (newResourceType === 'file' && !uploadFile)}
-                onClick={newResourceType === 'file' ? handleUploadResource : handleCreateResource}
+                onClick={newResourceType === 'file' ? handleUploadResource : newResourceType === 'google_doc' ? handleCreateGoogleResource : handleCreateResource}
                 className="flex-1 h-10 rounded-lg bg-[#2f66ee] text-xs font-black text-white hover:bg-[#3977ff] disabled:opacity-40">
                 {creatingResource
                   ? (uploadStatus ?? 'Creating…')
-                  : newResourceType === 'file' ? 'Upload →' : 'Create & Edit →'}
+                  : newResourceType === 'file' ? 'Upload →' : newResourceType === 'google_doc' ? 'Link Google Doc →' : 'Create & Edit →'}
               </button>
             </div>
           </div>
