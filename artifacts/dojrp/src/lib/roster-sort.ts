@@ -127,7 +127,7 @@ export function personnelGroupLabelFromRank<
   return group.name;
 }
 
-/** Resolve roster title from the member's current department rank only. */
+/** Resolve roster title from linked rank metadata or API group_name. */
 export function personnelGroupLabelForDisplay<
   T extends PersonnelRosterMember,
 >(
@@ -136,7 +136,19 @@ export function personnelGroupLabelForDisplay<
   groups: TitleGroup[],
   getRankName: (member: T) => string | null | undefined,
 ): string | null {
-  return personnelGroupLabelFromRank(member, ranks, groups, getRankName);
+  const fromRank = personnelGroupLabelFromRank(member, ranks, groups, getRankName);
+  if (fromRank) return fromRank;
+
+  const fromApi = personnelGroupLabel(member);
+  if (!fromApi) return null;
+
+  const safeGroups = groups.filter(g => !isCommunityTitle(g.name));
+  if (safeGroups.length === 0) return fromApi;
+
+  const matched = safeGroups.find(
+    g => g.name.trim().toLowerCase() === fromApi.toLowerCase(),
+  );
+  return matched?.name ?? fromApi;
 }
 
 /**
@@ -216,6 +228,68 @@ export function buildPersonnelTitleGroups<
       ),
     }))
     .filter(group => group.members.length > 0);
+}
+
+/** Title label for the public index roster. */
+function publicPersonnelTitleLabel<
+  T extends PersonnelRosterMember,
+>(
+  member: T,
+  ranks: TitleRank[],
+  groups: TitleGroup[],
+  getRankName: (member: T) => string | null | undefined,
+): string | null {
+  const fromDisplay = personnelGroupLabelForDisplay(member, ranks, groups, getRankName);
+  if (fromDisplay) return fromDisplay;
+
+  const fromApi = personnelGroupLabel(member);
+  if (fromApi) return fromApi;
+
+  return null;
+}
+
+const PUBLIC_UNASSIGNED_TITLE = "Unassigned";
+
+/** Public roster grouping — includes all personnel under title headings. */
+export function buildPublicPersonnelTitleGroups<
+  T extends PersonnelRosterMember & { username?: string | null; callsign?: string | null },
+>(
+  members: T[],
+  groups: TitleGroup[],
+  ranks: TitleRank[],
+  getRankName: (member: T) => string | null | undefined,
+): Array<{ id: number | null; label: string; members: T[] }> {
+  const eligible = dedupeRosterMembersById(members);
+  const safeGroups = groups.filter(g => !isCommunityTitle(g.name));
+
+  const resolveLabel = (m: T): string =>
+    publicPersonnelTitleLabel(m, ranks, groups, getRankName) ?? PUBLIC_UNASSIGNED_TITLE;
+
+  const titleOrder = new Map<string, { id: number | null; sort: number }>();
+  for (const g of safeGroups) {
+    titleOrder.set(g.name, { id: g.id, sort: g.sort_order });
+  }
+  if (eligible.some(m => publicPersonnelTitleLabel(m, ranks, groups, getRankName) == null)) {
+    titleOrder.set(PUBLIC_UNASSIGNED_TITLE, { id: null, sort: 999_999 });
+  }
+  for (const m of eligible) {
+    const label = resolveLabel(m);
+    if (titleOrder.has(label)) continue;
+    titleOrder.set(label, { id: null, sort: 999 });
+  }
+
+  return [...titleOrder.entries()]
+    .sort((a, b) => a[1].sort - b[1].sort || a[0].localeCompare(b[0]))
+    .map(([label, meta]) => ({
+      id: meta.id,
+      label,
+      members: sortByRankThenCallsign(
+        eligible.filter(m => resolveLabel(m) === label),
+        ranks,
+        getRankName,
+      ),
+    }))
+    .filter(g => g.members.length > 0);
 }
 
 export type PersonnelRosterTitle<T> = {

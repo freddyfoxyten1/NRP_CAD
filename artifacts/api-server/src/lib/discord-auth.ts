@@ -1,7 +1,7 @@
 import type { Request } from "express";
 import { pool, isMongoStore, usersRepo } from "@workspace/db";
 import { denyMessageForMode, getCadMode, modeToOnline, type CadMode } from "./cad-mode";
-import { isSuperAdminDiscordId } from "./superadmin";
+import { applySuperAdminSessionOverrides, isSuperAdminDiscordId } from "./superadmin";
 
 export const COMMUNITY_GUILD_ID =
   process.env.DISCORD_GUILD_ID ?? "823606319529066548";
@@ -246,7 +246,7 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
     const user = await usersRepo.getUserById(profileId);
     if (!user) return null;
     const merged = await usersRepo.withDpsRanks(user);
-    return {
+    return applySuperAdminSessionOverrides({
       id: merged.id,
       username: merged.username,
       email: String(merged.email ?? ""),
@@ -264,7 +264,7 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
       can_access_terms_privacy: Boolean(merged.can_access_terms_privacy),
       can_access_terminal_offline: Boolean(merged.can_access_terminal_offline),
       can_access_doc_dps_cad: Boolean(merged.can_access_doc_dps_cad),
-    };
+    });
   }
 
   const result = await pool.query<CadSessionPayload>(
@@ -288,14 +288,14 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
 
   const row = result.rows[0];
   if (!row) return null;
-  return {
+  return applySuperAdminSessionOverrides({
     ...row,
     can_access_iab: Boolean(row.can_access_iab),
     can_access_system_logs: Boolean(row.can_access_system_logs),
     can_access_terms_privacy: Boolean(row.can_access_terms_privacy),
     can_access_terminal_offline: Boolean(row.can_access_terminal_offline),
     can_access_doc_dps_cad: Boolean(row.can_access_doc_dps_cad),
-  };
+  });
 }
 
 function hasStaffAssignment(staffRole: string | null | undefined, staffRank: string | null | undefined): boolean {

@@ -5,7 +5,7 @@ import { getCadSession } from '@/lib/cad-session';
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
 import { renderContentBlocks } from '@/components/shared/ContentBlocks';
 import { cadModeLabel } from '@/hooks/useCadStatus';
-import { MEMBER_PORTAL_NAV_ITEMS, useMemberPortal } from './member-portal-shared';
+import { MEMBER_PORTAL_NAV_ITEMS, getMemberPortalNavPath, isMemberPortalNavComingSoon, useMemberPortal } from './member-portal-shared';
 
 function SectionHeading({ icon: Icon, title, count }: {
   icon: React.ComponentType<{ className?: string }>; title: string; count?: number;
@@ -47,7 +47,13 @@ const MemberPortalIndex = () => {
     role,
     canAccessStaff,
     canAccessAdminPortal,
+    superAdmin,
   } = useMemberPortal();
+
+  const navAccess = {
+    superAdmin,
+    canAccessIab: Boolean(portalData?.profile.can_access_iab),
+  };
 
   return (
     <main className="min-h-screen bg-[#02060b] text-white">
@@ -85,9 +91,7 @@ const MemberPortalIndex = () => {
           <div className="sidebar-scroll mt-8 lg:flex-1 lg:overflow-x-hidden lg:overflow-y-auto">
             <nav className="flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible lg:pb-0">
               {MEMBER_PORTAL_NAV_ITEMS.map((item) => {
-                const isComingSoon =
-                  item === 'Department of Communications'
-                  || item === 'Department of Transportation';
+                const isComingSoon = isMemberPortalNavComingSoon(item, navAccess);
                 const isActive = activeNav === item;
                 return (
                 <div key={item} className="contents lg:block lg:w-full">
@@ -100,8 +104,8 @@ const MemberPortalIndex = () => {
                         setActiveNav(item);
                         return;
                       }
-                      if (item === 'Department of Public Safety') navigate('/dps_information');
-                      if (item === 'Department of Public Health') navigate('/dph_information');
+                      const path = getMemberPortalNavPath(item);
+                      if (path) navigate(path);
                     }}
                     className={`flex w-[240px] shrink-0 flex-col items-start justify-center gap-0.5 rounded-md border-l-2 px-4 py-3 text-left text-sm font-semibold leading-snug transition-colors lg:w-full ${
                       isComingSoon
@@ -121,13 +125,32 @@ const MemberPortalIndex = () => {
                   {item === 'Department of Communications' && (
                     <button
                       type="button"
-                      disabled
-                      className="flex w-[240px] shrink-0 flex-col items-start justify-center gap-0.5 rounded-md border-l-2 border-transparent px-4 py-3 text-left text-sm font-semibold leading-snug transition-colors cursor-not-allowed text-[#3f5470] lg:w-full"
+                      disabled={isMemberPortalNavComingSoon('Department of Internal Affairs', navAccess)}
+                      onClick={() => {
+                        const path = getMemberPortalNavPath('Department of Internal Affairs');
+                        if (path) navigate(path);
+                      }}
+                      className={`flex w-[240px] shrink-0 flex-col items-start justify-center gap-0.5 rounded-md border-l-2 px-4 py-3 text-left text-sm font-semibold leading-snug transition-colors lg:w-full ${
+                        isMemberPortalNavComingSoon('Department of Internal Affairs', navAccess)
+                          ? 'cursor-not-allowed border-transparent text-[#3f5470]'
+                          : 'border-transparent text-[#8392aa] hover:bg-[#070d16] hover:text-white'
+                      }`}
                     >
                       <span className="w-full whitespace-normal break-words">Department of Internal Affairs</span>
-                      <span className="text-[10px] font-normal tracking-wide text-[#526179]">
-                        Coming Soon
-                      </span>
+                      {isMemberPortalNavComingSoon('Department of Internal Affairs', navAccess) && (
+                        <span className="text-[10px] font-normal tracking-wide text-[#526179]">
+                          Coming Soon
+                        </span>
+                      )}
+                    </button>
+                  )}
+                  {item === 'Department of Transportation' && superAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => navigate('/civilian_operations')}
+                      className="flex w-[240px] shrink-0 flex-col items-start justify-center gap-0.5 rounded-md border-l-2 border-transparent px-4 py-3 text-left text-sm font-semibold leading-snug transition-colors border-transparent text-[#8392aa] hover:bg-[#070d16] hover:text-white lg:w-full"
+                    >
+                      <span className="w-full whitespace-normal break-words">Civilian Operations</span>
                     </button>
                   )}
                 </div>

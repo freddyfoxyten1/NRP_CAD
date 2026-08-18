@@ -14,6 +14,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { pool, isMongoStore, contentRepo } from "@workspace/db";
 import { fetchInGameStats } from "../lib/erlc-stats";
+import { getDiscordPresenceBatch } from "../lib/discord-presence-cache";
 import { writeLog } from "../lib/audit-log";
 
 const router = Router();
@@ -173,6 +174,27 @@ router.get("/public/stats", async (req, res) => {
     req.log.error({ err }, "public/stats error");
     res.status(500).json({ error: "Unable to load stats." });
   }
+});
+
+// ── GET /public/discord-presence — batch Discord status for roster display ───
+router.get("/public/discord-presence", (req, res) => {
+  const raw = req.query.ids;
+  const ids = typeof raw === "string"
+    ? raw.split(",").map(s => s.trim()).filter(Boolean)
+    : Array.isArray(raw)
+      ? raw.flatMap(v => String(v).split(",")).map(s => s.trim()).filter(Boolean)
+      : [];
+
+  if (ids.length === 0) {
+    res.json({});
+    return;
+  }
+  if (ids.length > 500) {
+    res.status(400).json({ error: "Too many ids (max 500)." });
+    return;
+  }
+
+  res.json(getDiscordPresenceBatch(ids));
 });
 
 // ── GET /public/gallery ───────────────────────────────────────────────────────

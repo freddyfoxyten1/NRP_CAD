@@ -5,27 +5,25 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Monitor,
   Shield,
   Settings,
   Sparkles,
   X,
 } from 'lucide-react';
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
-import { canAccessDpsCad } from '@/lib/cad-access';
 import type { CadSession } from '@/lib/cad-session';
 import { cadModeLabel } from '@/hooks/useCadStatus';
 
-const DPS_SEAL_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}dps-seal.png`;
+const DPH_SEAL_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}dph-seal.png`;
 
-export type DpsNavTab = {
+export type DphNavTab = {
   id: string;
   label: string;
   icon: React.ElementType;
 };
 
-type DpsModernShellProps = {
-  tabs: DpsNavTab[];
+type DphModernShellProps = {
+  tabs: DphNavTab[];
   activeTab: string;
   setActiveTab: (id: string) => void;
   tabTitle: string;
@@ -57,11 +55,11 @@ function CadStatusPill({ cadOnline, cadMode, compact = false }: { cadOnline: boo
     <div
       className={`inline-flex items-center gap-2 rounded-full border ${
         compact ? 'px-2 py-1' : 'px-3.5 py-1.5'
-      } ${offline ? 'border-[#4a2028] bg-[#1a0a0e]' : 'border-[#1e3a5f] bg-[#081422]/90'}`}
+      } ${offline ? 'border-[#4a2028] bg-[#1a0a0e]' : 'border-[#1e3d32] bg-[#061510]/90'}`}
       title={label}
     >
-      <span className={`h-2 w-2 rounded-full ${offline ? 'bg-[#ff5d5d] shadow-[0_0_8px_rgba(255,93,93,0.55)]' : 'bg-[#4384ff] shadow-[0_0_8px_rgba(67,132,255,0.55)]'}`} />
-      <span className={`font-black uppercase ${compact ? 'hidden min-[420px]:inline text-[9px] tracking-[0.18em]' : 'text-[10px] tracking-[0.28em]'} ${offline ? 'text-[#ff8a8a]' : 'text-[#7eb8ff]'}`}>
+      <span className={`h-2 w-2 rounded-full ${offline ? 'bg-[#ff5d5d] shadow-[0_0_8px_rgba(255,93,93,0.55)]' : 'bg-[#34d399] shadow-[0_0_8px_rgba(52,211,153,0.55)]'}`} />
+      <span className={`font-black uppercase ${compact ? 'hidden min-[420px]:inline text-[9px] tracking-[0.18em]' : 'text-[10px] tracking-[0.28em]'} ${offline ? 'text-[#ff8a8a]' : 'text-[#86efac]'}`}>
         {label}
       </span>
     </div>
@@ -80,18 +78,18 @@ function ProfileAvatar({ session, username }: { session: CadSession | null; user
     );
   }
   return (
-    <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#1a3050] to-[#0d1422] text-sm font-black text-[#67b0ff]">
+    <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[#1a4030] to-[#0d1422] text-sm font-black text-[#6ee7b7]">
       {(username || '?')[0]?.toUpperCase()}
     </span>
   );
 }
 
-type DpsSidebarContentProps = {
+type DphSidebarContentProps = {
   username: string;
   rank: string;
   isLoading: boolean;
   session: CadSession | null;
-  tabs: DpsNavTab[];
+  tabs: DphNavTab[];
   activeTab: string;
   setActiveTab: (id: string) => void;
   canSeeSupervisoryPanel: boolean;
@@ -106,7 +104,7 @@ type DpsSidebarContentProps = {
   onClose?: () => void;
 };
 
-function DpsSidebarContent({
+function DphSidebarContent({
   username,
   rank,
   isLoading,
@@ -124,21 +122,19 @@ function DpsSidebarContent({
   onNavigate,
   showClose,
   onClose,
-}: DpsSidebarContentProps) {
+}: DphSidebarContentProps) {
   const finish = () => onNavigate?.();
-  const showPanelTools = Boolean(
-    session && (canSeeSupervisoryPanel || canSeeDepartmentPanel || canAccessDpsCad(session)),
-  );
+  const showPanelTools = Boolean(session && (canSeeSupervisoryPanel || canSeeDepartmentPanel));
 
   return (
     <>
       <div className="shrink-0 px-5 pb-4 pt-5 lg:px-6">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <img src={DPS_SEAL_URL} alt="" className="h-10 w-10 shrink-0 object-contain" />
+            <img src={DPH_SEAL_URL} alt="" className="h-10 w-10 shrink-0 object-contain" />
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#4a6080]">DOJ:RP CAD</p>
-              <h1 className="text-base font-black tracking-tight text-white">Dept. of Public Safety</h1>
+              <h1 className="text-base font-black tracking-tight text-white">Dept. of Public Health</h1>
             </div>
           </div>
           {showClose && (
@@ -164,7 +160,7 @@ function DpsSidebarContent({
               ) : (
                 <>
                   <p className="truncate text-sm font-black text-white">{username}</p>
-                  <p className="truncate text-[11px] font-bold text-[#4384ff]">{rank || 'Unranked'}</p>
+                  <p className="truncate text-[11px] font-bold text-[#34d399]">{rank || 'Unranked'}</p>
                 </>
               )}
             </div>
@@ -187,13 +183,13 @@ function DpsSidebarContent({
                 onClick={() => { setActiveTab(id); finish(); }}
                 className={`flex shrink-0 items-center gap-3 rounded-md border-l-2 px-4 py-3 text-left text-sm font-semibold leading-snug transition-colors lg:w-full ${
                   active
-                    ? 'border-[#4384ff] bg-[#071120] text-white'
+                    ? 'border-[#34d399] bg-[#071120] text-white'
                     : 'border-transparent text-[#8392aa] hover:bg-[#070d16] hover:text-white'
                 }`}
               >
-                <Icon className={`h-4 w-4 shrink-0 ${active ? 'text-[#4384ff]' : ''}`} />
+                <Icon className={`h-4 w-4 shrink-0 ${active ? 'text-[#34d399]' : ''}`} />
                 <span className="whitespace-nowrap lg:whitespace-normal">{label}</span>
-                {active && <ChevronRight className="ml-auto hidden h-4 w-4 shrink-0 text-[#4384ff] lg:block" />}
+                {active && <ChevronRight className="ml-auto hidden h-4 w-4 shrink-0 text-[#34d399] lg:block" />}
               </button>
             );
           })}
@@ -213,8 +209,8 @@ function DpsSidebarContent({
                   onClick={() => { onSupervisoryPanel(); finish(); }}
                   className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-bold transition-colors ${
                     activeTab === 'supervisory-panel'
-                      ? 'text-[#67b0ff] hover:bg-white/5'
-                      : 'text-[#7a90aa] hover:bg-white/5 hover:text-[#4384ff]'
+                      ? 'text-[#6ee7b7] hover:bg-white/5'
+                      : 'text-[#7a90aa] hover:bg-white/5 hover:text-[#34d399]'
                   }`}
                 >
                   <Shield className="h-3.5 w-3.5 shrink-0" />
@@ -228,21 +224,11 @@ function DpsSidebarContent({
                   className={`flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-bold transition-colors ${
                     activeTab === 'department-panel'
                       ? 'text-[#f4c542] hover:bg-white/5'
-                      : 'text-[#7a90aa] hover:bg-white/5 hover:text-[#4384ff]'
+                      : 'text-[#7a90aa] hover:bg-white/5 hover:text-[#34d399]'
                   }`}
                 >
                   <Settings className="h-3.5 w-3.5 shrink-0" />
                   Department Panel
-                </button>
-              )}
-              {session && canAccessDpsCad(session) && (
-                <button
-                  type="button"
-                  onClick={() => { navigate('/dps_cad'); finish(); }}
-                  className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs font-bold text-[#7a90aa] hover:bg-white/5 hover:text-[#4384ff]"
-                >
-                  <Monitor className="h-3.5 w-3.5 shrink-0" />
-                  DPS CAD
                 </button>
               )}
             </div>
@@ -273,7 +259,7 @@ function DpsSidebarContent({
   );
 }
 
-export function DpsModernShell({
+export function DphModernShell({
   tabs,
   activeTab,
   setActiveTab,
@@ -297,7 +283,7 @@ export function DpsModernShell({
   onDepartmentPanel,
   navigate,
   children,
-}: DpsModernShellProps) {
+}: DphModernShellProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
@@ -307,7 +293,7 @@ export function DpsModernShell({
     return () => { document.body.style.overflow = prev; };
   }, [mobileNavOpen]);
 
-  const sidebarProps: DpsSidebarContentProps = {
+  const sidebarProps: DphSidebarContentProps = {
     username,
     rank,
     isLoading,
@@ -334,21 +320,21 @@ export function DpsModernShell({
 
   return (
     <main className="min-h-screen bg-[#030810] text-white">
-      <div className="relative z-50 border-b border-[#4384ff]/25 bg-gradient-to-r from-[#0a1a32] via-[#102040] to-[#0a1a32] px-4 py-2 text-center">
-        <p className="text-[11px] font-bold tracking-wide text-[#9ec5ff]">
-          <Sparkles className="mr-1.5 inline h-3.5 w-3.5 text-[#4384ff]" />
-          Preview DPS layout — tell us if you want this as the new department page
+      <div className="relative z-50 border-b border-[#34d399]/25 bg-gradient-to-r from-[#0a1a32] via-[#102040] to-[#0a1a32] px-4 py-2 text-center">
+        <p className="text-[11px] font-bold tracking-wide text-[#a7f3d0]">
+          <Sparkles className="mr-1.5 inline h-3.5 w-3.5 text-[#34d399]" />
+          Preview DPH layout — tell us if you want this as the new department page
         </p>
       </div>
 
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -left-32 top-0 h-96 w-96 rounded-full bg-[#4384ff]/8 blur-3xl" />
+        <div className="absolute -left-32 top-0 h-96 w-96 rounded-full bg-[#34d399]/8 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#f4c542]/5 blur-3xl" />
       </div>
 
       <div className="relative flex min-h-[calc(100vh-36px)] flex-col lg:flex-row">
         <aside className="hidden lg:flex lg:w-[300px] lg:flex-col lg:overflow-hidden lg:border-r lg:border-[#132033] lg:bg-[#050b14]/95 lg:backdrop-blur-xl lg:fixed lg:inset-y-0 lg:top-[36px] lg:z-30">
-          <DpsSidebarContent {...sidebarProps} />
+          <DphSidebarContent {...sidebarProps} />
         </aside>
 
         {mobileNavOpen && (
@@ -360,7 +346,7 @@ export function DpsModernShell({
               onClick={() => setMobileNavOpen(false)}
             />
             <aside className="fixed inset-y-0 left-0 z-[60] flex w-[min(300px,88vw)] flex-col overflow-hidden border-r border-[#132033] bg-[#050b14] shadow-2xl lg:hidden">
-              <DpsSidebarContent {...sidebarProps} showClose onClose={() => setMobileNavOpen(false)} />
+              <DphSidebarContent {...sidebarProps} showClose onClose={() => setMobileNavOpen(false)} />
             </aside>
           </>
         )}
@@ -378,7 +364,7 @@ export function DpsModernShell({
               </button>
               <div className="min-w-0">
                 <p className="truncate text-sm font-black text-white">{tabTitle}</p>
-                <p className="truncate text-[10px] font-bold uppercase tracking-[0.16em] text-[#4384ff]">{rank || 'Unranked'}</p>
+                <p className="truncate text-[10px] font-bold uppercase tracking-[0.16em] text-[#34d399]">{rank || 'Unranked'}</p>
               </div>
             </div>
             <div className="hidden lg:block">
@@ -396,7 +382,7 @@ export function DpsModernShell({
                 <button
                   type="button"
                   onClick={() => setProfileOpen(o => !o)}
-                  className="h-9 w-9 overflow-hidden rounded-xl border-2 border-[#243650] transition hover:border-[#4384ff] sm:h-10 sm:w-10"
+                  className="h-9 w-9 overflow-hidden rounded-xl border-2 border-[#243650] transition hover:border-[#34d399] sm:h-10 sm:w-10"
                 >
                   <ProfileAvatar session={session} username={username} />
                 </button>
@@ -404,7 +390,7 @@ export function DpsModernShell({
                   <div className="absolute right-0 top-11 z-50 w-56 overflow-hidden rounded-xl border border-[#1a2d45] bg-[#0a121c] shadow-2xl sm:top-12">
                     <div className="border-b border-[#132033] px-4 py-3">
                       <p className="text-sm font-black text-white">{username}</p>
-                      <p className="text-[11px] text-[#4384ff]">{rank || 'Unranked'}</p>
+                      <p className="text-[11px] text-[#34d399]">{rank || 'Unranked'}</p>
                     </div>
                     <button
                       type="button"
@@ -422,8 +408,8 @@ export function DpsModernShell({
           </header>
 
           <div className="flex-1 px-4 py-6 pb-24 sm:px-6 sm:py-8 lg:px-10 lg:py-10 lg:pb-10">
-            <div className="mb-6 overflow-hidden rounded-2xl border border-[#1a3050] bg-gradient-to-br from-[#0d1a30] via-[#0a1424] to-[#060c14] p-5 sm:p-6 lg:mb-8">
-              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#4384ff] sm:text-[11px]">Department of Public Safety</p>
+            <div className="mb-6 overflow-hidden rounded-2xl border border-[#1a4030] bg-gradient-to-br from-[#0d1a30] via-[#0a1424] to-[#060c14] p-5 sm:p-6 lg:mb-8">
+              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#34d399] sm:text-[11px]">Department of Public Health</p>
               <h2 className="mt-2 text-2xl font-black tracking-tight text-white sm:text-3xl lg:text-4xl">{tabTitle}</h2>
               <p className="mt-2 max-w-3xl text-xs leading-relaxed text-[#8fa3bc] sm:text-sm">{tabSubtitle}</p>
             </div>
@@ -431,7 +417,7 @@ export function DpsModernShell({
             <div className="relative min-h-[280px]">
               {pageLoading && (
                 <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-[#030810]/85 backdrop-blur-[1px]">
-                  <PageLoadingScreen loading label="Loading…" accent="#4384ff" minHeightClass="min-h-0" />
+                  <PageLoadingScreen loading label="Loading…" accent="#34d399" minHeightClass="min-h-0" />
                 </div>
               )}
               <div className={pageLoading ? 'pointer-events-none opacity-0' : 'opacity-100 transition-opacity duration-150'}>
@@ -453,10 +439,10 @@ export function DpsModernShell({
                       else setActiveTab(id);
                     }}
                     className={`flex flex-col items-center justify-center gap-1 px-2 py-2.5 text-[10px] font-bold transition-colors ${
-                      active ? 'text-[#4384ff]' : 'text-[#5a7090] hover:text-[#9eb4cc]'
+                      active ? 'text-[#34d399]' : 'text-[#5a7090] hover:text-[#9eb4cc]'
                     }`}
                   >
-                    <Icon className={`h-5 w-5 ${active ? 'text-[#4384ff]' : ''}`} />
+                    <Icon className={`h-5 w-5 ${active ? 'text-[#34d399]' : ''}`} />
                     <span>{label}</span>
                   </button>
                 );

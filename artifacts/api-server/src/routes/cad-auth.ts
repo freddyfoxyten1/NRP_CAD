@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool, isMongoStore, usersRepo } from "@workspace/db";
 import { canSignInForCadMode } from "../lib/discord-auth";
+import { applySuperAdminSessionOverrides } from "../lib/superadmin";
 import { heartbeat } from "../lib/online-tracker";
 
 const router = Router();
@@ -107,6 +108,8 @@ router.post("/cad-auth/sign-in", async (req, res) => {
                 COALESCE(NULLIF(d.dps_rank,''), p.dps_rank) AS dps_rank,
                 COALESCE(NULLIF(d.dps_role,''), p.dps_role) AS dps_role,
                 p.staff_rank, p.staff_role,
+                NULLIF(p.discord_id, '') AS discord_id,
+                NULLIF(p.avatar_hash, '') AS avatar_hash,
                 p.password_salt, p.password_hash,
                 COALESCE(p.can_access_iab, false) AS can_access_iab,
                 COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
@@ -144,7 +147,7 @@ router.post("/cad-auth/sign-in", async (req, res) => {
       return;
     }
 
-    res.json({
+    res.json(applySuperAdminSessionOverrides({
       id: account.id,
       username: account.username,
       email: account.email,
@@ -155,12 +158,14 @@ router.post("/cad-auth/sign-in", async (req, res) => {
       dps_role: account.dps_role,
       staff_rank: account.staff_rank,
       staff_role: account.staff_role,
+      discord_id: account.discord_id ?? null,
+      avatar_hash: account.avatar_hash ?? null,
       can_access_iab: Boolean(account.can_access_iab),
       can_access_system_logs: Boolean(account.can_access_system_logs),
       can_access_terms_privacy: Boolean(account.can_access_terms_privacy),
       can_access_terminal_offline: Boolean(account.can_access_terminal_offline),
       can_access_doc_dps_cad: Boolean(account.can_access_doc_dps_cad),
-    });
+    }));
   } catch (err) {
     req.log.error({ err }, "cad-auth/sign-in error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Sign in failed." });
@@ -203,17 +208,15 @@ router.post("/cad-auth/session-status", async (req, res) => {
     }
 
     if (account) heartbeat(account.id);
-    res.json(account ? {
-      active: true,
-      account: {
-        ...account,
-        can_access_iab: Boolean(account.can_access_iab),
-        can_access_system_logs: Boolean(account.can_access_system_logs),
-        can_access_terms_privacy: Boolean(account.can_access_terms_privacy),
-        can_access_terminal_offline: Boolean(account.can_access_terminal_offline),
-        can_access_doc_dps_cad: Boolean(account.can_access_doc_dps_cad),
-      },
-    } : { active: false });
+    const payload = account ? applySuperAdminSessionOverrides({
+      ...account,
+      can_access_iab: Boolean(account.can_access_iab),
+      can_access_system_logs: Boolean(account.can_access_system_logs),
+      can_access_terms_privacy: Boolean(account.can_access_terms_privacy),
+      can_access_terminal_offline: Boolean(account.can_access_terminal_offline),
+      can_access_doc_dps_cad: Boolean(account.can_access_doc_dps_cad),
+    }) : null;
+    res.json(payload ? { active: true, account: payload } : { active: false });
   } catch (err) {
     req.log.error({ err }, "cad-auth/session-status error");
     res.status(500).json({ error: err instanceof Error ? err.message : "Session status check failed." });

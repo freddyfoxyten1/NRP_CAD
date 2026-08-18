@@ -70,7 +70,9 @@ async function denyUnlessSuperAdminForLocked(
 
 // ─── Staff Discord Guild ───────────────────────────────────────────────────────
 // Guild whose roles drive automatic rank assignment.
-const STAFF_GUILD_ID = process.env.STAFF_DISCORD_GUILD_ID ?? "1411760639428399194";
+const STAFF_GUILD_ID = (
+  process.env.STAFF_DISCORD_GUILD_ID ?? "1411760639428399194"
+).trim() || "1411760639428399194";
 
 // Cache of all guild members — populated by the background sync so the
 // member-search endpoint never needs to re-paginate for a search query.
@@ -90,14 +92,265 @@ async function staffDiscordFetch(url: string, init: RequestInit = {}): Promise<g
   return r;
 }
 
+async function readDiscordErrorBody(r: globalThis.Response): Promise<{ code?: number; message?: string }> {
+  return r.json().catch(() => ({})) as Promise<{ code?: number; message?: string }>;
+}
+
+/** True when the bot can see the staff guild at all (must be invited to the server). */
+async function isStaffGuildReachable(): Promise<boolean> {
+  const r = await staffDiscordFetch(`https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}`);
+  return r.ok;
+}
+
+type StaffGuildMemberLookup =
+  | { ok: true; member: StaffGuildMember }
+  | { ok: false; reason: "not_in_guild" | "guild_unreachable" };
+
+async function lookupStaffGuildMember(discordId: string): Promise<StaffGuildMemberLookup> {
+  const trimmed = discordId.trim();
+  if (!trimmed) return { ok: false, reason: "not_in_guild" };
+  const r = await staffDiscordFetch(
+    `https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/members/${trimmed}`,
+  );
+  if (r.ok) {
+    return { ok: true, member: (await r.json()) as StaffGuildMember };
+  }
+  const body = await readDiscordErrorBody(r);
+  if (body.code === 10004 || r.status === 403) {
+    return { ok: false, reason: "guild_unreachable" };
+  }
+  if (r.status === 404 || body.code === 10007) {
+    return { ok: false, reason: "not_in_guild" };
+  }
+  return { ok: false, reason: "guild_unreachable" };
+}
+
 async function getStaffGuildRoles(refresh = false): Promise<Array<{ id: string; name: string; position: number }>> {
   return getDiscordGuildRoles(STAFF_GUILD_ID, { refresh });
 }
 
 const STAFF_MEMBERS_TTL_MS = 5 * 60 * 1000; // 5 min — used by Add Staff Member typeahead
-let _staffMembersFetchRunning: Promise<StaffMemberCacheEntry[]> | null = null;
+let _staffMembersFetchRunning: Promise<StaffGuildMember[]> | null = null;
+
+const staffGuildMembersCache: { members: StaffGuildMember[]; fetchedAt: number } = {
+  members: [],
+  fetchedAt: 0,
+};
 
 type StaffGuildMember = { user: { id: string; username: string; avatar?: string | null }; nick?: string | null; roles: string[] };
+
+type StaffRosterProfileRow = {
+  id: number;
+  discord_id: string | null;
+  discord_username: string | null;
+  staff_rank: string | null;
+  staff_role: string | null;
+};
+
+function rememberStaffGuildMembers(members: StaffGuildMember[]): StaffGuildMember[] {
+  staffGuildMembersCache.members = members;
+  staffGuildMembersCache.fetchedAt = Date.now();
+  staffMembersCache.members = members.map(m => ({
+    id: m.user.id,
+    username: m.user.username,
+    nick: m.nick ?? null,
+  }));
+  staffMembersCache.fetchedAt = Date.now();
+  return members;
+}
+
+async function getStaffGuildMembersCached(force = false): Promise<StaffGuildMember[]> {
+  const fresh =
+    !force &&
+    staffGuildMembersCache.members.length > 0 &&
+    Date.now() - staffGuildMembersCache.fetchedAt < STAFF_MEMBERS_TTL_MS;
+  if (fresh) return staffGuildMembersCache.members;
+
+  if (!_staffMembersFetchRunning) {
+    _staffMembersFetchRunning = fetchStaffGuildMembers()
+      .finally(() => { _staffMembersFetchRunning = null; });
+  }
+  return _staffMembersFetchRunning;
+}
+
+function findStaffGuildMember(
+  row: Pick<StaffRosterProfileRow, "discord_id" | "discord_username">,
+  allMembers: StaffGuildMember[],
+): StaffGuildMember | undefined {
+  const discordId = String(row.discord_id ?? "").trim();
+  if (discordId) {
+    return allMembers.find(m => m.user.id === discordId);
+  }
+  const username = String(row.discord_username ?? "").trim().toLowerCase();
+  if (username) {
+    return allMembers.find(m => m.user.username.toLowerCase() === username);
+  }
+  return undefined;
+}
+
+/** Load every profile that appears on the staff roster (Mongo-safe — no ANY()). */
+async function loadStaffRosterProfiles(): Promise<StaffRosterProfileRow[]> {
+  const groupsRes = await pool.query<{ name: string }>(`SELECT name FROM staff_rank_groups`);
+  const ranksRes = await pool.query<{ name: string }>(`SELECT name FROM staff_ranks`);
+  const groupNamesLower = new Set(
+    groupsRes.rows.map(r => String(r.name ?? "").trim().toLowerCase()).filter(Boolean),
+  );
+  const rankNamesLower = new Set(
+    ranksRes.rows.map(r => String(r.name ?? "").trim().toLowerCase()).filter(Boolean),
+  );
+
+  const profilesRes = await pool.query<StaffRosterProfileRow>(
+    `SELECT id, discord_id, discord_username, staff_rank, staff_role
+     FROM cad_user_profiles`,
+  );
+
+  return profilesRes.rows.filter((row) => {
+    const role = String(row.staff_role ?? "").trim().toLowerCase();
+    const rank = String(row.staff_rank ?? "").trim().toLowerCase();
+    return (role && groupNamesLower.has(role)) || (rank && rankNamesLower.has(rank));
+  });
+}
+
+async function clearStaffRosterMembership(profileId: number): Promise<void> {
+  await pool.query(
+    `UPDATE cad_user_profiles SET staff_rank = NULL, staff_role = NULL, updated_at = NOW() WHERE id = $1`,
+    [profileId],
+  );
+}
+
+/**
+ * Remove staff roster rows when the member left the staff Discord guild or no
+ * longer holds the Discord role linked to their staff rank.
+ */
+async function pruneStaffRosterFromDiscord(
+  allMembers: StaffGuildMember[],
+  linkedRanks: Array<{ name: string; discord_role_id: string }>,
+): Promise<number> {
+  if (!process.env.DISCORD_BOT_TOKEN) return 0;
+
+  const linkedRankNamesLower = new Map<string, string>();
+  for (const rank of linkedRanks) {
+    const roleId = String(rank.discord_role_id ?? "").trim();
+    const name = String(rank.name ?? "").trim().toLowerCase();
+    if (roleId && name) linkedRankNamesLower.set(name, roleId);
+  }
+
+  const rosterProfiles = await loadStaffRosterProfiles();
+  let removed = 0;
+
+  for (const row of rosterProfiles) {
+    const rankLower = String(row.staff_rank ?? "").trim().toLowerCase();
+    const linkedRoleId = rankLower ? linkedRankNamesLower.get(rankLower) : undefined;
+    const guildMember = findStaffGuildMember(row, allMembers);
+
+    let shouldRemove = false;
+    if (!guildMember) {
+      shouldRemove = true;
+    } else if (linkedRoleId && !guildMember.roles.includes(linkedRoleId)) {
+      shouldRemove = true;
+    }
+
+    if (!shouldRemove) continue;
+
+    try {
+      await clearStaffRosterMembership(row.id);
+      removed += 1;
+    } catch (e) {
+      console.warn(`[staff-prune] remove profile_id ${row.id}:`, e);
+    }
+  }
+
+  if (removed > 0) {
+    console.info(`[staff-prune] removed ${removed} member(s) not in guild or without linked rank role`);
+  }
+  return removed;
+}
+
+/** Fallback when the bulk guild member list is unavailable (e.g. missing Members intent). */
+async function pruneStaffRosterViaMemberLookup(
+  linkedRanks: Array<{ name: string; discord_role_id: string }>,
+): Promise<{ removed: number; errors: string[] }> {
+  const errors: string[] = [];
+  const linkedRankNamesLower = new Map<string, string>();
+  for (const rank of linkedRanks) {
+    const roleId = String(rank.discord_role_id ?? "").trim();
+    const name = String(rank.name ?? "").trim().toLowerCase();
+    if (roleId && name) linkedRankNamesLower.set(name, roleId);
+  }
+
+  const rosterProfiles = await loadStaffRosterProfiles();
+  let removed = 0;
+
+  for (const row of rosterProfiles) {
+    const discordId = String(row.discord_id ?? "").trim();
+    if (!discordId) {
+      try {
+        await clearStaffRosterMembership(row.id);
+        removed += 1;
+      } catch (e) {
+        errors.push(`remove profile_id ${row.id}: ${String(e)}`);
+      }
+      continue;
+    }
+
+    const lookup = await lookupStaffGuildMember(discordId);
+    if (lookup.ok === false && lookup.reason === "guild_unreachable") {
+      errors.push(
+        `Cannot access staff Discord server ${STAFF_GUILD_ID}. Invite the DOJCAD bot to that server and verify STAFF_DISCORD_GUILD_ID.`,
+      );
+      break;
+    }
+
+    const rankLower = String(row.staff_rank ?? "").trim().toLowerCase();
+    const linkedRoleId = rankLower ? linkedRankNamesLower.get(rankLower) : undefined;
+    let shouldRemove = lookup.ok === false && lookup.reason === "not_in_guild";
+    if (!shouldRemove && lookup.ok && linkedRoleId && !lookup.member.roles.includes(linkedRoleId)) {
+      shouldRemove = true;
+    }
+
+    if (!shouldRemove) continue;
+
+    try {
+      await clearStaffRosterMembership(row.id);
+      removed += 1;
+    } catch (e) {
+      errors.push(`remove profile_id ${row.id}: ${String(e)}`);
+    }
+  }
+
+  if (removed > 0) {
+    console.info(`[staff-prune] member lookup removed ${removed} staff roster row(s)`);
+  }
+  return { removed, errors };
+}
+
+let _lastStaffRosterPruneMs = 0;
+const STAFF_ROSTER_PRUNE_DEBOUNCE_MS = 10_000;
+
+async function pruneStaffRosterDebounced(): Promise<number> {
+  const now = Date.now();
+  if (now - _lastStaffRosterPruneMs < STAFF_ROSTER_PRUNE_DEBOUNCE_MS) return 0;
+  _lastStaffRosterPruneMs = now;
+  if (!process.env.DISCORD_BOT_TOKEN) return 0;
+  try {
+    const ranksRes = await pool.query<{ name: string; discord_role_id: string }>(
+      `SELECT name, discord_role_id FROM staff_ranks WHERE discord_role_id IS NOT NULL AND discord_role_id != ''`,
+    );
+    if (await isStaffGuildReachable()) {
+      try {
+        const allMembers = await getStaffGuildMembersCached(true);
+        return await pruneStaffRosterFromDiscord(allMembers, ranksRes.rows);
+      } catch (fetchErr) {
+        console.warn("[staff-prune] bulk fetch failed, using member lookup:", fetchErr);
+      }
+    }
+    const fallback = await pruneStaffRosterViaMemberLookup(ranksRes.rows);
+    return fallback.removed;
+  } catch (err) {
+    console.warn("[staff-prune] debounced prune failed:", err);
+    return 0;
+  }
+}
 
 /** Paginate staff guild (1411760639428399194) and refresh the in-memory member cache. */
 async function fetchStaffGuildMembers(): Promise<StaffGuildMember[]> {
@@ -109,7 +362,11 @@ async function fetchStaffGuildMembers(): Promise<StaffGuildMember[]> {
   for (;;) {
     const url = `https://discord.com/api/v10/guilds/${STAFF_GUILD_ID}/members?limit=1000${after !== "0" ? `&after=${after}` : ""}`;
     const r = await staffDiscordFetch(url);
-    if (!r.ok) throw new Error(`Staff members fetch failed: ${r.status}`);
+    if (!r.ok) {
+      const body = await readDiscordErrorBody(r);
+      const detail = body.message ? `: ${body.message}` : "";
+      throw new Error(`Staff members fetch failed: HTTP ${r.status}${detail} (guild ${STAFF_GUILD_ID})`);
+    }
     const batch = (await r.json()) as StaffGuildMember[];
     if (batch.length === 0) break;
     allMembers = allMembers.concat(batch);
@@ -117,13 +374,7 @@ async function fetchStaffGuildMembers(): Promise<StaffGuildMember[]> {
     after = batch[batch.length - 1].user.id;
   }
 
-  staffMembersCache.members = allMembers.map(m => ({
-    id: m.user.id,
-    username: m.user.username,
-    nick: m.nick ?? null,
-  }));
-  staffMembersCache.fetchedAt = Date.now();
-  return allMembers;
+  return rememberStaffGuildMembers(allMembers);
 }
 
 /** Persist Discord avatars onto matching CAD profiles (by discord_id). Only writes when changed. */
@@ -133,18 +384,20 @@ async function refreshCadAvatarsFromGuildMembers(
   const withAvatar = members.filter(m => (m.user.avatar?.trim() ?? "") !== "");
   if (withAvatar.length === 0) return;
 
-  const ids = withAvatar.map(m => m.user.id);
+  const idSet = new Set(withAvatar.map(m => m.user.id));
   let existing = new Map<string, { avatar_hash: string | null; discord_username: string | null }>();
   try {
     const { rows } = await pool.query<{
-      discord_id: string; avatar_hash: string | null; discord_username: string | null;
+      discord_id: string | null; avatar_hash: string | null; discord_username: string | null;
     }>(
-      `SELECT discord_id, avatar_hash, discord_username
-         FROM cad_user_profiles
-        WHERE discord_id = ANY($1::text[])`,
-      [ids],
+      `SELECT discord_id, avatar_hash, discord_username FROM cad_user_profiles`,
     );
-    existing = new Map(rows.map(r => [r.discord_id, r]));
+    for (const row of rows) {
+      const discordId = String(row.discord_id ?? "").trim();
+      if (discordId && idSet.has(discordId)) {
+        existing.set(discordId, row);
+      }
+    }
   } catch { /* fall through — skip bulk refresh if lookup fails */ return; }
 
   for (const m of withAvatar) {
@@ -170,18 +423,8 @@ async function refreshCadAvatarsFromGuildMembers(
 
 /** Ensure the staff guild member cache is warm (for Add Staff Member search). */
 async function ensureStaffMembersCache(force = false): Promise<StaffMemberCacheEntry[]> {
-  const fresh =
-    !force &&
-    staffMembersCache.members.length > 0 &&
-    Date.now() - staffMembersCache.fetchedAt < STAFF_MEMBERS_TTL_MS;
-  if (fresh) return staffMembersCache.members;
-
-  if (!_staffMembersFetchRunning) {
-    _staffMembersFetchRunning = fetchStaffGuildMembers()
-      .then(() => staffMembersCache.members)
-      .finally(() => { _staffMembersFetchRunning = null; });
-  }
-  return _staffMembersFetchRunning;
+  await getStaffGuildMembersCached(force);
+  return staffMembersCache.members;
 }
 
 async function ensureCadProfileForStaffDiscordMember(
@@ -251,9 +494,13 @@ async function ensureCadProfileForStaffDiscordMember(
 async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: number; removed: number; errors: string[] }> {
   const tok = process.env.DISCORD_BOT_TOKEN;
   if (!tok) return { assigned: 0, skipped: 0, removed: 0, errors: ["No DISCORD_BOT_TOKEN configured"] };
+
+  staffGuildMembersCache.members = [];
+  staffGuildMembersCache.fetchedAt = 0;
+  staffMembersCache.members = [];
+  staffMembersCache.fetchedAt = 0;
+
   try {
-    // 1. Get all ranks linked to a Discord role (include sort_order so we can
-    //    pick the highest-ranked role when a member holds more than one)
     const ranksRes = await pool.query<{ name: string; discord_role_id: string; group_id: number | null; sort_order: number }>(
       `SELECT name, discord_role_id, group_id, sort_order FROM staff_ranks WHERE discord_role_id IS NOT NULL AND discord_role_id != ''`
     );
@@ -266,19 +513,38 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
     const rankMap = buildLinkedRankByRoleId(ranksRes.rows, groupSortById, groupNameById);
     const linkedRoleIds = [...rankMap.keys()];
 
-    // 2. Always refresh staff guild members first (needed for Add Staff search
-    //    even when no ranks are Discord-linked yet).
-    const allMembers = await fetchStaffGuildMembers();
-    // Keep roster avatars in sync with Discord for every CAD profile we can match.
-    await refreshCadAvatarsFromGuildMembers(allMembers);
-
     let assigned = 0; let skipped = 0; let removed = 0; const errors: string[] = [];
 
-    // 3. Assign staff ranks to matching CAD profiles
-    if (linkedRoleIds.length > 0) {
+    if (!(await isStaffGuildReachable())) {
+      const hint = `Cannot access staff Discord server ${STAFF_GUILD_ID}. Invite the DOJCAD bot to that server and verify STAFF_DISCORD_GUILD_ID on the VPS.`;
+      errors.push(hint);
+      const fallback = await pruneStaffRosterViaMemberLookup(ranksRes.rows);
+      removed += fallback.removed;
+      errors.push(...fallback.errors.filter(e => e !== hint));
+      return { assigned, skipped, removed, errors: [...new Set(errors)] };
+    }
+
+    let allMembers: StaffGuildMember[] | null = null;
+    try {
+      allMembers = await fetchStaffGuildMembers();
+      try {
+        await refreshCadAvatarsFromGuildMembers(allMembers);
+      } catch (avatarErr) {
+        console.warn("[staff-sync] avatar refresh failed:", avatarErr);
+      }
+    } catch (fetchErr) {
+      const msg = String(fetchErr);
+      errors.push(msg);
+      console.warn("[staff-sync] bulk member fetch failed, using per-member lookup:", fetchErr);
+      const fallback = await pruneStaffRosterViaMemberLookup(ranksRes.rows);
+      removed += fallback.removed;
+      for (const err of fallback.errors) {
+        if (!errors.includes(err)) errors.push(err);
+      }
+    }
+
+    if (allMembers && linkedRoleIds.length > 0) {
       for (const m of allMembers) {
-        // Collect every linked role this member holds, then pick the one with
-        // the lowest sort_order (= highest position in the rank hierarchy).
         const matchingRids = m.roles.filter(r => linkedRoleIds.includes(r));
         if (matchingRids.length === 0) continue;
         const rid = pickHighestLinkedDiscordRole(matchingRids, rankMap);
@@ -307,46 +573,8 @@ async function syncStaffDiscordRoles(): Promise<{ assigned: number; skipped: num
       }
     }
 
-    // 4. Remove staff ranks from members whose linked Discord role was taken away
-    const linkedRankNames = ranksRes.rows.map(r => r.name);
-    if (linkedRankNames.length > 0) {
-      const staffWithLinkedRank = await pool.query<{
-        id: number; discord_id: string | null; discord_username: string | null; staff_rank: string;
-      }>(
-        `SELECT id, discord_id, discord_username, staff_rank
-         FROM cad_user_profiles
-         WHERE staff_rank = ANY($1::text[])`,
-        [linkedRankNames],
-      );
-
-      // Build sets of members who still hold a linked role
-      const activeByDiscordId = new Set<string>(
-        allMembers
-          .filter(m => m.roles.some(r => linkedRoleIds.includes(r)))
-          .map(m => m.user.id)
-      );
-      const activeByUsername = new Set<string>(
-        allMembers
-          .filter(m => m.roles.some(r => linkedRoleIds.includes(r)))
-          .map(m => m.user.username.toLowerCase())
-      );
-
-      for (const row of staffWithLinkedRank.rows) {
-        const stillHasRole =
-          (row.discord_id != null && activeByDiscordId.has(row.discord_id)) ||
-          (row.discord_id == null && row.discord_username != null &&
-            activeByUsername.has(row.discord_username.toLowerCase()));
-
-        if (!stillHasRole) {
-          try {
-            await pool.query(
-              `UPDATE cad_user_profiles SET staff_rank = NULL, staff_role = NULL WHERE id = $1`,
-              [row.id]
-            );
-            removed++;
-          } catch (e) { errors.push(`remove profile_id ${row.id}: ${String(e)}`); }
-        }
-      }
+    if (allMembers) {
+      removed += await pruneStaffRosterFromDiscord(allMembers, ranksRes.rows);
     }
 
     await writeLog("staff", "System", "Discord role sync completed",
@@ -499,48 +727,49 @@ router.get("/staff/users/search", async (req, res) => {
 });
 
 // ── GET /staff/roster — list staff members ────────────────────────────────────
+/** Mongo-safe staff roster rows for API responses. */
+async function queryStaffRosterRows(includeInactive: boolean): Promise<Record<string, unknown>[]> {
+  const ranksRes = await pool.query<{ name: string; sort_order: number }>(
+    `SELECT name, sort_order FROM staff_ranks`,
+  );
+  const rankOrderByName = new Map(
+    ranksRes.rows.map(r => [String(r.name).trim().toLowerCase(), Number(r.sort_order ?? 999_999)]),
+  );
+
+  const profilesRes = await pool.query<Record<string, unknown>>(
+    `SELECT p.id, p.username, p.discord_username, p.discord_id, p.avatar_hash,
+            p.staff_rank, p.staff_role, p.status, p.staff_appointed_date,
+            COALESCE(p.can_access_iab, false) AS can_access_iab,
+            COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
+            COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
+            COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline,
+            COALESCE(p.can_access_doc_dps_cad, false) AS can_access_doc_dps_cad
+     FROM cad_user_profiles p`,
+  );
+
+  const rosterIds = new Set((await loadStaffRosterProfiles()).map(r => r.id));
+  const rows = profilesRes.rows.filter((row) => {
+    const id = Number(row.id);
+    if (!rosterIds.has(id)) return false;
+    if (includeInactive) return true;
+    return String(row.status ?? "active").trim().toLowerCase() !== "inactive";
+  });
+
+  return sortStaffByRank(rows.map(normalizeStaffMemberRow), rankOrderByName);
+}
+
 router.get("/staff/roster", async (req, res) => {
   const all = req.query.all === "1";
   try {
-    const groupsRes = await pool.query<{ name: string }>(`SELECT name FROM staff_rank_groups`);
-    const ranksRes = await pool.query<{ name: string; sort_order: number }>(
-      `SELECT name, sort_order FROM staff_ranks`,
-    );
-    const groupNames = groupsRes.rows.map(r => String(r.name).trim().toLowerCase()).filter(Boolean);
-    const rankNames = ranksRes.rows.map(r => String(r.name).trim().toLowerCase()).filter(Boolean);
-    const rankOrderByName = new Map(
-      ranksRes.rows.map(r => [String(r.name).trim().toLowerCase(), Number(r.sort_order ?? 999_999)]),
-    );
-
-    const r = await pool.query(
-      `SELECT p.id, p.username, p.discord_username, p.discord_id, p.avatar_hash,
-              p.staff_rank, p.staff_role, p.status, p.staff_appointed_date,
-              COALESCE(p.can_access_iab, false) AS can_access_iab,
-              COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
-              COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
-              COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline,
-              COALESCE(p.can_access_doc_dps_cad, false) AS can_access_doc_dps_cad
-       FROM cad_user_profiles p
-       LEFT JOIN staff_ranks sr ON lower(sr.name) = lower(COALESCE(p.staff_rank, ''))
-       WHERE (
-         lower(COALESCE(p.staff_role, '')) = ANY($1::text[])
-         OR (
-           p.staff_rank IS NOT NULL AND p.staff_rank != ''
-           AND lower(p.staff_rank) = ANY($2::text[])
-         )
-       )
-         ${all ? "" : "AND lower(COALESCE(p.status, 'active')) != 'inactive'"}
-       ORDER BY COALESCE(sr.sort_order, 999999), p.username`,
-      [groupNames, rankNames],
-    );
-    res.json(sortStaffByRank(r.rows.map(normalizeStaffMemberRow), rankOrderByName));
+    void pruneStaffRosterDebounced().catch((pruneErr) => {
+      req.log.warn({ err: pruneErr }, "staff/roster GET prune failed");
+    });
+    res.json(await queryStaffRosterRows(all));
   } catch (err) {
     req.log?.error?.({ err }, "staff/roster GET error");
     res.status(500).json({ error: "Unable to load staff roster." });
   }
 });
-
-// ── POST /staff/roster/:id/permissions/clear — revoke Access Permissions for one member
 router.post("/staff/roster/:id/permissions/clear", async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {

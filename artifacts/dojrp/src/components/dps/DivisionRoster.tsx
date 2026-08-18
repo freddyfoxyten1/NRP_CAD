@@ -1,4 +1,4 @@
-import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, BookOpen, ChevronDown, ChevronRight, ChevronUp, ClipboardList, FileText, FolderOpen,
   GripVertical, Info, Layers, Pencil, Plus, Radio, RefreshCw, Search, Settings, Trash2, UserMinus, UserPlus, Users, X,
@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { isPdfLikeResource, resourceTypeLabel } from '@/lib/resource-type';
 import ImageInput from '@/components/shared/ImageInput';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
+import { useDiscordPresence } from '@/hooks/useDiscordPresence';
+import { DiscordStatusBadge } from '@/components/shared/DiscordStatusBadge';
 
 export type DpsDivision = {
   id: number;
@@ -275,6 +277,9 @@ export function DivisionRosterView({
   const [cardSearch, setCardSearch] = useState('');
   const [divisionResources, setDivisionResources] = useState<DivisionResource[]>([]);
   const [resourcesLoading, setResourcesLoading] = useState(false);
+
+  const discordIds = useMemo(() => members.map(m => m.discord_id), [members]);
+  const discordPresence = useDiscordPresence(discordIds);
 
   useEffect(() => {
     fetch(`${apiBase}/divisions`, { headers: { accept: 'application/json' } })
@@ -642,7 +647,7 @@ export function DivisionRosterView({
   })();
 
   const toggle = (label: string) => setCollapsed(p => ({ ...p, [label]: !p[label] }));
-  const colCount = 8;
+  const colCount = 9;
 
   return (
     <div className="rounded-xl border border-[#172235] bg-[#0d1422] shadow-[0_22px_55px_rgba(0,0,0,0.22)] overflow-hidden">
@@ -685,6 +690,7 @@ export function DivisionRosterView({
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-36">DPS Rank</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-24">Callsign</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-20">Status</th>
+                <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-28">Discord Status</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-28">Appointed</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Discord ID</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Certifications</th>
@@ -770,6 +776,11 @@ export function DivisionRosterView({
                             </span>
                           </td>
                           <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                          <td className="px-4 py-3.5">
+                            <DiscordStatusBadge
+                              status={m.discord_id ? (discordPresence[m.discord_id] ?? 'offline') : 'offline'}
+                            />
+                          </td>
                           <td className="px-4 py-3.5 text-[#8392aa]">{formatDate(m.appointed_date)}</td>
                           <td className="px-4 py-3.5">
                             <span className="font-mono text-[11px] text-[#526179]">{m.discord_id || '—'}</span>
@@ -1937,6 +1948,9 @@ export function DivisionPanelSection({
   const [accessSavingKey, setAccessSavingKey] = useState<string | null>(null);
   const [syncingDiscord, setSyncingDiscord] = useState(false);
 
+  const panelDiscordIds = useMemo(() => members.map(m => m.discord_id), [members]);
+  const panelDiscordPresence = useDiscordPresence(panelDiscordIds);
+
   const handleSyncDivisionDiscord = async () => {
     setSyncingDiscord(true);
     try {
@@ -3060,6 +3074,7 @@ export function DivisionPanelSection({
                   <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Division Rank</th>
                   <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Callsign</th>
                   <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Status</th>
+                  <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Discord Status</th>
                   <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Actions</th>
                 </tr>
               </thead>
@@ -3098,6 +3113,11 @@ export function DivisionPanelSection({
                       </td>
                       <td className="px-4 py-3.5 font-black text-[#4384ff]">{m.callsign || '—'}</td>
                       <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                      <td className="px-4 py-3.5">
+                        <DiscordStatusBadge
+                          status={m.discord_id ? (panelDiscordPresence[m.discord_id] ?? 'offline') : 'offline'}
+                        />
+                      </td>
                       <td className="px-4 py-3.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {fullAccess && (

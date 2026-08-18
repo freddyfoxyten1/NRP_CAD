@@ -121,6 +121,26 @@ const DEPARTMENTS: DepartmentEntry[] = [
   },
 ];
 
+function resolveMemberPortalDepartments(
+  depts: DepartmentEntry[],
+  options: { superAdmin: boolean; canAccessIab: boolean },
+): DepartmentEntry[] {
+  const unlockPaths: Record<string, string> = {
+    doc: '/doc_information',
+    iab: '/dps_internal-affairs',
+    dot: '/dot_information',
+    civilian: '/civilian_operations',
+  };
+
+  return depts.map((dept) => {
+    if (dept.key === 'iab' && options.canAccessIab && !options.superAdmin) {
+      return { ...dept, live: true, path: unlockPaths.iab };
+    }
+    if (!options.superAdmin || !unlockPaths[dept.key]) return dept;
+    return { ...dept, live: true, path: unlockPaths[dept.key] };
+  });
+}
+
 function DepartmentMark({
   dept,
   size = 'sm',
@@ -215,6 +235,7 @@ type PortalSidebarProps = {
   activeNav: string;
   setActiveNav: (nav: string) => void;
   navigate: (path: string) => void;
+  departments: DepartmentEntry[];
   canAccessStaff: boolean;
   canAccessAdminPortal: boolean;
   handleAdminPortal: () => void;
@@ -233,6 +254,7 @@ function PortalSidebarContent({
   activeNav,
   setActiveNav,
   navigate,
+  departments,
   canAccessStaff,
   canAccessAdminPortal,
   handleAdminPortal,
@@ -315,7 +337,7 @@ function PortalSidebarContent({
         </p>
 
         <nav className="space-y-0.5 pb-2">
-          {DEPARTMENTS.map((dept) => (
+          {departments.map((dept) => (
               <button
                 key={dept.key}
                 type="button"
@@ -428,7 +450,13 @@ const MemberPortalModern = () => {
     role,
     canAccessStaff,
     canAccessAdminPortal,
+    superAdmin,
   } = useMemberPortal();
+
+  const departments = resolveMemberPortalDepartments(DEPARTMENTS, {
+    superAdmin,
+    canAccessIab: Boolean(portalData?.profile.can_access_iab),
+  });
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -446,6 +474,7 @@ const MemberPortalModern = () => {
     activeNav,
     setActiveNav,
     navigate,
+    departments,
     canAccessStaff,
     canAccessAdminPortal,
     handleAdminPortal,
@@ -648,7 +677,7 @@ const MemberPortalModern = () => {
                     </div>
                   </div>
                   <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 snap-x snap-mandatory sm:mx-0 sm:grid sm:grid-cols-2 sm:gap-4 sm:overflow-visible sm:px-0 sm:pb-0">
-                    {DEPARTMENTS.map((dept) => (
+                    {departments.map((dept) => (
                         <button
                           key={dept.key}
                           type="button"
