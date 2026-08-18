@@ -1,2 +1,2 @@
-// Thin router — page logic lives in PublicView.page.tsx (preview skin toggle in public-index-skin.ts).
+// Public index — page logic lives in PublicView.page.tsx.
 export { default } from "./PublicView.page";

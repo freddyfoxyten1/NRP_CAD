@@ -3,14 +3,12 @@ import {
   CalendarDays,
   ChevronRight,
   ExternalLink,
-  Flame,
   LayoutDashboard,
-  Shield,
   Users,
   type LucideIcon,
 } from 'lucide-react';
 import { imageStyle } from '@/components/shared/ImageInput';
-import { INDEX_PREVIEW_SKIN, ix, skin } from '@/pages/public-index-skin';
+import { skin } from '@/pages/public-index-skin';
 import type { IndexInfoContent } from '@/lib/index-info-content';
 import { withoutInternalAffairsSubs } from '@/lib/index-info-content';
 
@@ -93,7 +91,6 @@ export default function DepartmentIndexPanel({
   onRoster,
   onEvents,
 }: DepartmentIndexPanelProps) {
-  const Icon: LucideIcon = department === 'dps' ? Shield : Flame;
   const short = department === 'dps' ? 'DPS' : 'DPH';
 
   const description = info?.description?.trim() || fallbackDescription;
@@ -109,14 +106,11 @@ export default function DepartmentIndexPanel({
   const apiSubs = withoutInternalAffairsSubs(info?.sub_departments);
   const subDepartments = apiSubs.length > 0 ? apiSubs : fallbackSubDepartments;
 
-  const primaryBtn = INDEX_PREVIEW_SKIN
-    ? 'inline-flex w-fit items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-xs font-black text-[#0a1018] transition hover:bg-[#e4eaf2]'
-    : `inline-flex w-fit items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-black text-white transition hover:-translate-y-0.5 ${primaryBtnClass}`;
+  const primaryBtn =
+    'inline-flex w-fit items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-xs font-black text-[#0a1018] transition hover:bg-[#e4eaf2]';
 
-  const ghostBtn = ix(
-    'inline-flex w-fit items-center gap-2 rounded-lg border border-[#3a5068] bg-transparent px-4 py-2.5 text-xs font-black text-white transition hover:border-[#5a7090] hover:bg-white/5',
-    'inline-flex w-fit items-center gap-2 rounded-lg border border-[#2a4060] bg-transparent px-4 py-2.5 text-xs font-black text-white transition hover:border-[#4a6080] hover:bg-white/5',
-  );
+  const ghostBtn =
+    'inline-flex w-fit items-center gap-2 rounded-lg border border-[#2a4060] bg-transparent px-4 py-2.5 text-xs font-black text-white transition hover:border-[#4a6080] hover:bg-white/5';
 
   return (
     <section className={`overflow-hidden ${skin.panel}`}>
@@ -140,11 +134,7 @@ export default function DepartmentIndexPanel({
               <div
                 className="flex h-full min-h-[220px] w-full items-center justify-center bg-gradient-to-br from-[#0d1a30] via-[#0a1424] to-[#060c14] md:min-h-full"
               >
-                {INDEX_PREVIEW_SKIN ? (
-                  <img src={sealUrl} alt="" className="h-24 w-24 object-contain opacity-90 drop-shadow-2xl sm:h-28 sm:w-28" />
-                ) : (
-                  <Icon className="h-20 w-20 opacity-40" style={{ color: accent }} />
-                )}
+                <img src={sealUrl} alt="" className="h-24 w-24 object-contain opacity-90 drop-shadow-2xl sm:h-28 sm:w-28" />
               </div>
             )}
 
@@ -157,27 +147,18 @@ export default function DepartmentIndexPanel({
             <div>
               <h2 className="flex flex-wrap items-center gap-2.5 text-xl font-black leading-tight tracking-tight text-white sm:text-2xl">
                 <span>{title}</span>
-                {INDEX_PREVIEW_SKIN ? (
-                  <img
-                    src={sealUrl}
-                    alt=""
-                    className="h-8 w-8 shrink-0 object-contain sm:h-9 sm:w-9"
-                  />
-                ) : (
-                  <span
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[#1a2d45] bg-[#0a1525]/80 sm:h-9 sm:w-9"
-                    style={{ color: accent }}
-                  >
-                    <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
-                  </span>
-                )}
+                <img
+                  src={sealUrl}
+                  alt=""
+                  className="h-8 w-8 shrink-0 object-contain sm:h-9 sm:w-9"
+                />
               </h2>
               {tagline && (
                 <p className="mt-1.5 text-xs font-semibold sm:text-sm" style={{ color: accentMuted }}>
                   {tagline}
                 </p>
               )}
-              <p className={`mt-3 text-sm leading-relaxed ${ix('text-[#a8b7cd]', 'text-[#8fa3bc]')}`}>
+              <p className="mt-3 text-sm leading-relaxed text-[#8fa3bc]">
                 {description}
               </p>
             </div>
@@ -199,6 +180,23 @@ export default function DepartmentIndexPanel({
                 </a>
               )}
             </nav>
+
+            {subDepartments.length > 0 && (
+              <div>
+                <p className="mb-2 text-[10px] font-black uppercase tracking-[0.22em] text-[#4a6080]">Departments</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {subDepartments.map((sd, i) => (
+                    <span
+                      key={`${sd.name}-${i}`}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[#1a2d45] bg-[#0a1525]/80 px-2.5 py-1 text-[10px] font-bold text-[#9eb4cc]"
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${divisionDotClass}`} />
+                      {sd.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {divisionList.length > 0 && (
               <div>
@@ -232,23 +230,6 @@ export default function DepartmentIndexPanel({
           </div>
         </div>
       </div>
-
-      {/* Departments below the split card */}
-      {subDepartments.length > 0 && (
-        <div className="border-t border-[#132033]/80 px-5 py-5 sm:px-7 sm:py-6">
-          <p className="mb-3 text-[10px] font-black uppercase tracking-[0.22em] text-[#4a6080]">Departments</p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {subDepartments.map((sd, i) => (
-              <article
-                key={`${sd.name}-${i}`}
-                className="rounded-xl border border-[#1a2d45] bg-[#0a1525]/60 px-4 py-3"
-              >
-                <p className="text-xs font-black text-white sm:text-sm">{sd.name}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-      )}
     </section>
   );
 }

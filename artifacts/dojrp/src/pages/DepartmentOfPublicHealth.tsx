@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import DepartmentOfPublicHealthClassic from './DepartmentOfPublicHealth.classic';
 
-/** 'modern' = preview redesign · 'classic' = current DPH layout */
+/** 'modern' = redesigned department layout · 'classic' = previous look */
 const DPH_UI_THEME: 'classic' | 'modern' = 'modern';
 
 const DepartmentOfPublicHealth = () => (

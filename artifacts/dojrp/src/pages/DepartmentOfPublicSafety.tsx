@@ -5,7 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import DepartmentOfPublicSafetyClassic from './DepartmentOfPublicSafety.classic';
 
-/** 'modern' = preview redesign · 'classic' = current DPS layout */
+/** 'modern' = redesigned department layout · 'classic' = previous look */
 const DPS_UI_THEME: 'classic' | 'modern' = 'modern';
 
 const DepartmentOfPublicSafety = () => (
