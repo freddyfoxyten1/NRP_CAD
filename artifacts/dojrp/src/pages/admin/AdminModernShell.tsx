@@ -5,7 +5,6 @@ import {
   LogOut,
   Menu,
   Shield,
-  Sparkles,
   Users,
   X,
 } from 'lucide-react';
@@ -231,20 +230,13 @@ export function AdminModernShell({
 
   return (
     <main className="min-h-screen bg-[#030810] text-white">
-      <div className="relative z-50 border-b border-[#f4c542]/25 bg-gradient-to-r from-[#0a1a32] via-[#102040] to-[#0a1a32] px-4 py-2 text-center">
-        <p className="text-[11px] font-bold tracking-wide text-[#fde68a]">
-          <Sparkles className="mr-1.5 inline h-3.5 w-3.5 text-[#f4c542]" />
-          Preview Admin Portal layout — tell us if you want this as the new admin page
-        </p>
-      </div>
-
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -left-32 top-0 h-96 w-96 rounded-full bg-[#f4c542]/8 blur-3xl" />
         <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#4384ff]/5 blur-3xl" />
       </div>
 
-      <div className="relative flex min-h-[calc(100vh-36px)] flex-col lg:flex-row">
-        <aside className="hidden lg:flex lg:w-[300px] lg:flex-col lg:overflow-hidden lg:border-r lg:border-[#132033] lg:bg-[#050b14]/95 lg:backdrop-blur-xl lg:fixed lg:inset-y-0 lg:top-[36px] lg:z-30">
+      <div className="relative flex min-h-screen flex-col lg:flex-row">
+        <aside className="hidden lg:flex lg:w-[300px] lg:flex-col lg:overflow-hidden lg:border-r lg:border-[#132033] lg:bg-[#050b14]/95 lg:backdrop-blur-xl lg:fixed lg:inset-y-0 lg:left-0 lg:z-30">
           <AdminSidebarContent {...sidebarProps} />
         </aside>
 

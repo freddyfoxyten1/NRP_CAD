@@ -11,7 +11,7 @@ import {
   CalendarDays, Gamepad2, Users, Megaphone, Image as ImageIcon,
   Newspaper, ChevronLeft, ExternalLink, Calendar, User,
   Radio, Shield, Wifi, Building2, Flame,
-  BookOpen, FileText, X, ShoppingBag, ChevronDown, ChevronRight, Sparkles,
+  BookOpen, FileText, X, ShoppingBag, ChevronDown, ChevronRight,
 } from "lucide-react";
 import DojrpLogo from "@/components/shared/DojrpLogo";
 import DojrpShield from "@/components/shared/DojrpShield";
@@ -20,8 +20,6 @@ import {
   DPH_SEAL_URL,
   DPS_INDEX_BANNER_URL,
   DPH_INDEX_BANNER_URL,
-  INDEX_PREVIEW_SKIN,
-  ix,
   skin,
 } from "./public-index-skin";
 import { PageLoadingScreen } from "@/components/shared/LoadingProgress";
@@ -105,32 +103,20 @@ async function fetchJsonArray<T>(url: string): Promise<T[]> {
   }
 }
 // -- Hero stat card (classic horizontal layout) ----
-function StatCard({ icon: Icon, label, value, sub, tone, iconColor, color }: {
+function StatCard({ icon: Icon, label, value, sub, tone, iconColor }: {
   icon: React.ElementType; label: string; value: number | string;
-  sub?: string; tone?: string; iconColor?: string; color?: string;
+  sub?: string; tone: string; iconColor: string;
 }) {
-  const preview = INDEX_PREVIEW_SKIN && tone && iconColor;
-
   return (
     <div
-      className={
-        preview
-          ? `flex h-full min-h-[4.75rem] items-center gap-3 rounded-xl border border-[#1a2d45] bg-gradient-to-br ${tone} px-3 py-3 transition hover:border-[#2a4060] sm:min-h-[5.25rem] sm:gap-4 sm:rounded-2xl sm:px-5 sm:py-4`
-          : `flex h-full min-h-[4.75rem] items-center gap-3 ${skin.card} px-3 py-3 sm:min-h-[5.25rem] sm:gap-4 sm:px-5 sm:py-4 ${color ?? ""}`
-      }
+      className={`flex h-full min-h-[4.75rem] items-center gap-3 rounded-xl border border-[#1a2d45] bg-gradient-to-br ${tone} px-3 py-3 transition hover:border-[#2a4060] sm:min-h-[5.25rem] sm:gap-4 sm:rounded-2xl sm:px-5 sm:py-4`}
     >
-      <div
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg sm:h-10 sm:w-10 ${preview ? "rounded-xl border" : "bg-current/10"}`}
-        style={preview ? {
-          backgroundColor: `${iconColor}18`,
-          borderColor: `${iconColor}30`,
-          color: iconColor,
-        } : undefined}
-      >
-        <Icon className="h-4 w-4 sm:h-5 sm:w-5" style={preview ? undefined : { color: "inherit" }} />
-      </div>
+      <Icon
+        className="h-4 w-4 shrink-0 sm:h-5 sm:w-5"
+        style={{ color: iconColor }}
+      />
       <div className="min-w-0">
-        <p className={`truncate text-[9px] font-black uppercase tracking-[0.12em] sm:text-[10px] sm:tracking-[0.2em] ${preview ? "text-[#5a7090]" : skin.mutedText}`}>
+        <p className="truncate text-[9px] font-black uppercase tracking-[0.12em] text-[#5a7090] sm:text-[10px] sm:tracking-[0.2em]">
           {label}
         </p>
         <p className="mt-0.5 text-lg font-black tabular-nums text-white sm:text-2xl">{value}</p>
@@ -279,7 +265,7 @@ function eventSourceBadge(ev: DpsEvent): { label: string; className: string } | 
     return { label: "DPS", className: "border-[#4384ff]/30 bg-[#4384ff]/10 text-[#4384ff]" };
   }
   if (ev.source === "dph") {
-    return { label: "DPH", className: ix("border-[#f87171]/30 bg-[#f87171]/10 text-[#f87171]", "border-[#34d399]/30 bg-[#34d399]/10 text-[#34d399]") };
+    return { label: "DPH", className: "border-[#34d399]/30 bg-[#34d399]/10 text-[#34d399]" };
   }
   return null;
 }
@@ -760,45 +746,23 @@ const PublicView = () => {
 
   return (
     <div className={skin.page}>
-      {INDEX_PREVIEW_SKIN && (
-        <div className="relative z-50 border-b border-[#4384ff]/25 bg-gradient-to-r from-[#0a1a32] via-[#102040] to-[#0a1a32] px-4 py-2 text-center">
-          <p className="text-[11px] font-bold tracking-wide text-[#9ec5ff]">
-            <Sparkles className="mr-1.5 inline h-3.5 w-3.5 text-[#4384ff]" />
-            Preview index skin — member portal colours &amp; assets (layout unchanged)
-          </p>
-        </div>
-      )}
-
-      {INDEX_PREVIEW_SKIN && (
-        <div className="pointer-events-none fixed inset-0 overflow-hidden">
-          <div className="absolute -left-32 top-0 h-96 w-96 rounded-full bg-[#4384ff]/8 blur-3xl" />
-          <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#f4c542]/5 blur-3xl" />
-        </div>
-      )}
-
-      {!INDEX_PREVIEW_SKIN && <div className="h-px bg-[#1b2738]" />}
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -left-32 top-0 h-96 w-96 rounded-full bg-[#4384ff]/8 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-80 w-80 rounded-full bg-[#f4c542]/5 blur-3xl" />
+      </div>
 
       {/* Header */}
       <header className={skin.header}>
         <div className="mx-auto flex h-full max-w-6xl items-center gap-3 px-4 sm:gap-4 sm:px-8">
           <div className="flex min-w-0 items-center gap-2.5">
-            {INDEX_PREVIEW_SKIN ? (
-              <>
-                <DojrpShield className="h-7 w-7 shrink-0" />
-                <span className="truncate text-sm font-black tracking-tight text-white">DOJ:RP CAD</span>
-              </>
-            ) : (
-              <>
-                <img src={`${import.meta.env.BASE_URL}dojrp-shield.png`} alt="" className="h-7 w-7 shrink-0" />
-                <DojrpLogo />
-              </>
-            )}
+            <DojrpShield className="h-7 w-7 shrink-0" />
+            <span className="truncate text-sm font-black tracking-tight text-white">DOJ:RP CAD</span>
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {/* Live ERLC badge */}
             <div className={`flex h-9 items-center gap-1.5 rounded-full border px-2.5 sm:px-3 ${
-              statsLoading ? ix("border-[#1b2738] bg-[#070d16]", "border-[#1a2d45] bg-[#0a1525]") : skin.liveBadge
+              statsLoading ? "border-[#1a2d45] bg-[#0a1525]" : skin.liveBadge
             }`}>
               <span className={`h-1.5 w-1.5 rounded-full ${statsLoading ? "bg-[#2a3a50]" : "animate-pulse bg-[#3ecf8e]"}`} />
               <span className="text-[9px] font-black uppercase tracking-[0.12em] text-[#4384ff] tabular-nums sm:tracking-[0.2em]">
@@ -827,15 +791,7 @@ const PublicView = () => {
         <div className={skin.heroGradient} />
         <div className="relative mx-auto max-w-6xl px-4 py-10 sm:px-8 sm:py-20">
           <div className="flex flex-col items-center text-center">
-            {INDEX_PREVIEW_SKIN ? (
-              <DojrpShield className="mb-6 h-20 w-20 opacity-95 drop-shadow-[0_0_30px_rgba(67,132,255,0.45)]" />
-            ) : (
-              <img
-                src={`${import.meta.env.BASE_URL}dojrp-shield.png`}
-                alt=""
-                className="mb-6 h-20 w-20 opacity-90 drop-shadow-[0_0_30px_rgba(47,112,255,0.4)]"
-              />
-            )}
+            <DojrpShield className="mb-6 h-20 w-20 opacity-95 drop-shadow-[0_0_30px_rgba(67,132,255,0.45)]" />
             <h1 className="text-[38px] font-black leading-[0.95] tracking-[-0.05em] sm:text-[58px]">
               <DojrpLogo />
             </h1>
@@ -852,7 +808,6 @@ const PublicView = () => {
                 sub="ERLC players"
                 tone="from-[#102030] to-[#080e18]"
                 iconColor="#4fc3f7"
-                color="border-[#1a3040] text-[#4fc3f7]"
               />
               <StatCard
                 icon={Users}
@@ -861,7 +816,6 @@ const PublicView = () => {
                 sub="Discord server"
                 tone="from-[#143024] to-[#081510]"
                 iconColor="#34d399"
-                color="border-[#1b3320] text-[#34d399]"
               />
               <StatCard
                 icon={Wifi}
@@ -870,7 +824,6 @@ const PublicView = () => {
                 sub="Discord online"
                 tone="from-[#1a3050] to-[#0a1525]"
                 iconColor="#4384ff"
-                color="border-[#1b2a40] text-[#4384ff]"
               />
             </div>
           </div>
@@ -921,7 +874,7 @@ const PublicView = () => {
       {/* Main content */}
       <main className="relative mx-auto max-w-6xl space-y-10 px-4 py-8 sm:space-y-14 sm:px-8 sm:py-12">
         {pageLoading ? (
-          <PageLoadingScreen loading accent={INDEX_PREVIEW_SKIN ? skin.accent : undefined} />
+          <PageLoadingScreen loading accent={skin.accent} />
         ) : (
         <>
 
@@ -1478,7 +1431,7 @@ const PublicView = () => {
                       className={`rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-[0.12em] transition-colors ${
                         active
                           ? item.id === "dph"
-                            ? ix("border-[#f87171]/50 bg-[#f87171]/15 text-[#f87171]", "border-[#34d399]/50 bg-[#34d399]/15 text-[#34d399]")
+                            ? "border-[#34d399]/50 bg-[#34d399]/15 text-[#34d399]"
                             : "border-[#4384ff]/50 bg-[#4384ff]/15 text-[#4384ff]"
                           : "border-[#1f3050] bg-[#07111f] text-[#526179] hover:border-[#4384ff]/30 hover:text-[#8392aa]"
                       }`}
@@ -1604,11 +1557,11 @@ const PublicView = () => {
                 { name: "Liberty County Medical Services (LCMS)", description: "" },
               ]}
               fallbackHeroUrl={DPH_INDEX_BANNER_URL}
-              accent={ix("#f87171", "#34d399")}
-              accentMuted={ix("#fca5a5", "#6ee7b7")}
+              accent="#34d399"
+              accentMuted="#6ee7b7"
               primaryBtnClass={skin.dphBtn}
               outlineBtnClass={skin.dphBtnOutline}
-              divisionDotClass={ix("bg-[#ef4444]", "bg-[#34d399]")}
+              divisionDotClass="bg-[#34d399]"
               onOpenPage={() => {
                 if (getCadSession()) navigate("/dph_information");
                 else {
