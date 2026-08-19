@@ -67,6 +67,33 @@ async function ensureDpsResourcesSchema(): Promise<void> {
         await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
         await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
         await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
+        await pool.query(`
+          DO $$
+          BEGIN
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'dps_resources'
+                AND column_name = 'division_only' AND udt_name = 'bool'
+            ) THEN
+              ALTER TABLE dps_resources ALTER COLUMN division_only DROP DEFAULT;
+              ALTER TABLE dps_resources
+                ALTER COLUMN division_only TYPE INTEGER
+                USING (CASE WHEN division_only THEN 1 ELSE 0 END);
+              ALTER TABLE dps_resources ALTER COLUMN division_only SET DEFAULT 0;
+            END IF;
+            IF EXISTS (
+              SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'dps_resources'
+                AND column_name = 'personnel_only' AND udt_name = 'bool'
+            ) THEN
+              ALTER TABLE dps_resources ALTER COLUMN personnel_only DROP DEFAULT;
+              ALTER TABLE dps_resources
+                ALTER COLUMN personnel_only TYPE INTEGER
+                USING (CASE WHEN personnel_only THEN 1 ELSE 0 END);
+              ALTER TABLE dps_resources ALTER COLUMN personnel_only SET DEFAULT 0;
+            END IF;
+          END $$;
+        `);
       } catch (e) {
         dpsResourcesSchemaReady = null;
         console.error("dps_resources migration failed:", e);
@@ -79,20 +106,24 @@ async function ensureDpsResourcesSchema(): Promise<void> {
 
 void ensureDpsResourcesSchema().catch(() => { /* logged above */ });
 
+/** Postgres-safe 0/1 for flag columns stored as boolean or integer (legacy migrations). */
+const flagCol = (name: string) =>
+  `(CASE WHEN ${name} IS TRUE OR ${name} = 1 THEN 1 ELSE 0 END)`;
+
 const RESOURCE_LIST_COLS = `
   id, title, type, logo_url, header_config, created_by, created_at, updated_at, division_id,
-  COALESCE(division_only, false) AS division_only,
+  ${flagCol("division_only")} AS division_only,
   COALESCE(allowed_ranks, '[]') AS allowed_ranks,
-  COALESCE(personnel_only, false) AS personnel_only,
+  ${flagCol("personnel_only")} AS personnel_only,
   COALESCE(allowed_dps_ranks, '[]') AS allowed_dps_ranks,
   google_file_id, google_integration_id, google_modified_time
 `;
 
 const RESOURCE_DETAIL_COLS = `
   id, title, type, logo_url, header_config, content, created_by, created_at, updated_at,
-  division_id, COALESCE(division_only, false) AS division_only,
+  division_id, ${flagCol("division_only")} AS division_only,
   COALESCE(allowed_ranks, '[]') AS allowed_ranks,
-  COALESCE(personnel_only, false) AS personnel_only,
+  ${flagCol("personnel_only")} AS personnel_only,
   COALESCE(allowed_dps_ranks, '[]') AS allowed_dps_ranks,
   google_file_id, google_integration_id, google_modified_time
 `;
@@ -142,8 +173,8 @@ router.get("/resources", async (req, res) => {
     } else if (publicOnly) {
       // Index / community: department-wide public docs only (no division or restricted).
       where = `WHERE division_id IS NULL
-                 AND COALESCE(division_only, false) = false
-                 AND COALESCE(personnel_only, false) = false`;
+                 AND ${flagCol("division_only")} = 0
+                 AND ${flagCol("personnel_only")} = 0`;
     }
     // Clients filter by viewer membership / ranks / personnel flags when not publicOnly.
     const { rows } = await pool.query(
