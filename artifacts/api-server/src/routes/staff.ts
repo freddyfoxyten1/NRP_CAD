@@ -10,6 +10,7 @@ import {
   clearAllStaffAccessPermissions,
   resetStaffMemberAccessPermissions,
 } from "../lib/department-permissions.js";
+import { STAFF_GUILD_ID } from "../lib/discord-guild-ids.js";
 
 const router = Router();
 
@@ -68,11 +69,9 @@ async function denyUnlessSuperAdminForLocked(
   return true;
 }
 
-// ─── Staff Discord Guild ───────────────────────────────────────────────────────
-// Guild whose roles drive automatic rank assignment.
-const STAFF_GUILD_ID = (
-  process.env.STAFF_DISCORD_GUILD_ID ?? "1411760639428399194"
-).trim() || "1411760639428399194";
+/** Postgres-safe 0/1 for profile flag columns stored as boolean or integer. */
+const profileFlagCol = (column: string) =>
+  `(CASE WHEN p.${column} IS TRUE OR p.${column} = 1 THEN 1 ELSE 0 END)`;
 
 // Cache of all guild members — populated by the background sync so the
 // member-search endpoint never needs to re-paginate for a search query.
@@ -739,11 +738,11 @@ async function queryStaffRosterRows(includeInactive: boolean): Promise<Record<st
   const profilesRes = await pool.query<Record<string, unknown>>(
     `SELECT p.id, p.username, p.discord_username, p.discord_id, p.avatar_hash,
             p.staff_rank, p.staff_role, p.status, p.staff_appointed_date,
-            COALESCE(p.can_access_iab, false) AS can_access_iab,
-            COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
-            COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
-            COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline,
-            COALESCE(p.can_access_doc_dps_cad, false) AS can_access_doc_dps_cad
+            ${profileFlagCol("can_access_iab")} AS can_access_iab,
+            ${profileFlagCol("can_access_system_logs")} AS can_access_system_logs,
+            ${profileFlagCol("can_access_terms_privacy")} AS can_access_terms_privacy,
+            ${profileFlagCol("can_access_terminal_offline")} AS can_access_terminal_offline,
+            ${profileFlagCol("can_access_doc_dps_cad")} AS can_access_doc_dps_cad
      FROM cad_user_profiles p`,
   );
 
@@ -1712,15 +1711,21 @@ function mapStaffEvent(row: Record<string, unknown>) {
   };
 }
 
+const staffPublicEventFlag =
+  `(CASE WHEN is_public IS TRUE OR is_public = 1 THEN 1 ELSE 0 END) = 1`;
+
 router.get("/staff/events", async (req, res) => {
   await ensureStaffEvents;
   try {
-    const publicOnly = req.query.public === "true";
+    const publicOnly =
+      req.query.public === "true"
+      || req.query.public === "1"
+      || req.query.scope === "public";
     const result = await pool.query(
       `SELECT id, title, event_date, event_time, location, purpose,
               hosted_by, hosting_department, is_public, created_at
        FROM staff_events
-       ${publicOnly ? "WHERE is_public = true" : ""}
+       ${publicOnly ? `WHERE ${staffPublicEventFlag}` : ""}
        ORDER BY event_date ASC, event_time ASC`
     );
     res.json(result.rows.map((row) => mapStaffEvent(row as Record<string, unknown>)));

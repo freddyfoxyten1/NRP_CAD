@@ -40,3 +40,11 @@ export function resolveDivisionDiscordGuildId(dpsGuildId = resolveDpsDiscordGuil
 
 export const DPS_GUILD_ID = resolveDpsDiscordGuildId();
 export const DIVISION_GUILD_ID = resolveDivisionDiscordGuildId(DPS_GUILD_ID);
+
+/** Resolve staff roster guild ID — defaults to the main community server. */
+export function resolveStaffDiscordGuildId(): string {
+  const fromEnv = normalizeGuildId(process.env.STAFF_DISCORD_GUILD_ID);
+  return fromEnv || COMMUNITY_GUILD_ID;
+}
+
+export const STAFF_GUILD_ID = resolveStaffDiscordGuildId();

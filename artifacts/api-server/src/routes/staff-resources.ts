@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { Router, Request, Response, NextFunction } from "express";
 import multer from "multer";
-import { pool } from "@workspace/db";
+import { isMongoStore, pool } from "@workspace/db";
 import { writeLog } from "../lib/audit-log";
 import { ConversionError, convertDocxToPdf, isDocx, isLegacyDoc, isPdf } from "../lib/docx-to-pdf";
 import { sanitizeResourceForClient, tryServeGoogleDocFile } from "../lib/google-doc-resource";
@@ -43,49 +43,110 @@ const parseJsonField = (value: unknown, fallback: unknown = {}) => {
   return fallback;
 };
 
-const normalizeResourceRow = (row: Record<string, unknown>) =>
+const parseRankList = (value: unknown): string[] => {
+  const parsed = parseJsonField(value, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map(String).map(s => s.trim()).filter(Boolean);
+};
+
+const normalizeResourceRow = (row: Record<string, unknown>, opts: { public?: boolean } = {}) =>
   sanitizeResourceForClient({
     ...row,
     header_config: parseJsonField(row.header_config, {}),
     content: parseJsonField(row.content, {}),
-  });
+    allowed_ranks: parseRankList(row.allowed_ranks),
+  }, opts);
 
-(async () => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS staff_resources (
-        id            serial PRIMARY KEY,
-        title         text NOT NULL,
-        type          text NOT NULL DEFAULT 'document',
-        logo_url      text,
-        header_config jsonb NOT NULL DEFAULT '{}',
-        content       jsonb NOT NULL DEFAULT '{}',
-        file_data     bytea,
-        created_by    text,
-        created_at    timestamptz NOT NULL DEFAULT NOW(),
-        updated_at    timestamptz NOT NULL DEFAULT NOW()
-      )
-    `);
-    await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS header_config jsonb NOT NULL DEFAULT '{}'`);
-    await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS file_data bytea`);
-    await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
-    await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
-    await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
-  } catch (e) {
-    console.error("staff_resources migration failed:", e);
+let staffResourcesSchemaReady: Promise<void> | null = null;
+
+async function ensureStaffResourcesSchema(): Promise<void> {
+  if (isMongoStore()) return;
+  if (!staffResourcesSchemaReady) {
+    staffResourcesSchemaReady = (async () => {
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS staff_resources (
+            id            serial PRIMARY KEY,
+            title         text NOT NULL,
+            type          text NOT NULL DEFAULT 'document',
+            logo_url      text,
+            header_config jsonb NOT NULL DEFAULT '{}',
+            content       jsonb NOT NULL DEFAULT '{}',
+            file_data     bytea,
+            created_by    text,
+            created_at    timestamptz NOT NULL DEFAULT NOW(),
+            updated_at    timestamptz NOT NULL DEFAULT NOW()
+          )
+        `);
+        await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS header_config jsonb NOT NULL DEFAULT '{}'`);
+        await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS file_data bytea`);
+        await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS allowed_ranks text NOT NULL DEFAULT '[]'`);
+        await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
+        await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
+        await pool.query(`ALTER TABLE staff_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
+      } catch (e) {
+        staffResourcesSchemaReady = null;
+        console.error("staff_resources migration failed:", e);
+        throw e;
+      }
+    })();
   }
-})();
+  await staffResourcesSchemaReady;
+}
 
-const RESOURCE_LIST_COLS = `id, title, type, logo_url, header_config, created_by, created_at, updated_at, google_file_id, google_integration_id, google_modified_time`;
-const RESOURCE_DETAIL_COLS = `id, title, type, logo_url, header_config, content, created_by, created_at, updated_at, google_file_id, google_integration_id, google_modified_time`;
+void ensureStaffResourcesSchema().catch(() => { /* logged above */ });
+
+const RESOURCE_LIST_COLS = `
+  id, title, type, logo_url, header_config, created_by, created_at, updated_at,
+  COALESCE(allowed_ranks, '[]') AS allowed_ranks,
+  google_file_id, google_integration_id, google_modified_time
+`;
+
+const RESOURCE_DETAIL_COLS = `
+  id, title, type, logo_url, header_config, content, created_by, created_at, updated_at,
+  COALESCE(allowed_ranks, '[]') AS allowed_ranks,
+  google_file_id, google_integration_id, google_modified_time
+`;
+
+const RESOURCE_LIST_COLS_BASE = `
+  id, title, type, logo_url, header_config, created_by, created_at, updated_at
+`;
+
+async function queryStaffResourceList(): Promise<Record<string, unknown>[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ${RESOURCE_LIST_COLS}
+         FROM staff_resources
+        ORDER BY lower(title), id`,
+    );
+    return rows as Record<string, unknown>[];
+  } catch (err) {
+    console.warn("[staff-resources] full list query failed, falling back to base columns:", err);
+    const { rows } = await pool.query(
+      `SELECT ${RESOURCE_LIST_COLS_BASE}
+         FROM staff_resources
+        ORDER BY lower(title), id`,
+    );
+    return rows as Record<string, unknown>[];
+  }
+}
+
+const isPublicResource = (row: { allowed_ranks: string[] }) =>
+  row.allowed_ranks.length === 0;
 
 /** GET /staff/resources — list (no content blob) */
 router.get("/staff/resources", async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT ${RESOURCE_LIST_COLS} FROM staff_resources ORDER BY lower(title), id`
-    );
-    res.json(result.rows.map(normalizeResourceRow));
+    await ensureStaffResourcesSchema().catch((err) => {
+      console.warn("[staff-resources] schema ensure failed:", err);
+    });
+    const publicOnly =
+      req.query.public === "true"
+      || req.query.public === "1"
+      || req.query.scope === "public";
+    const rows = await queryStaffResourceList();
+    const normalized = rows.map(r => normalizeResourceRow(r, { public: publicOnly }));
+    res.json(publicOnly ? normalized.filter(isPublicResource) : normalized);
   } catch (err) {
     req.log.error({ err }, "staff/resources GET error");
     res.status(500).json({ error: "Unable to load staff resources." });
@@ -100,6 +161,9 @@ router.get("/staff/resources/:id", async (req, res) => {
     return;
   }
   try {
+    await ensureStaffResourcesSchema().catch((err) => {
+      console.warn("[staff-resources] schema ensure failed:", err);
+    });
     const result = await pool.query(
       `SELECT ${RESOURCE_DETAIL_COLS} FROM staff_resources WHERE id = $1`,
       [id]
@@ -166,6 +230,9 @@ router.post("/staff/resources", requireAdmin, async (req, res) => {
     return;
   }
   try {
+    await ensureStaffResourcesSchema().catch((err) => {
+      console.warn("[staff-resources] schema ensure failed:", err);
+    });
     const result = await pool.query(
       `INSERT INTO staff_resources (title, type, created_by)
        VALUES ($1, 'document', $2)
@@ -222,6 +289,9 @@ router.post("/staff/resources/upload", requireAdmin, (req, res) => {
     }
 
     try {
+      await ensureStaffResourcesSchema().catch((err) => {
+        console.warn("[staff-resources] schema ensure failed:", err);
+      });
       const { isMongoStore, resourcesRepo } = await import("@workspace/db");
       if (isMongoStore()) {
         const row = await resourcesRepo.insertResource("staff", {
@@ -283,6 +353,9 @@ router.patch("/staff/resources/:id", async (req, res) => {
   vals.push(id);
 
   try {
+    await ensureStaffResourcesSchema().catch((err) => {
+      console.warn("[staff-resources] schema ensure failed:", err);
+    });
     const result = await pool.query(
       `UPDATE staff_resources SET ${sets.join(", ")} WHERE id = $${idx}
        RETURNING ${RESOURCE_DETAIL_COLS}`,
@@ -295,8 +368,8 @@ router.patch("/staff/resources/:id", async (req, res) => {
     const actor =
       (typeof req.headers["x-actor"] === "string" && req.headers["x-actor"])
       || "Admin";
-    const title = String(result.rows[0].title ?? id);
-    void writeLog("staff", actor, "Updated staff resource", title);
+    const resourceTitle = String(result.rows[0].title ?? id);
+    void writeLog("staff", actor, "Updated staff resource", resourceTitle);
     res.json(normalizeResourceRow(result.rows[0]));
   } catch (err) {
     req.log.error({ err }, "staff/resources/:id PATCH error");

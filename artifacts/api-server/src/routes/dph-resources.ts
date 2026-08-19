@@ -413,6 +413,9 @@ router.post("/dph/resources", async (req, res) => {
   const savedDphRanks = resolvedDivisionId == null ? dphRanks : [];
 
   try {
+    await ensureDphResourcesSchema().catch((err) => {
+      console.warn("[dph-resources] schema ensure failed:", err);
+    });
     const { rows } = await pool.query(
       `INSERT INTO dph_resources
          (title, type, created_by, division_id, division_only, allowed_ranks, personnel_only, allowed_dph_ranks)

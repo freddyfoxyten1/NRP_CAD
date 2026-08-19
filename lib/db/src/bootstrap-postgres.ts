@@ -464,6 +464,10 @@ async function ensurePostgresMigrations(pool: Queryable): Promise<void> {
     ["dph_resources", "google_file_id", "TEXT"],
     ["dph_resources", "google_integration_id", "INTEGER"],
     ["dph_resources", "google_modified_time", "TEXT"],
+    ["staff_resources", "google_file_id", "TEXT"],
+    ["staff_resources", "google_integration_id", "INTEGER"],
+    ["staff_resources", "google_modified_time", "TEXT"],
+    ["staff_resources", "allowed_ranks", "TEXT NOT NULL DEFAULT '[]'"],
   ];
 
   for (const [table, column, definition] of addColumns) {
@@ -526,6 +530,9 @@ async function ensurePostgresMigrations(pool: Queryable): Promise<void> {
       created_by TEXT,
       file_data BYTEA,
       allowed_ranks TEXT NOT NULL DEFAULT '[]',
+      google_file_id TEXT,
+      google_integration_id INTEGER,
+      google_modified_time TEXT,
       created_at TEXT NOT NULL DEFAULT ${NOW},
       updated_at TEXT NOT NULL DEFAULT ${NOW}
     );
