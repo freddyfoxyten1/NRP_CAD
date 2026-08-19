@@ -50,6 +50,9 @@ const repoEnv = {
   get PREVIEW_API_URL() {
     return usingRemoteApi ? PREVIEW_API_URL : "";
   },
+  get VITE_STATS_URL() {
+    return (process.env.VITE_STATS_URL ?? "").trim();
+  },
   CAD_DATABASE_PATH: process.env.CAD_DATABASE_PATH ?? path.join(root, "cad-database"),
 };
 
@@ -185,18 +188,18 @@ function printBanner() {
       "",
       "═══════════════════════════════════════════════════════════════",
       usingRemoteApi
-        ? "  NRP CAD live preview — local files + remote API (PREVIEW_API_URL)"
+        ? "  NRP CAD live preview — local UI + Render API (Supabase Postgres)"
         : "  NRP CAD local preview (this checkout only)",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site (live reload):  http://localhost:${WEB_PORT}/`,
       usingRemoteApi
-        ? `  API:                 ${PREVIEW_API_URL}/api/healthz  (remote)`
+        ? `  API:                 ${PREVIEW_API_URL}/api/healthz  (Render → Supabase)`
         : `  API health:          http://localhost:${API_PORT}/api/healthz`,
       "",
       "  Edit & save files → the browser updates automatically.",
       usingRemoteApi
-        ? "  Data comes from PREVIEW_API_URL. Push to GitHub when you are ready."
+        ? "  Discord counts also fall back to Supabase public-stats when needed."
         : "  Push to GitHub only when you are happy with what you see here.",
       "",
       "  Stop with Ctrl+C",
@@ -223,7 +226,7 @@ process.on("SIGTERM", () => shutdown(0));
 await freePort(WEB_PORT, "preview");
 
 if (usingRemoteApi) {
-  console.log(`Using remote API from PREVIEW_API_URL: ${PREVIEW_API_URL}`);
+  console.log(`Using Render API (Supabase Postgres): ${PREVIEW_API_URL}`);
   const dbOk = await probeDbHealth(PREVIEW_API_URL);
   if (!dbOk) {
     console.warn("VPS Mongo is not ready — falling back to local API + .env.");

@@ -60,8 +60,8 @@ function apiProxyOptions(target = apiTarget) {
             res.writeHead(502, { 'content-type': 'application/json' });
             res.end(JSON.stringify({
               error: remote
-                ? 'Could not reach the live VPS API. Try again in a moment.'
-                : 'The local API is not running. Restart preview with bun run preview.',
+                ? 'Could not reach the hosted NRP API. Try again in a moment.'
+                : 'The local API is not running. Restart preview with bun run dev.',
             }));
           }
         },
