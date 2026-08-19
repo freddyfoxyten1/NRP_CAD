@@ -30,7 +30,7 @@ services:
       - key: DPS_DISCORD_GUILD_ID
         value: "1539660726338326571"
       - key: DIVISION_DISCORD_GUILD_ID
-        value: "1539452857592324116"
+        value: "1539660726338326571"
       - key: DPH_DISCORD_GUILD_ID
         value: "1539452857592324116"
       - key: DISCORD_SERVER_NAME
