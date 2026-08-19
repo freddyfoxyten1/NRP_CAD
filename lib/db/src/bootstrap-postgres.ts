@@ -454,6 +454,10 @@ async function ensurePostgresMigrations(pool: Queryable): Promise<void> {
     ["dps_rank_groups", "locked", "INTEGER NOT NULL DEFAULT 0"],
     ["dph_rank_groups", "panel_access", "INTEGER NOT NULL DEFAULT 0"],
     ["dph_rank_groups", "division_oversight", "INTEGER NOT NULL DEFAULT 0"],
+    ["dps_resources", "allowed_dps_ranks", "TEXT NOT NULL DEFAULT '[]'"],
+    ["dps_resources", "google_file_id", "TEXT"],
+    ["dps_resources", "google_integration_id", "INTEGER"],
+    ["dps_resources", "google_modified_time", "TEXT"],
   ];
 
   for (const [table, column, definition] of addColumns) {
@@ -476,6 +480,10 @@ async function ensurePostgresMigrations(pool: Queryable): Promise<void> {
       division_only INTEGER NOT NULL DEFAULT 0,
       allowed_ranks TEXT NOT NULL DEFAULT '[]',
       personnel_only INTEGER NOT NULL DEFAULT 0,
+      allowed_dps_ranks TEXT NOT NULL DEFAULT '[]',
+      google_file_id TEXT,
+      google_integration_id INTEGER,
+      google_modified_time TEXT,
       created_at TEXT NOT NULL DEFAULT ${NOW},
       updated_at TEXT NOT NULL DEFAULT ${NOW}
     );

@@ -37,39 +37,47 @@ const normalizeResourceRow = (row: Record<string, unknown>, opts: { public?: boo
   }, opts);
 
 // ── One-time migration ────────────────────────────────────────────────────────
-(async () => {
+let dpsResourcesSchemaReady: Promise<void> | null = null;
+
+async function ensureDpsResourcesSchema(): Promise<void> {
   if (isMongoStore()) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS dps_resources (
-        id            serial PRIMARY KEY,
-        title         text NOT NULL,
-        type          text NOT NULL DEFAULT 'document',
-        logo_url      text,
-        header_config jsonb NOT NULL DEFAULT '{}',
-        content       jsonb NOT NULL DEFAULT '{}',
-        created_by    text,
-        created_at    timestamptz NOT NULL DEFAULT NOW(),
-        updated_at    timestamptz NOT NULL DEFAULT NOW()
-      )
-    `);
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS header_config jsonb NOT NULL DEFAULT '{}'`);
-    // file_data holds the stored PDF for uploaded (type='pdf') resources.
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS file_data bytea`);
-    // Optional link to a DPS division (Division Roster → Resources).
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS division_id integer`);
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS division_only boolean NOT NULL DEFAULT false`);
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS allowed_ranks text NOT NULL DEFAULT '[]'`);
-    // Department-wide visibility: DPS personnel only + optional DPS rank list
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS personnel_only boolean NOT NULL DEFAULT false`);
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS allowed_dps_ranks text NOT NULL DEFAULT '[]'`);
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
-    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
-  } catch (e) {
-    console.error("dps_resources migration failed:", e);
+  if (!dpsResourcesSchemaReady) {
+    dpsResourcesSchemaReady = (async () => {
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS dps_resources (
+            id            serial PRIMARY KEY,
+            title         text NOT NULL,
+            type          text NOT NULL DEFAULT 'document',
+            logo_url      text,
+            header_config jsonb NOT NULL DEFAULT '{}',
+            content       jsonb NOT NULL DEFAULT '{}',
+            created_by    text,
+            created_at    timestamptz NOT NULL DEFAULT NOW(),
+            updated_at    timestamptz NOT NULL DEFAULT NOW()
+          )
+        `);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS header_config jsonb NOT NULL DEFAULT '{}'`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS file_data bytea`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS division_id integer`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS division_only integer NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS allowed_ranks text NOT NULL DEFAULT '[]'`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS personnel_only integer NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS allowed_dps_ranks text NOT NULL DEFAULT '[]'`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
+        await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
+      } catch (e) {
+        dpsResourcesSchemaReady = null;
+        console.error("dps_resources migration failed:", e);
+        throw e;
+      }
+    })();
   }
-})();
+  await dpsResourcesSchemaReady;
+}
+
+void ensureDpsResourcesSchema().catch(() => { /* logged above */ });
 
 const RESOURCE_LIST_COLS = `
   id, title, type, logo_url, header_config, created_by, created_at, updated_at, division_id,
@@ -99,6 +107,7 @@ const isPublicResource = (row: ReturnType<typeof normalizeResourceRow>) =>
 // ── GET /resources — list all (lightweight, no content blob) ──────────────────
 router.get("/resources", async (req, res) => {
   try {
+    await ensureDpsResourcesSchema();
     const divisionIdRaw = typeof req.query.division_id === "string" ? req.query.division_id : "";
     const divisionId = divisionIdRaw ? parseInt(divisionIdRaw, 10) : NaN;
     const publicOnly =
@@ -157,6 +166,7 @@ router.get("/resources/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id." });
   try {
+    await ensureDpsResourcesSchema();
     if (isMongoStore()) {
       const col = await getCollection("resources");
       const row = await col.findOne({ id, department: "dps" });
@@ -211,6 +221,7 @@ router.post("/resources", async (req, res) => {
     : false;
   const savedDpsRanks = resolvedDivisionId == null ? dpsRanks : [];
   try {
+    await ensureDpsResourcesSchema();
     const { rows } = await pool.query(
       `INSERT INTO dps_resources
          (title, type, created_by, division_id, division_only, allowed_ranks, personnel_only, allowed_dps_ranks)
