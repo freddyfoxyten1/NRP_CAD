@@ -1,8 +1,6 @@
 # Live site: northpointrp.xyz
 
-The **frontend** is hosted on **[Vercel](VERCEL-SETUP.md)** (recommended). GitHub Pages is legacy — disable it after Vercel is live.
-
-The **API** runs on Render; **database** is Supabase Postgres. GitHub Pages / Vercel do **not** read `.env` — Discord login and counts need those hosted backends.
+**GitHub Pages** serves the frontend at https://northpointrp.xyz (free). It does **not** read `.env` — Discord login and live counts need Render + Supabase.
 
 ## Quick fix: Discord counts on the homepage (Supabase)
 

@@ -1,8 +1,12 @@
 name: Deploy GitHub Pages
 
-# Legacy — prefer Vercel (see docs/VERCEL-SETUP.md). Disable Pages after Vercel serves northpointrp.xyz.
-
 on:
+  push:
+    branches:
+      - master
+      - cursor/vps-deploy-ia-roster-fixes
+      - cursor/sync-github-preview-3e41
+      - cursor/nrp-live-deploy
   workflow_dispatch:
 
 permissions:

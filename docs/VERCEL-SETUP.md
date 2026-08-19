@@ -1,7 +1,8 @@
-# Host on Vercel (instead of GitHub Pages)
+# Optional: Vercel hosting (not used — we stay on GitHub Pages)
 
-Vercel serves the **Northpoint CAD frontend** at **https://northpointrp.xyz**.  
-The **API stays on Render** (`nrp-cad-api`) with **Supabase Postgres**. Vercel only hosts static files.
+This repo includes `vercel.json` if you ever want to switch. **Production uses GitHub Pages** at https://northpointrp.xyz.
+
+See [`LIVE-SETUP.md`](LIVE-SETUP.md) for the active stack.
 
 ## Architecture
 
