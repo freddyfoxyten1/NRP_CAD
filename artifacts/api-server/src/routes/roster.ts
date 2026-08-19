@@ -4379,6 +4379,15 @@ router.post("/roster/equipment/categories/reorder", async (req, res) => {
 });
 
 // ── GET /roster/events ─────────────────────────────────────────────────────────
+function mapDpsEventRow(row: Record<string, unknown>) {
+  return {
+    ...row,
+    event_date: String(row.event_date ?? "").slice(0, 10),
+    hosting_department: row.hosting_department || "Department of Public Safety",
+    is_public: Boolean(row.is_public),
+  };
+}
+
 router.get("/roster/events", async (req, res) => {
   try {
     const publicOnly = req.query.public === "true";
@@ -4387,19 +4396,15 @@ router.get("/roster/events", async (req, res) => {
       return;
     }
     const result = await pool.query(
-      `SELECT id, title, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date,
-              event_time, location, purpose, hosted_by, hosting_department,
+      `SELECT id, title, event_date, event_time, location, purpose, hosted_by, hosting_department,
               is_public, created_at
        FROM dps_events
        ${publicOnly ? "WHERE is_public = true" : ""}
        ORDER BY event_date ASC, event_time ASC NULLS LAST`
     );
-    res.json(result.rows.map((row: Record<string, unknown>) => ({
-      ...row,
-      hosting_department: row.hosting_department || "Department of Public Safety",
-      is_public: Boolean(row.is_public),
-    })));
+    res.json(result.rows.map((row: Record<string, unknown>) => mapDpsEventRow(row)));
   } catch (err) {
+    req.log?.error?.({ err }, "roster/events GET error");
     res.status(500).json({ error: "Unable to load events." });
   }
 });
@@ -4419,14 +4424,13 @@ router.post("/roster/events", async (req, res) => {
     const r = await pool.query(
       `INSERT INTO dps_events (title, event_date, event_time, location, purpose, is_public, hosted_by, hosting_department)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, title, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date,
-                 event_time, location, purpose, hosted_by, hosting_department, is_public, created_at`,
+       RETURNING id, title, event_date, event_time, location, purpose, hosted_by, hosting_department, is_public, created_at`,
       [
         title.trim(), event_date, event_time || null, location?.trim() || null, purpose?.trim() || null,
         is_public === true, hosted_by?.trim() || null, dept,
       ]
     );
-    res.status(201).json({ ...r.rows[0], is_public: Boolean(r.rows[0].is_public) });
+    res.status(201).json(mapDpsEventRow(r.rows[0] as Record<string, unknown>));
   } catch (err) {
     req.log.error({ err }, "roster/events POST error");
     res.status(500).json({ error: "Unable to create event." });
@@ -4451,15 +4455,14 @@ router.patch("/roster/events/:id", async (req, res) => {
       `UPDATE dps_events SET title=$1, event_date=$2, event_time=$3, location=$4, purpose=$5, is_public=$6,
          hosted_by=$7, hosting_department=$8
        WHERE id=$9
-       RETURNING id, title, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date,
-                 event_time, location, purpose, hosted_by, hosting_department, is_public, created_at`,
+       RETURNING id, title, event_date, event_time, location, purpose, hosted_by, hosting_department, is_public, created_at`,
       [
         title.trim(), event_date, event_time || null, location?.trim() || null, purpose?.trim() || null,
         is_public === true, hosted_by?.trim() || null, dept, id,
       ]
     );
     if ((r.rowCount ?? 0) === 0) { res.status(404).json({ error: "Event not found." }); return; }
-    res.json({ ...r.rows[0], is_public: Boolean(r.rows[0].is_public) });
+    res.json(mapDpsEventRow(r.rows[0] as Record<string, unknown>));
   } catch (err) {
     res.status(500).json({ error: "Unable to update event." });
   }
