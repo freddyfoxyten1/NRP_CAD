@@ -1,11 +1,13 @@
 /**
  * Local private preview — Vite with live reload.
  * Default: local API + SQLite.
- * With PREVIEW_API_URL (dev:live): proxied VPS API + Mongo on cad.dojrblx.com.
+ * With PREVIEW_API_URL (dev:live): proxied Render API + Supabase Postgres.
  * Code changes stay on your machine until you push to GitHub.
  */
+import { NRP_LIVE_API_URL, NRP_LIVE_SITE_URL } from "./nrp-live-defaults.mjs";
 import { execSync, spawn } from "node:child_process";
 import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,9 +17,14 @@ const WEB_PORT = process.env.WEB_PORT ?? "5173";
 const PREVIEW_API_URL = (process.env.PREVIEW_API_URL ?? "").trim().replace(/\/$/, "");
 let usingRemoteApi = PREVIEW_API_URL.length > 0;
 
+function httpGet(url, options = {}) {
+  const client = url.startsWith("https:") ? https : http;
+  return client.get(url, options);
+}
+
 function probeDbHealth(baseUrl) {
   return new Promise((resolve) => {
-    const req = http.get(`${baseUrl}/api/health/db`, (res) => {
+    const req = httpGet(`${baseUrl}/api/health/db`, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (chunk) => {
@@ -53,7 +60,7 @@ let exiting = false;
 
 function probe(url) {
   return new Promise((resolve) => {
-    const req = http.get(url, (res) => {
+    const req = httpGet(url, (res) => {
       res.resume();
       resolve(res.statusCode >= 200 && res.statusCode < 400);
     });
@@ -180,18 +187,18 @@ function printBanner() {
       "",
       "═══════════════════════════════════════════════════════════════",
       usingRemoteApi
-        ? "  NRP CAD live preview — local files + VPS Mongo"
+        ? "  NRP CAD live preview — local files + Render API"
         : "  NRP CAD local preview (private — not on GitHub)",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site (live reload):  http://localhost:${WEB_PORT}/`,
       usingRemoteApi
-        ? `  API:                 ${PREVIEW_API_URL}/api/healthz  (team VPS + Mongo)`
+        ? `  API:                 ${PREVIEW_API_URL}/api/healthz  (Render + Supabase)`
         : `  API health:          http://localhost:${API_PORT}/api/healthz`,
       "",
       "  Edit & save files → the browser updates automatically.",
       usingRemoteApi
-        ? "  Data is live from cad.dojrblx.com. Push to GitHub to update the VPS site."
+        ? `  Data is live from ${NRP_LIVE_API_URL}. Push to GitHub to update ${NRP_LIVE_SITE_URL}.`
         : "  Push to GitHub only when you are happy with what you see here.",
       "",
       "  Stop with Ctrl+C",
@@ -218,10 +225,10 @@ process.on("SIGTERM", () => shutdown(0));
 await freePort(WEB_PORT, "preview");
 
 if (usingRemoteApi) {
-  console.log(`Using live VPS API (Mongo on cad.dojrblx.com): ${PREVIEW_API_URL}`);
+  console.log(`Using live Render API (Supabase): ${PREVIEW_API_URL}`);
   const dbOk = await probeDbHealth(PREVIEW_API_URL);
   if (!dbOk) {
-    console.warn("VPS Mongo is not ready — falling back to local API + .env.");
+    console.warn("Render API database is not ready — falling back to local API + .env.");
     usingRemoteApi = false;
   }
 }

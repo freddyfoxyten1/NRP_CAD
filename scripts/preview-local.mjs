@@ -1,7 +1,8 @@
 /**
  * Production-style local preview: build frontend, serve on 4173.
- * Default (preview / preview:edit / preview:live): unpublished UI + VPS Mongo.
+ * Default (preview / preview:edit / preview:live): unpublished UI + Render API.
  */
+import { NRP_LIVE_API_URL, NRP_LIVE_SITE_URL } from "./nrp-live-defaults.mjs";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import http from "node:http";
@@ -12,11 +13,11 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = process.env.API_PORT ?? "8080";
 const PREVIEW_PORT = process.env.PREVIEW_PORT ?? "4173";
-/** Live VPS API (Mongo) — set via PREVIEW_API_URL or preview:live script */
+/** Live Render API — set via PREVIEW_API_URL or preview:live script */
 let remoteApiUrl = (process.env.PREVIEW_API_URL ?? "").trim().replace(/\/$/, "");
 let usingRemoteApi = remoteApiUrl.length > 0;
 
-/** Always return to this preview, never the published cad.dojrblx.com site. */
+/** Always return to this preview, never the published northpointrp.xyz site. */
 const previewRedirectUri = `http://localhost:${PREVIEW_PORT}/dojcad/discord-callback`;
 
 const repoEnv = {
@@ -109,13 +110,13 @@ function probeDbHealth(baseUrl) {
 
 async function ensureRemoteApiReady() {
   if (!usingRemoteApi) return true;
-  console.log(`Checking VPS API (Mongo): ${remoteApiUrl}`);
+  console.log(`Checking Render API (Supabase): ${remoteApiUrl}`);
   const dbOk = await probeDbHealth(remoteApiUrl);
   if (dbOk) return true;
   console.warn(
-    `VPS API at ${remoteApiUrl} did not report Mongo as healthy.`,
+    `Render API at ${remoteApiUrl} did not report Postgres as healthy.`,
   );
-  console.warn("Falling back to local API + your .env MongoDB.");
+  console.warn("Falling back to local API + your .env database.");
   usingRemoteApi = false;
   remoteApiUrl = "";
   return false;
@@ -222,7 +223,7 @@ function spawnInRoot(command, args) {
 async function isApiHealthy() {
   if (!isPortListening(API_PORT)) return false;
   if (!(await probe(`http://127.0.0.1:${API_PORT}/api/healthz`))) return false;
-  // healthz alone is not enough — a stale API can be up while Mongo roster routes fail.
+  // healthz alone is not enough — a stale API can be up while roster routes fail.
   return probeDbHealth(`http://127.0.0.1:${API_PORT}`);
 }
 
@@ -262,8 +263,8 @@ process.on("SIGTERM", () => shutdown(0));
 await ensureRemoteApiReady();
 
 if (usingRemoteApi) {
-  console.log(`Using live VPS API (GitHub deploy data): ${remoteApiUrl}`);
-  // Unpublished Google Doc routes are not on the VPS yet — serve them locally.
+  console.log(`Using live Render API: ${remoteApiUrl}`);
+  // Unpublished Google Doc routes are not on Render yet — serve them locally.
   await ensureApi("local API for unpublished routes");
 } else {
   await ensureApi();
@@ -305,23 +306,23 @@ if (ready) {
       "",
       "═══════════════════════════════════════════════════════════════",
       usingRemoteApi
-        ? "  DOJCAD test preview — unpublished files + live VPS"
-        : "  DOJCAD test preview — unpublished files (local API)",
+        ? "  NRP CAD test preview — unpublished files + live Render API"
+        : "  NRP CAD test preview — unpublished files (local API)",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site:  http://localhost:${PREVIEW_PORT}/`,
       usingRemoteApi
-        ? `  API:   ${remoteApiUrl}/api/healthz  (VPS + Mongo)`
-        : `  API:   http://localhost:${API_PORT}/api/healthz  (local Mongo from .env)`,
+        ? `  API:   ${remoteApiUrl}/api/healthz  (Render + Supabase)`
+        : `  API:   http://localhost:${API_PORT}/api/healthz  (local SQLite from .env)`,
       usingRemoteApi
         ? `  Local: http://localhost:${API_PORT}/api  (unpublished Google Doc routes)`
         : "",
       "",
       usingRemoteApi
         ? "  Local files only — nothing is committed, pushed, or published."
-        : "  Unpublished files. Sign-in returns here, not cad.dojrblx.com.",
+        : `  Unpublished files. Sign-in returns here, not ${NRP_LIVE_SITE_URL}.`,
       usingRemoteApi
-        ? "  Data/login use the live VPS at cad.dojrblx.com. Sign-in returns here."
+        ? `  Data/login use the live Render API. Sign-in returns here.`
         : "",
       "",
       "  Live reload while editing: bun run dev:live",
