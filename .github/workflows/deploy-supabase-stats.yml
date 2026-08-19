@@ -1,0 +1,36 @@
+name: Deploy Supabase public-stats
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - cursor/vps-deploy-ia-roster-fixes
+    paths:
+      - "supabase/functions/public-stats/**"
+      - ".github/workflows/deploy-supabase-stats.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Deploy public-stats function
+        if: ${{ secrets.SUPABASE_ACCESS_TOKEN != '' }}
+        run: supabase functions deploy public-stats --project-ref vmkfcsbbzuzznwauzsxe --no-verify-jwt
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+
+      - name: Skipped — no Supabase token
+        if: ${{ secrets.SUPABASE_ACCESS_TOKEN == '' }}
+        run: |
+          echo "Add SUPABASE_ACCESS_TOKEN to GitHub repo secrets, then set Supabase function secrets:"
+          echo "  DISCORD_BOT_TOKEN, DISCORD_GUILD_ID"
+          echo "Dashboard: https://supabase.com/dashboard/project/vmkfcsbbzuzznwauzsxe/functions"

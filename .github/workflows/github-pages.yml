@@ -37,6 +37,7 @@ jobs:
           BASE_PATH: /
           NODE_ENV: production
           VITE_API_URL: ${{ vars.VITE_API_URL || 'https://nrp-cad-api.onrender.com' }}
+          VITE_STATS_URL: ${{ vars.VITE_STATS_URL || 'https://vmkfcsbbzuzznwauzsxe.supabase.co/functions/v1/public-stats' }}
 
       - name: Prepare GitHub Pages files
         run: bun ./scripts/prepare-github-pages.mjs
