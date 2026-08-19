@@ -61,56 +61,135 @@ const normalizeResourceRow = (row: Record<string, unknown>, opts: { public?: boo
   }, opts);
 
 // ── One-time migration ────────────────────────────────────────────────────────
-(async () => {
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS dph_resources (
-        id            serial PRIMARY KEY,
-        title         text NOT NULL,
-        type          text NOT NULL DEFAULT 'document',
-        logo_url      text,
-        header_config jsonb NOT NULL DEFAULT '{}',
-        content       jsonb NOT NULL DEFAULT '{}',
-        created_by    text,
-        created_at    timestamptz NOT NULL DEFAULT NOW(),
-        updated_at    timestamptz NOT NULL DEFAULT NOW()
-      )
-    `);
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS header_config jsonb NOT NULL DEFAULT '{}'`);
-    // file_data holds the stored PDF for uploaded (type='pdf') resources.
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS file_data bytea`);
-    // Optional link to a DPH division (Division Roster → Resources).
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS division_id integer`);
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS division_only boolean NOT NULL DEFAULT false`);
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS allowed_ranks text NOT NULL DEFAULT '[]'`);
-    // Department-wide visibility: DPH personnel only + optional DPH rank list
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS personnel_only boolean NOT NULL DEFAULT false`);
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS allowed_dph_ranks text NOT NULL DEFAULT '[]'`);
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
-    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
-  } catch (e) {
-    console.error("dph_resources migration failed:", e);
+let dphResourcesSchemaReady: Promise<void> | null = null;
+
+async function ensureDphResourcesSchema(): Promise<void> {
+  if (isMongoStore()) return;
+  if (!dphResourcesSchemaReady) {
+    dphResourcesSchemaReady = (async () => {
+      try {
+        await pool.query(`
+          CREATE TABLE IF NOT EXISTS dph_resources (
+            id            serial PRIMARY KEY,
+            title         text NOT NULL,
+            type          text NOT NULL DEFAULT 'document',
+            logo_url      text,
+            header_config jsonb NOT NULL DEFAULT '{}',
+            content       jsonb NOT NULL DEFAULT '{}',
+            created_by    text,
+            created_at    timestamptz NOT NULL DEFAULT NOW(),
+            updated_at    timestamptz NOT NULL DEFAULT NOW()
+          )
+        `);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS header_config jsonb NOT NULL DEFAULT '{}'`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS file_data bytea`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS division_id integer`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS division_only integer NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS allowed_ranks text NOT NULL DEFAULT '[]'`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS personnel_only integer NOT NULL DEFAULT 0`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS allowed_dph_ranks text NOT NULL DEFAULT '[]'`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
+        await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
+        try {
+          await pool.query(`
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'dph_resources'
+                  AND column_name = 'division_only' AND udt_name = 'bool'
+              ) THEN
+                ALTER TABLE dph_resources ALTER COLUMN division_only DROP DEFAULT;
+                ALTER TABLE dph_resources
+                  ALTER COLUMN division_only TYPE INTEGER
+                  USING (CASE WHEN division_only THEN 1 ELSE 0 END);
+                ALTER TABLE dph_resources ALTER COLUMN division_only SET DEFAULT 0;
+              END IF;
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'dph_resources'
+                  AND column_name = 'personnel_only' AND udt_name = 'bool'
+              ) THEN
+                ALTER TABLE dph_resources ALTER COLUMN personnel_only DROP DEFAULT;
+                ALTER TABLE dph_resources
+                  ALTER COLUMN personnel_only TYPE INTEGER
+                  USING (CASE WHEN personnel_only THEN 1 ELSE 0 END);
+                ALTER TABLE dph_resources ALTER COLUMN personnel_only SET DEFAULT 0;
+              END IF;
+            END $$;
+          `);
+        } catch (e) {
+          console.warn("[dph-resources] optional flag column normalize skipped:", e);
+        }
+      } catch (e) {
+        dphResourcesSchemaReady = null;
+        console.error("dph_resources migration failed:", e);
+        throw e;
+      }
+    })();
   }
-})();
+  await dphResourcesSchemaReady;
+}
+
+void ensureDphResourcesSchema().catch(() => { /* logged above */ });
+
+/** Postgres-safe 0/1 for flag columns stored as boolean or integer (legacy migrations). */
+const flagCol = (name: string) =>
+  `(CASE WHEN ${name} IS TRUE OR ${name} = 1 THEN 1 ELSE 0 END)`;
 
 const RESOURCE_LIST_COLS = `
   id, title, type, logo_url, header_config, created_by, created_at, updated_at, division_id,
-  COALESCE(division_only, false) AS division_only,
+  ${flagCol("division_only")} AS division_only,
   COALESCE(allowed_ranks, '[]') AS allowed_ranks,
-  COALESCE(personnel_only, false) AS personnel_only,
+  ${flagCol("personnel_only")} AS personnel_only,
   COALESCE(allowed_dph_ranks, '[]') AS allowed_dph_ranks,
   google_file_id, google_integration_id, google_modified_time
 `;
 
 const RESOURCE_DETAIL_COLS = `
   id, title, type, logo_url, header_config, content, created_by, created_at, updated_at,
-  division_id, COALESCE(division_only, false) AS division_only,
+  division_id, ${flagCol("division_only")} AS division_only,
   COALESCE(allowed_ranks, '[]') AS allowed_ranks,
-  COALESCE(personnel_only, false) AS personnel_only,
+  ${flagCol("personnel_only")} AS personnel_only,
   COALESCE(allowed_dph_ranks, '[]') AS allowed_dph_ranks,
   google_file_id, google_integration_id, google_modified_time
 `;
+
+const RESOURCE_LIST_COLS_BASE = `
+  id, title, type, logo_url, header_config, created_by, created_at, updated_at, division_id
+`;
+
+async function queryDphResourceList(
+  where: string,
+  params: unknown[],
+): Promise<Record<string, unknown>[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ${RESOURCE_LIST_COLS}
+         FROM dph_resources
+         ${where}
+        ORDER BY created_at DESC`,
+      params,
+    );
+    return rows as Record<string, unknown>[];
+  } catch (err) {
+    console.warn("[dph-resources] full list query failed, falling back to base columns:", err);
+    const fallbackWhere = where.includes("division_id = $1")
+      ? "WHERE division_id = $1"
+      : where.includes("division_id IS NULL")
+        ? "WHERE division_id IS NULL"
+        : "";
+    const { rows } = await pool.query(
+      `SELECT ${RESOURCE_LIST_COLS_BASE}
+         FROM dph_resources
+         ${fallbackWhere}
+        ORDER BY created_at DESC`,
+      params,
+    );
+    return rows as Record<string, unknown>[];
+  }
+}
 
 const isPublicResource = (row: {
   division_id?: unknown;
@@ -128,6 +207,9 @@ const isPublicResource = (row: {
 // ── GET /dph/resources — list all (lightweight, no content blob) ──────────────
 router.get("/dph/resources", async (req, res) => {
   try {
+    await ensureDphResourcesSchema().catch((err) => {
+      console.warn("[dph-resources] schema ensure failed:", err);
+    });
     const divisionIdRaw = typeof req.query.division_id === "string" ? req.query.division_id : "";
     const divisionId = divisionIdRaw ? parseInt(divisionIdRaw, 10) : NaN;
     const publicOnly =
@@ -141,17 +223,11 @@ router.get("/dph/resources", async (req, res) => {
       params.push(divisionId);
     } else if (publicOnly) {
       where = `WHERE division_id IS NULL
-                 AND COALESCE(division_only, false) = false
-                 AND COALESCE(personnel_only, false) = false`;
+                 AND ${flagCol("division_only")} = 0
+                 AND ${flagCol("personnel_only")} = 0`;
     }
-    const { rows } = await pool.query(
-      `SELECT ${RESOURCE_LIST_COLS}
-         FROM dph_resources
-         ${where}
-        ORDER BY created_at DESC`,
-      params
-    );
-    const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>, { public: publicOnly }));
+    const rows = await queryDphResourceList(where, params);
+    const normalized = rows.map(r => normalizeResourceRow(r, { public: publicOnly }));
     res.json(publicOnly ? normalized.filter(isPublicResource) : normalized);
   } catch (err) {
     req.log.error({ err }, "dph/resources GET error");
@@ -286,6 +362,9 @@ router.get("/dph/resources/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    await ensureDphResourcesSchema().catch((err) => {
+      console.warn("[dph-resources] schema ensure failed:", err);
+    });
     const { rows } = await pool.query(
       `SELECT ${RESOURCE_DETAIL_COLS} FROM dph_resources WHERE id = $1`,
       [id]

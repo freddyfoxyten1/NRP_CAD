@@ -361,6 +361,9 @@ export async function ensurePostgresSchema(pool: Queryable): Promise<void> {
       allowed_ranks TEXT NOT NULL DEFAULT '[]',
       personnel_only INTEGER NOT NULL DEFAULT 0,
       allowed_dph_ranks TEXT NOT NULL DEFAULT '[]',
+      google_file_id TEXT,
+      google_integration_id INTEGER,
+      google_modified_time TEXT,
       created_at TEXT NOT NULL DEFAULT ${NOW},
       updated_at TEXT NOT NULL DEFAULT ${NOW}
     );
@@ -458,6 +461,9 @@ async function ensurePostgresMigrations(pool: Queryable): Promise<void> {
     ["dps_resources", "google_file_id", "TEXT"],
     ["dps_resources", "google_integration_id", "INTEGER"],
     ["dps_resources", "google_modified_time", "TEXT"],
+    ["dph_resources", "google_file_id", "TEXT"],
+    ["dph_resources", "google_integration_id", "INTEGER"],
+    ["dph_resources", "google_modified_time", "TEXT"],
   ];
 
   for (const [table, column, definition] of addColumns) {

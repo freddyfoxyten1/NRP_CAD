@@ -732,18 +732,19 @@ router.get("/public/events", async (req, res) => {
   });
 
   try {
+    const publicEventFlag = `(CASE WHEN is_public IS TRUE OR is_public = 1 THEN 1 ELSE 0 END) = 1`;
     const [dps, dph, staff] = await Promise.all([
       pool.query(
         `SELECT id, title, event_date, event_time, location, purpose, hosted_by, hosting_department
-         FROM dps_events WHERE is_public = true`
+         FROM dps_events WHERE ${publicEventFlag}`
       ).catch(() => ({ rows: [] as Row[] })),
       pool.query(
         `SELECT id, title, event_date, event_time, location, purpose, hosted_by, hosting_department
-         FROM dph_events WHERE is_public = true`
+         FROM dph_events WHERE ${publicEventFlag}`
       ).catch(() => ({ rows: [] as Row[] })),
       pool.query(
         `SELECT id, title, event_date, event_time, location, purpose, hosted_by, hosting_department
-         FROM staff_events WHERE is_public = true`
+         FROM staff_events WHERE ${publicEventFlag}`
       ).catch(() => ({ rows: [] as Row[] })),
     ]);
 

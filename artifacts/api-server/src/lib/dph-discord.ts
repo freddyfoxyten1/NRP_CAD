@@ -7,10 +7,11 @@
 // single member cache and a single Discord pagination per sync cycle.
 // ─────────────────────────────────────────────────────────────────────────────
 import { pool } from "@workspace/db";
+import { COMMUNITY_GUILD_ID } from "./discord-auth.js";
 import { getDiscordGuildRoles } from "./discord-guild-roles-cache.js";
 
-/** DPH Discord server — role linking & membership checks. */
-export const DPH_GUILD_ID = process.env.DPH_DISCORD_GUILD_ID ?? "1519857439220957204";
+/** DPH Discord server — role linking & membership checks (defaults to community guild). */
+export const DPH_GUILD_ID = (process.env.DPH_DISCORD_GUILD_ID ?? "").trim() || COMMUNITY_GUILD_ID;
 
 /** Guild used for DPH Division Roster role links — defaults to the DPH guild. */
 export const DPH_DIVISION_GUILD_ID =
