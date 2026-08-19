@@ -133,7 +133,8 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
           type="button"
           onClick={handleDiscordSignIn}
           disabled={pending}
-          className="mt-8 flex h-[52px] w-full items-center justify-center gap-3 rounded-xl bg-[#2f66ee] text-[13px] font-black uppercase tracking-[0.06em] text-white shadow-[0_10px_32px_rgba(47,102,238,0.45)] transition-all hover:-translate-y-0.5 hover:bg-[#3a74ff] hover:shadow-[0_14px_36px_rgba(47,102,238,0.55)] disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0"
+          className="mt-8 flex h-[52px] w-full items-center justify-center gap-3 rounded-xl bg-[#2f66ee] text-[13px] font-black tracking-[0.02em] text-white shadow-[0_10px_32px_rgba(47,102,238,0.45)] transition-all hover:-translate-y-0.5 hover:bg-[#3a74ff] hover:shadow-[0_14px_36px_rgba(47,102,238,0.55)] disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0"
+          aria-label="Login with Discord"
         >
           {pending ? (
             <>

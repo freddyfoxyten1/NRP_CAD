@@ -76,4 +76,4 @@ http://localhost:5173/dojcad/discord-callback
 - **Homepage counts:** https://northpointrp.xyz (Members / Online cards)
 - **Stats JSON (Supabase):** `https://vmkfcsbbzuzznwauzsxe.supabase.co/functions/v1/public-stats`
 - **Stats JSON (Render):** `https://nrp-cad-api.onrender.com/api/public/live-stats`
-- **Sign in:** Staff Login with Discord on https://northpointrp.xyz
+- **Sign in:** Login with Discord on https://northpointrp.xyz
