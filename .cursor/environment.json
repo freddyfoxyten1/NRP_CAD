@@ -1,0 +1,16 @@
+{
+  "name": "NRP CAD",
+  "install": "bun install",
+  "terminals": [
+    {
+      "name": "preview",
+      "command": "bun run dev:live"
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 5173
+    }
+  ]
+}

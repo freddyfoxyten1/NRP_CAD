@@ -1,3 +1,5 @@
+import { NRP_LIVE_API_URL } from '../../scripts/nrp-live-defaults.mjs';
+
 import http from 'node:http';
 import https from 'node:https';
 import path from 'path';
@@ -17,10 +19,10 @@ if (Number.isNaN(port) || port <= 0) {
 const basePath = process.env.BASE_PATH ?? '/';
 const apiPort = process.env.API_PORT ?? '8080';
 const isVitePreview = process.argv.includes('preview');
-/** When set (e.g. https://cad.dojrblx.com), preview uses the deployed VPS API + Mongo instead of local SQLite. */
+/** When set (e.g. Render API URL), preview uses the deployed API + Supabase instead of local SQLite. */
 const previewApiUrl = (
   process.env.PREVIEW_API_URL ??
-  (isVitePreview ? 'https://cad.dojrblx.com' : '')
+  (isVitePreview ? NRP_LIVE_API_URL : '')
 ).trim().replace(/\/$/, '');
 const localApiUrl = `http://127.0.0.1:${apiPort}`;
 const apiTarget = previewApiUrl || localApiUrl;
@@ -64,7 +66,7 @@ function apiProxyOptions(target = apiTarget) {
             res.writeHead(502, { 'content-type': 'application/json' });
             res.end(JSON.stringify({
               error: remote
-                ? 'Could not reach the live VPS API. Try again in a moment.'
+                ? 'Could not reach the live Render API. Try again in a moment.'
                 : 'The local API is not running. Restart preview with bun run preview.',
             }));
           }
@@ -74,7 +76,7 @@ function apiProxyOptions(target = apiTarget) {
   };
 }
 
-/** Unpublished Google Doc routes are not on the VPS yet — always hit this checkout's API. */
+/** Unpublished Google Doc routes are not on Render yet — always hit this checkout's API. */
 function unpublishedApiProxy() {
   return apiProxyOptions(localApiUrl);
 }

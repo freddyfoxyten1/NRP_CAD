@@ -36,6 +36,7 @@ That starts a **local live-reload preview** at http://localhost:5173/ — save a
 |---|---|
 | `bun run preview` | Live reload of your unpublished files (use this while editing) |
 | `bun run preview:edit` | Production-style build preview on port 4173 |
-| `bun run preview:live` | Local files + live VPS data (cad.dojrblx.com) |
+| `bun run dev:live` | Live reload + live Render API data (Supabase) |
+| `bun run preview:live` | Local build preview + live Render API data |
 | `bun run render:setup` | Create/update Render API + sync secrets from `.env` |
 | `bun run render:check` | Probe `https://nrp-cad-api.onrender.com/api/healthz` |

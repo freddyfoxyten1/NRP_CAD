@@ -1,11 +1,13 @@
 /**
  * Purge all DPH title groups, ranks, and roster members via the live API.
- * Uses PREVIEW_API_URL or https://cad.dojrblx.com by default.
+ * Uses PREVIEW_API_URL or the live Render API by default.
  *
  * Dry run:  bun ./scripts/purge-dph-roster-api.mjs
  * Apply:    bun ./scripts/purge-dph-roster-api.mjs --apply
  */
-const BASE = (process.env.PREVIEW_API_URL ?? "https://cad.dojrblx.com").replace(/\/$/, "");
+import { NRP_LIVE_API_URL } from "./nrp-live-defaults.mjs";
+
+const BASE = (process.env.PREVIEW_API_URL ?? NRP_LIVE_API_URL).replace(/\/$/, "");
 const APPLY = process.argv.includes("--apply");
 
 async function getJson(path) {
