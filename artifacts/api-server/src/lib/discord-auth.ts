@@ -325,11 +325,11 @@ export async function loadCadSession(profileId: number): Promise<CadSessionPaylo
             p.staff_rank, p.staff_role,
             NULLIF(p.discord_id, '') AS discord_id,
             NULLIF(p.avatar_hash, '') AS avatar_hash,
-            COALESCE(p.can_access_iab, false) AS can_access_iab,
-            COALESCE(p.can_access_system_logs, false) AS can_access_system_logs,
-            COALESCE(p.can_access_terms_privacy, false) AS can_access_terms_privacy,
-            COALESCE(p.can_access_terminal_offline, false) AS can_access_terminal_offline,
-            COALESCE(p.can_access_doc_dps_cad, false) AS can_access_doc_dps_cad
+            COALESCE(p.can_access_iab, 0) AS can_access_iab,
+            COALESCE(p.can_access_system_logs, 0) AS can_access_system_logs,
+            COALESCE(p.can_access_terms_privacy, 0) AS can_access_terms_privacy,
+            COALESCE(p.can_access_terminal_offline, 0) AS can_access_terminal_offline,
+            COALESCE(p.can_access_doc_dps_cad, 0) AS can_access_doc_dps_cad
      FROM cad_user_profiles p
      LEFT JOIN dps_users d ON d.profile_id = p.id
      WHERE p.id = $1
@@ -388,7 +388,7 @@ export async function canSignInForCadMode(profileId: number): Promise<{
       can_access_terminal_offline: boolean | number | null;
     }>(
       `SELECT staff_role, staff_rank, discord_id,
-              COALESCE(can_access_terminal_offline, false) AS can_access_terminal_offline
+              COALESCE(can_access_terminal_offline, 0) AS can_access_terminal_offline
        FROM cad_user_profiles
        WHERE id = $1
        LIMIT 1`,

@@ -57,26 +57,26 @@ export async function ensureSuperAdminAccess(discordId: string, profileId: numbe
   if (existing.rows.length === 0) {
     await pool.query(
       `INSERT INTO staff_rank_groups (name, sort_order, locked, staff_access, admin_access, doc_access)
-       VALUES ('Executive Team', 0, TRUE, TRUE, TRUE, TRUE)`,
+       VALUES ('Executive Team', 0, 1, 1, 1, 1)`,
     );
   } else {
     await pool.query(
       `UPDATE staff_rank_groups
-       SET locked = TRUE, staff_access = TRUE, admin_access = TRUE, doc_access = TRUE
+       SET locked = 1, staff_access = 1, admin_access = 1, doc_access = 1
        WHERE id = $1`,
       [existing.rows[0].id],
     );
   }
 
-  // Whitelist + full access flags — keep whatever staff roster rank they already have.
+  // Whitelist + full access flags — Postgres bootstrap uses INTEGER booleans (0/1).
   await pool.query(
     `UPDATE cad_user_profiles
-     SET whitelisted = TRUE,
-         can_access_iab = TRUE,
-         can_access_system_logs = TRUE,
-         can_access_terms_privacy = TRUE,
-         can_access_terminal_offline = TRUE,
-         can_access_doc_dps_cad = TRUE,
+     SET whitelisted = 1,
+         can_access_iab = 1,
+         can_access_system_logs = 1,
+         can_access_terms_privacy = 1,
+         can_access_terminal_offline = 1,
+         can_access_doc_dps_cad = 1,
          updated_at  = NOW()
      WHERE id = $1`,
     [profileId],
