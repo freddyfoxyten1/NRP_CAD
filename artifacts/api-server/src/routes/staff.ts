@@ -71,7 +71,7 @@ async function denyUnlessSuperAdminForLocked(
 
 /** Postgres-safe 0/1 for profile flag columns stored as boolean or integer. */
 const profileFlagCol = (column: string) =>
-  `(CASE WHEN p.${column} IS TRUE OR p.${column} = 1 THEN 1 ELSE 0 END)`;
+  `(CASE WHEN COALESCE(p.${column}::int, 0) != 0 THEN 1 ELSE 0 END)`;
 
 // Cache of all guild members — populated by the background sync so the
 // member-search endpoint never needs to re-paginate for a search query.
@@ -1711,8 +1711,7 @@ function mapStaffEvent(row: Record<string, unknown>) {
   };
 }
 
-const staffPublicEventFlag =
-  `(CASE WHEN is_public IS TRUE OR is_public = 1 THEN 1 ELSE 0 END) = 1`;
+const staffPublicEventFlag = `(COALESCE(is_public::int, 0) != 0)`;
 
 router.get("/staff/events", async (req, res) => {
   await ensureStaffEvents;
