@@ -8,8 +8,20 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:4173",
 ]);
 
+function isAllowedStatsOrigin(origin: string | null): boolean {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return host.endsWith(".vercel.app");
+  } catch {
+    return false;
+  }
+}
+
 function corsHeaders(origin: string | null): Record<string, string> {
-  const allowed = origin && ALLOWED_ORIGINS.has(origin) ? origin : "https://northpointrp.xyz";
+  const allowed =
+    origin && isAllowedStatsOrigin(origin) ? origin : "https://northpointrp.xyz";
   return {
     "Access-Control-Allow-Origin": allowed,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, accept",

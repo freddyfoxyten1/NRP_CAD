@@ -1,41 +1,39 @@
 # Northpoint Roleplay CAD
 
-Public community CAD for Northpoint Roleplay. The live site is published with GitHub Pages on a custom domain:
+Public community CAD for Northpoint Roleplay.
 
-**https://northpointrp.xyz**
+**Production site:** https://northpointrp.xyz — host the frontend on **[Vercel](docs/VERCEL-SETUP.md)** (recommended) or GitHub Pages.
 
-GitHub Pages serves the static website. Discord login, member counts, and CAD data come from the API (`nrp-cad-api` on Render), which uses your Discord bot and Supabase Postgres.
+The **API** runs on Render (`nrp-cad-api`) with **Supabase Postgres**. Discord counts can fall back to a Supabase Edge Function.
 
-**Setup guide:** [`docs/LIVE-SETUP.md`](docs/LIVE-SETUP.md)
+**Setup guides:**
+- **[Vercel hosting](docs/VERCEL-SETUP.md)** — recommended for the website
+- **[Live stack (Render + Supabase)](docs/LIVE-SETUP.md)** — API, Discord, database
 
-The Pages build calls `https://nrp-cad-api.onrender.com`. Deploy the API with:
+Deploy the API with:
 
 ```bash
 # Add RENDER_API_KEY to .env, then:
 bun run render:setup
 ```
 
-Or use [Render Blueprint](https://dashboard.render.com/select-repo?type=blueprint) once, then paste these **environment values** in the Render dashboard (do not put them in git):
-
-- `DATABASE_URL` — Supabase session pooler URI
-- `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` / `DISCORD_BOT_TOKEN`
-
 In the [Discord Developer Portal](https://discord.com/developers/applications) OAuth2 redirects, add:
 
 - `http://localhost:5173/dojcad/discord-callback`
 - `https://northpointrp.xyz/dojcad/discord-callback`
+- `https://www.northpointrp.xyz/dojcad/discord-callback`
 
 ```bash
 bun install
-bun run preview
+bun run dev:live
 ```
 
-That starts a **local live-reload preview** at http://localhost:5173/ — save a file and the browser updates. Nothing is committed or pushed until you do it yourself.
+Live-reload preview at http://localhost:5173/ — UI from this repo, API from Render, stats from Supabase.
 
 | Command | What it does |
 |---|---|
-| `bun run preview` | Live reload of your unpublished files (use this while editing) |
-| `bun run preview:edit` | Production-style build preview on port 4173 |
-| `bun run preview:live` | Local files + live VPS data (cad.dojrblx.com) |
+| `bun run dev:live` | Live preview + Render API + Supabase stats URL |
+| `bun run dev` | Offline preview (local SQLite only) |
+| `bun run vercel:build` | Production build (same as Vercel deploy) |
 | `bun run render:setup` | Create/update Render API + sync secrets from `.env` |
-| `bun run render:check` | Probe `https://nrp-cad-api.onrender.com/api/healthz` |
+| `bun run supabase:deploy-stats` | Deploy Supabase Discord count function |

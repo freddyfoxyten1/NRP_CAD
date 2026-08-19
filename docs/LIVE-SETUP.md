@@ -1,6 +1,8 @@
 # Live site: northpointrp.xyz
 
-GitHub Pages serves the frontend only — it **does not read `.env`**. Discord member/online counts and sign-in need hosted backends with your secrets.
+The **frontend** is hosted on **[Vercel](VERCEL-SETUP.md)** (recommended). GitHub Pages is legacy — disable it after Vercel is live.
+
+The **API** runs on Render; **database** is Supabase Postgres. GitHub Pages / Vercel do **not** read `.env` — Discord login and counts need those hosted backends.
 
 ## Quick fix: Discord counts on the homepage (Supabase)
 

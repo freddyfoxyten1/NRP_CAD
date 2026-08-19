@@ -2,6 +2,7 @@ import type { Request } from "express";
 import { pool, isMongoStore, usersRepo } from "@workspace/db";
 import { denyMessageForMode, getCadMode, modeToOnline, type CadMode } from "./cad-mode";
 import { applySuperAdminSessionOverrides, isSuperAdminDiscordId } from "./superadmin";
+import { isGitHubPagesHost, isNorthpointSiteHost, isVercelPreviewHost } from "./site-origins";
 
 /** Main community Discord — login gate, public member/online counts. */
 export const COMMUNITY_GUILD_ID =
@@ -124,10 +125,9 @@ function isAllowedOAuthHost(host: string, isProd: boolean): boolean {
   }
   if (
     lower === "cad.dojrblx.com" ||
-    lower === "northpointrp.xyz" ||
-    lower === "www.northpointrp.xyz" ||
-    lower === "freddyfoxyten1.github.io" ||
-    lower.endsWith(".github.io")
+    isNorthpointSiteHost(lower) ||
+    isVercelPreviewHost(lower) ||
+    isGitHubPagesHost(lower)
   ) {
     return true;
   }
@@ -145,7 +145,7 @@ function isAllowedOAuthHost(host: string, isProd: boolean): boolean {
 function publicSiteBasePath(host: string): string {
   const fromEnv = (process.env.PUBLIC_BASE_PATH ?? "").trim().replace(/\/$/, "");
   if (fromEnv) return fromEnv.startsWith("/") ? fromEnv : `/${fromEnv}`;
-  if (host.toLowerCase().endsWith(".github.io")) return "/NRP_CAD";
+  if (isGitHubPagesHost(host)) return "/NRP_CAD";
   return "";
 }
 
