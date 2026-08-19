@@ -9,11 +9,26 @@ import { ensureMongoIndexes } from "./ensure-indexes";
 import { createMongoPoolFacade } from "./mongo-sql-bridge";
 import { postgresPoolConfig } from "./postgres-url";
 import { ensurePostgresSchema } from "./bootstrap-postgres";
+import { adaptSqlForPostgres } from "./postgres-sql-adapter";
 
 const { Pool } = pg;
 
 function isPlaceholderDatabaseUrl(url: string): boolean {
   return /\[YOUR-PASSWORD\]|:YOUR_PASSWORD@|:PASSWORD@/i.test(url);
+}
+
+function wrapPostgresPool(pool: pg.Pool): pg.Pool {
+  const baseQuery = pool.query.bind(pool);
+  pool.query = ((queryText: string | pg.QueryConfig, values?: unknown[]) => {
+    if (typeof queryText === "string") {
+      return baseQuery(adaptSqlForPostgres(queryText), values);
+    }
+    if (queryText && typeof queryText === "object" && typeof queryText.text === "string") {
+      return baseQuery({ ...queryText, text: adaptSqlForPostgres(queryText.text) }, values);
+    }
+    return baseQuery(queryText, values);
+  }) as typeof pool.query;
+  return pool;
 }
 
 function createSqlPool(): pg.Pool {
@@ -26,7 +41,7 @@ function createSqlPool(): pg.Pool {
       console.warn("[db] DATABASE_URL still has a password placeholder — using local SQLite until you paste the real Supabase password.");
     } else {
       console.info("[db] Using Postgres via DATABASE_URL");
-      return new Pool(postgresPoolConfig(databaseUrl));
+      return wrapPostgresPool(new Pool(postgresPoolConfig(databaseUrl)));
     }
   }
 

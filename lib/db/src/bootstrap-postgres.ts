@@ -440,4 +440,89 @@ export async function ensurePostgresSchema(pool: Queryable): Promise<void> {
       SELECT 1 FROM staff_rank_groups WHERE lower(name) = 'executive team'
     );
   `);
+
+  await ensurePostgresMigrations(pool);
+}
+
+/** Idempotent column/table patches for Supabase databases created from older schema snapshots. */
+async function ensurePostgresMigrations(pool: Queryable): Promise<void> {
+  const addColumns: Array<[string, string, string]> = [
+    ["cad_user_profiles", "division_rank", "TEXT"],
+    ["dps_users", "division_rank", "TEXT"],
+    ["dps_rank_groups", "panel_access", "INTEGER NOT NULL DEFAULT 0"],
+    ["dps_rank_groups", "division_oversight", "INTEGER NOT NULL DEFAULT 0"],
+    ["dps_rank_groups", "locked", "INTEGER NOT NULL DEFAULT 0"],
+    ["dph_rank_groups", "panel_access", "INTEGER NOT NULL DEFAULT 0"],
+    ["dph_rank_groups", "division_oversight", "INTEGER NOT NULL DEFAULT 0"],
+  ];
+
+  for (const [table, column, definition] of addColumns) {
+    await pool.query(
+      `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${definition}`,
+    );
+  }
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS dps_resources (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'document',
+      logo_url TEXT,
+      header_config TEXT NOT NULL DEFAULT '{}',
+      content TEXT NOT NULL DEFAULT '{}',
+      created_by TEXT,
+      file_data BYTEA,
+      division_id INTEGER,
+      division_only INTEGER NOT NULL DEFAULT 0,
+      allowed_ranks TEXT NOT NULL DEFAULT '[]',
+      personnel_only INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT ${NOW},
+      updated_at TEXT NOT NULL DEFAULT ${NOW}
+    );
+
+    CREATE TABLE IF NOT EXISTS dps_equipment_categories (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS dps_equipment (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      quantity TEXT,
+      category TEXT NOT NULL DEFAULT 'General',
+      category_sort INTEGER NOT NULL DEFAULT 0,
+      image_url TEXT,
+      image_scale DOUBLE PRECISION NOT NULL DEFAULT 1,
+      image_position_x DOUBLE PRECISION NOT NULL DEFAULT 50,
+      image_position_y DOUBLE PRECISION NOT NULL DEFAULT 50,
+      who_can_use TEXT NOT NULL DEFAULT '[]',
+      restrict_to_divisions TEXT NOT NULL DEFAULT '[]',
+      notes TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS staff_resources (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'document',
+      logo_url TEXT,
+      header_config TEXT NOT NULL DEFAULT '{}',
+      content TEXT NOT NULL DEFAULT '{}',
+      created_by TEXT,
+      file_data BYTEA,
+      allowed_ranks TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT ${NOW},
+      updated_at TEXT NOT NULL DEFAULT ${NOW}
+    );
+
+    CREATE TABLE IF NOT EXISTS cad_audit_logs (
+      id SERIAL PRIMARY KEY,
+      department TEXT NOT NULL,
+      actor TEXT NOT NULL DEFAULT 'System',
+      action TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT ${NOW}
+    );
+  `);
 }
