@@ -4,9 +4,11 @@ Public community CAD for Northpoint Roleplay. The live site is published with Gi
 
 **https://northpointrp.xyz**
 
-GitHub Pages serves the static website. Discord login, member counts, and CAD data come from the API, which uses your Discord bot and Supabase Postgres.
+GitHub Pages serves the static website. Discord login, member counts, and CAD data come from the API (`nrp-cad-api` on Render), which uses your Discord bot and Supabase Postgres.
 
-The Pages build calls `https://nrp-cad-api.onrender.com`. Create that API once on [Render](https://render.com) from this repo (`render.yaml`), and paste these **environment values** in the Render dashboard (do not put them in git):
+**Setup guide:** [`docs/LIVE-SETUP.md`](docs/LIVE-SETUP.md)
+
+The Pages build calls `https://nrp-cad-api.onrender.com`. Create that API once on [Render](https://dashboard.render.com/select-repo?type=blueprint) from this repo (`render.yaml`), and paste these **environment values** in the Render dashboard (do not put them in git):
 
 - `DATABASE_URL` — Supabase session pooler URI
 - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` / `DISCORD_BOT_TOKEN`

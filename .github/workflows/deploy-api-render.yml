@@ -1,0 +1,28 @@
+name: Deploy API (Render)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - cursor/vps-deploy-ia-roster-fixes
+    paths:
+      - "Dockerfile"
+      - "render.yaml"
+      - "scripts/start-production-api.mjs"
+      - "artifacts/api-server/**"
+      - "lib/db/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+        run: curl -fsS -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
+
+      - name: No deploy hook configured
+        if: ${{ secrets.RENDER_DEPLOY_HOOK == '' }}
+        run: |
+          echo "Skip: add RENDER_DEPLOY_HOOK in GitHub repo secrets after creating nrp-cad-api on Render."
+          echo "Blueprint: https://dashboard.render.com/select-repo?type=blueprint"

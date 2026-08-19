@@ -48,6 +48,11 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
         if (res.status >= 500) {
           throw new Error('The API server is not running. From the project root, run: bun run dev');
         }
+        if (res.status === 404 || res.status === 502 || res.status === 503) {
+          throw new Error(
+            'The live API is not running yet. Deploy the nrp-cad-api service on Render and set DATABASE_URL plus Discord secrets.',
+          );
+        }
         throw new Error('The server returned an unexpected response.');
       }
 

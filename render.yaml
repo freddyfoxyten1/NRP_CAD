@@ -2,8 +2,11 @@ services:
   - type: web
     name: nrp-cad-api
     runtime: docker
+    plan: free
+    region: frankfurt
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/healthz
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
@@ -12,7 +15,7 @@ services:
       - key: PUBLIC_BASE_PATH
         value: ""
       - key: CORS_ORIGIN
-        value: https://northpointrp.xyz
+        value: https://northpointrp.xyz,https://www.northpointrp.xyz
       - key: PUBLIC_ORIGIN
         value: https://northpointrp.xyz
       - key: DISCORD_REDIRECT_URI
