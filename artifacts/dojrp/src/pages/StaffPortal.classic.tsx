@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { usePortalSection } from '@/hooks/usePortalSection';
 import { BookOpen, CalendarDays, ChevronDown, ChevronRight, FileText, LayoutDashboard, LogOut, MapPin, Pencil, Plus, Search, Shield, Trash2, Users, X } from 'lucide-react';
@@ -8,10 +8,36 @@ import DojrpShield from '@/components/shared/DojrpShield';
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
 import DocumentEditor from '@/components/editor/DocumentEditor';
 import PdfViewer from '@/components/shared/PdfViewer';
+import { googleFileIdFromResource, isPdfLikeResource, resourceFileUrl, resourceTypeLabel } from '@/lib/resource-type';
+import { parseResourcePathname } from '@/lib/resource-url';
+import { useResourceDeepLink } from '@/hooks/useResourceDeepLink';
+import { useLocation } from 'react-router-dom';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
 import { isSuperAdminSession } from '@/lib/superadmin';
 import { getStaffRosterTitle, getStaffSidebarTitle } from '@/lib/display-rank';
 import { sortByRankThenUsername } from '@/lib/roster-sort';
+import { useDiscordPresence } from '@/hooks/useDiscordPresence';
+import { DiscordStatusBadge } from '@/components/shared/DiscordStatusBadge';
+import { StaffModernShell } from '@/pages/staff/StaffModernShell';
+
+type StaffTab = 'roster' | 'resources' | 'events';
+
+function getStaffTabSubtitle(tab: StaffTab): string {
+  switch (tab) {
+    case 'roster': return 'Active staff roster for DOJ:RP.';
+    case 'resources': return 'Guides and reference materials for staff. Managed from the Admin Portal.';
+    case 'events': return 'Host server events as DOJ Staff. Public events appear on the website index.';
+    default: return 'Staff roster portal.';
+  }
+}
+
+const STAFF_NAV_TABS = [
+  { id: 'roster' as const, label: 'Staff Roster', icon: Users },
+  { id: 'resources' as const, label: 'Resources', icon: BookOpen },
+  { id: 'events' as const, label: 'Events', icon: CalendarDays },
+];
+
+
 
 // ── Access control ─────────────────────────────────────────────────────────────
 const STAFF_ROLE_GROUPS = ['Executive Team', 'Owner', 'Executive', 'Management', 'Admin', 'Moderation'];
@@ -38,6 +64,8 @@ type StaffResource = {
   title: string;
   type: string;
   logo_url: string | null;
+  google_file_id?: string | null;
+  header_config?: unknown;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -121,8 +149,11 @@ const Avatar = ({ name, discordId, avatarHash, size = 'sm' }: { name: string; di
 };
 
 // ── Main page ──────────────────────────────────────────────────────────────────
-const StaffPortalClassic = () => {
+type StaffShellTheme = 'classic' | 'modern';
+
+const StaffPortal = ({ shellTheme = 'classic' }: { shellTheme?: StaffShellTheme } = {}) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [session,     setSession]     = useState<CadSession | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
@@ -131,7 +162,14 @@ const StaffPortalClassic = () => {
     base: 'staff',
     valid: ['roster', 'resources', 'events'] as const,
     defaultSection: 'roster',
+    resolveParent: raw =>
+      raw.startsWith('resources-') || raw.startsWith('public_resource_') || raw.startsWith('edit_resource_')
+        ? 'resources'
+        : null,
   });
+  const pathnameResourceLink = useMemo(() => parseResourcePathname(location.pathname), [location.pathname]);
+  const showResourcesTab = activeTab === 'resources'
+    || (pathnameResourceLink?.department === 'staff' && pathnameResourceLink.mode === 'public');
 
   // ── Roster state ──────────────────────────────────────────────────────────
   const [groups,       setGroups]       = useState<StaffGroup[]>([]);
@@ -283,9 +321,41 @@ const StaffPortalClassic = () => {
   };
 
   useEffect(() => {
-    if (activeTab !== 'resources') return;
+    if (!showResourcesTab) return;
     void fetchResources();
-  }, [activeTab]);
+  }, [showResourcesTab]);
+
+  const openResourceState = useCallback((r: StaffResource) => {
+    if (isPdfLikeResource(r)) {
+      setOpenPdf(r);
+      setOpenDocId(null);
+      return;
+    }
+    setOpenPdf(null);
+    setOpenDocId(r.id);
+  }, []);
+
+  const onStaffResourceDeepLink = useCallback((r: StaffResource) => {
+    openResourceState(r);
+  }, [openResourceState]);
+
+  const { openResourceUrl, closeResourceUrl } = useResourceDeepLink({
+    department: 'staff',
+    resources,
+    resourcesLoaded: !resourcesLoading,
+    onOpen: onStaffResourceDeepLink,
+  });
+
+  const handleOpenResource = (r: StaffResource) => {
+    openResourceUrl(r, false);
+    openResourceState(r);
+  };
+
+  const handleCloseResource = () => {
+    setOpenPdf(null);
+    setOpenDocId(null);
+    closeResourceUrl();
+  };
 
   const fetchEvents = async () => {
     setEventsLoading(true);
@@ -392,149 +462,29 @@ const StaffPortalClassic = () => {
   );
   if (orphans.length > 0) groupedRoster.push({ id: -1, label: 'Other', locked: false, members: orphans });
   const totalVisible = filteredMembers.length;
+  const staffDiscordIds = useMemo(() => members.map(m => m.discord_id), [members]);
+  const discordPresence = useDiscordPresence(staffDiscordIds);
 
   const pageLoading = authLoading
-    || (activeTab === 'roster' && dataLoading)
-    || (activeTab === 'resources' && resourcesLoading)
-    || (activeTab === 'events' && eventsLoading);
+    || (activeTab === 'roster' && dataLoading && members.length === 0)
+    || (showResourcesTab && resourcesLoading && resources.length === 0)
+    || (activeTab === 'events' && eventsLoading && events.length === 0);
 
-  const inputCls = 'h-10 w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-3 text-sm font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#ff5d5d] transition-colors';
-  const labelCls = 'block text-[10px] font-black uppercase tracking-[0.18em] text-[#6f7f99] mb-1.5';
 
-  return (
-    <main className="min-h-screen bg-[#02060b] text-white">
+  const tabTitle = STAFF_NAV_TABS.find(t => t.id === activeTab)?.label ?? 'Staff Roster';
+  const tabSubtitle = getStaffTabSubtitle(activeTab);
+  const useModernShell = shellTheme === 'modern';
+  const canSeeAdminPortal = isSuperAdminSession(session) || (groups.find(g => g.name.toLowerCase() === ((session?.staff_role ?? session?.role) ?? '').toLowerCase().trim())?.admin_access ?? false);
+  const username = session?.username ?? '';
+  const rankLabel = getStaffSidebarTitle(session);
 
-      {/* ── Sidebar ───────────────────────────────────────────────────────── */}
-      <aside className="fixed inset-y-0 left-0 flex w-[265px] flex-col border-r border-[#182232] bg-[#03070c] px-5 py-5">
-        <div className="shrink-0">
-          <h1 className="text-xl font-black tracking-[-0.04em] text-white">Staff Roster</h1>
-          <p className="mt-2 flex items-center gap-2 text-sm font-black leading-none text-[#ff5d5d]"><DojrpShield className="h-5 w-5" /><DojrpLogo /></p>
-          <p className="mt-1 text-[10px] font-black uppercase tracking-[0.22em] text-[#7b8ca7]">
-            {getStaffSidebarTitle(session)}
-          </p>
-        </div>
-
-        <div className="sidebar-scroll mt-8 flex-1 overflow-x-hidden overflow-y-auto">
-          <nav className="flex flex-col gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('roster')}
-              className={`flex items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm font-semibold transition-colors ${
-                activeTab === 'roster'
-                  ? 'border-l-2 border-[#ff5d5d] bg-[#1a0608] text-white'
-                  : 'text-[#a8b7cd] hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <Users className="h-4 w-4 shrink-0" />
-              Staff Roster
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('resources')}
-              className={`flex items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm font-semibold transition-colors ${
-                activeTab === 'resources'
-                  ? 'border-l-2 border-[#ff5d5d] bg-[#1a0608] text-white'
-                  : 'text-[#a8b7cd] hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <BookOpen className="h-4 w-4 shrink-0" />
-              Resources
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('events')}
-              className={`flex items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm font-semibold transition-colors ${
-                activeTab === 'events'
-                  ? 'border-l-2 border-[#ff5d5d] bg-[#1a0608] text-white'
-                  : 'text-[#a8b7cd] hover:bg-white/5 hover:text-white'
-              }`}
-            >
-              <CalendarDays className="h-4 w-4 shrink-0" />
-              Events
-            </button>
-          </nav>
-
-          <div className="mt-6 flex flex-col gap-2 border-t border-[#182232] pt-6">
-            <button
-              type="button"
-              onClick={() => window.open('https://portal.dojrblx.com/', '_blank')}
-              className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase text-[#a8b7cd] transition-colors hover:text-white"
-            >
-              <Shield className="h-4 w-4" />
-              Staff Portal
-            </button>
-            {(isSuperAdminSession(session) || (groups.find(g => g.name.toLowerCase() === ((session?.staff_role ?? session?.role) ?? '').toLowerCase().trim())?.admin_access ?? false)) && (
-              <button
-                type="button"
-                onClick={() => navigate('/admin_members')}
-                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase text-[#a8b7cd] transition-colors hover:text-white"
-              >
-                <Shield className="h-4 w-4" />
-                Admin Portal
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => navigate('/portal_dashboard')}
-              className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm font-black uppercase text-[#a8b7cd] transition-colors hover:text-white"
-            >
-              <LayoutDashboard className="h-4 w-4" />
-              Member Portal
-            </button>
-          </div>
-        </div>
-
-        <div className="hidden lg:block border-t border-[#182232] px-3 py-4">
-          <button type="button" onClick={() => { clearCadSession(); navigate('/', { replace: true }); }}
-            className="flex w-full items-center gap-3 rounded-md px-4 py-2.5 text-left text-sm font-bold text-[#dce7f8] transition-colors hover:bg-white/5 hover:text-[#4384ff]">
-            <LogOut className="h-4 w-4" />
-            Sign out
-          </button>
-        </div>
-      </aside>
-
-      {/* ── Main content ──────────────────────────────────────────────────── */}
-      <section className="ml-[265px] flex min-h-screen flex-col">
-        <header className="relative z-40 flex items-center justify-between border-b border-[#182232] px-9 py-4">
-          <p className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em] text-white"><DojrpShield className="h-5 w-5" /><DojrpLogo /></p>
-          {/* Right — profile avatar */}
-          <div className="relative" ref={profileRef}>
-            <button type="button" onClick={() => setProfileOpen(o => !o)}
-              className="h-9 w-9 overflow-hidden rounded-full border-2 border-[#1b2738] transition-all hover:border-[#4384ff]">
-              {session?.discord_id && session?.avatar_hash
-                ? <img src={`https://cdn.discordapp.com/avatars/${session.discord_id}/${session.avatar_hash}.png?size=64`} alt="Profile" className="h-full w-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
-                : <div className="flex h-full w-full items-center justify-center bg-[#0f1b28] text-xs font-black text-[#4384ff]">{(session?.username ?? '?')[0].toUpperCase()}</div>}
-            </button>
-            {profileOpen && (
-              <div className="absolute right-0 top-11 z-[80] w-56 rounded-xl border border-[#1b2738] bg-[#0b1422] py-1 shadow-[0_16px_48px_rgba(0,0,0,0.5)]">
-                <div className="border-b border-[#131f30] px-4 py-3">
-                  <p className="text-xs font-black text-white">{session?.username}</p>
-                  <p className="mt-0.5 text-[10px] font-semibold text-[#526179]">{getStaffSidebarTitle(session)}</p>
-                </div>
-                <button type="button" onClick={() => { setProfileOpen(false); clearCadSession(); navigate('/', { replace: true }); }}
-                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm font-bold text-[#ff7070] transition-colors hover:bg-white/5">
-                  <LogOut className="h-4 w-4" />
-                  Log off
-                </button>
-              </div>
-            )}
-          </div>
-        </header>
-
-        {/* ─── ROSTER TAB ──────────────────────────────────────────────────── */}
+  const staffTabPanels = (
+    <>
+{/* ─── ROSTER TAB ──────────────────────────────────────────────────── */}
         {activeTab === 'roster' && (
           <div className="flex-1 px-8 py-9">
-            {pageLoading ? (
-              <PageLoadingScreen loading accent="#ff7070" />
-            ) : (
-            <>
-            <div className="mb-8">
-              <h2 className="text-3xl font-black leading-none tracking-[-0.05em] text-white sm:text-4xl">Staff Roster</h2>
-              <p className="mt-2 text-sm text-[#8392aa]">Active staff roster for DOJ:RP.</p>
-            </div>
-
-            <div className="rounded-xl border border-[#172235] bg-[#0d1422] shadow-[0_22px_55px_rgba(0,0,0,0.22)] overflow-hidden">
-              <div className="flex items-center gap-4 border-b border-[#172235] px-6 py-4">
+            <div className="rounded-xl border border-[#131f30] bg-[#070d16] shadow-[0_22px_55px_rgba(0,0,0,0.22)] overflow-hidden">
+              <div className="flex items-center gap-4 border-b border-[#131f30] px-6 py-4">
                 <div className="relative flex-1 max-w-sm">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#526179]" />
                   <input
@@ -568,6 +518,7 @@ const StaffPortalClassic = () => {
                         <th className="px-5 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-52">Name</th>
                         <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-40">Title</th>
                         <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-20">Status</th>
+                        <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-28">Discord Status</th>
                         <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-28">Appointed</th>
                         <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Discord ID</th>
                       </tr>
@@ -576,10 +527,10 @@ const StaffPortalClassic = () => {
                       {groupedRoster.map(group => (
                         <React.Fragment key={group.label}>
                           <tr
-                            className="cursor-pointer border-b border-t border-[#172235] bg-[#0a1525] hover:bg-[#0c1830] transition-colors"
+                            className="cursor-pointer border-b border-t border-[#131f30] bg-[#0a1525] hover:bg-[#0c1830] transition-colors"
                             onClick={() => toggleGroup(group.label)}
                           >
-                            <td colSpan={5} className="px-5 py-2.5">
+                            <td colSpan={6} className="px-5 py-2.5">
                               <div className="flex items-center gap-2 flex-wrap">
                                 {collapsed[group.label]
                                   ? <ChevronRight className="h-3.5 w-3.5 text-[#ff5d5d] shrink-0" />
@@ -610,6 +561,11 @@ const StaffPortalClassic = () => {
                                   <span className="text-[10px] font-black" style={{ color: chipColor ?? '#a8b7cd' }}>{getStaffRosterTitle(m)}</span>
                                 </td>
                                 <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                                <td className="px-4 py-3.5">
+                                  <DiscordStatusBadge
+                                    status={m.discord_id ? (discordPresence[m.discord_id] ?? 'offline') : 'offline'}
+                                  />
+                                </td>
                                 <td className="px-4 py-3.5 text-[#8392aa] text-[11px]">{formatDate(m.staff_appointed_date)}</td>
                                 <td className="px-4 py-3.5"><span className="font-mono text-[11px] text-[#526179]">{m.discord_id || '—'}</span></td>
                               </tr>
@@ -622,29 +578,14 @@ const StaffPortalClassic = () => {
                 </div>
               )}
             </div>
-            </>
-            )}
           </div>
         )}
 
         {/* ─── RESOURCES TAB (view only) ─────────────────────────────────────── */}
-        {activeTab === 'resources' && (
+        {showResourcesTab && (
           <div className="flex-1 px-8 py-9">
-            {pageLoading ? (
-              <PageLoadingScreen loading accent="#ff7070" />
-            ) : (
-              <>
-                <div className="mb-8">
-                  <h2 className="text-3xl font-black leading-none tracking-[-0.05em] text-white sm:text-4xl">
-                    Staff Resources
-                  </h2>
-                  <p className="mt-2 text-sm text-[#8392aa]">
-                    Guides and reference materials for staff. Managed from the Admin Portal.
-                  </p>
-                </div>
-
                 {resources.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-[#172235] bg-[#0d1422] py-24 text-center">
+                  <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-[#131f30] bg-[#070d16] py-24 text-center">
                     <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[#ff5d5d]/20 bg-[#ff5d5d]/8">
                       <BookOpen className="h-8 w-8 text-[#ff5d5d]/60" />
                     </div>
@@ -661,11 +602,8 @@ const StaffPortalClassic = () => {
                       <button
                         key={r.id}
                         type="button"
-                        onClick={() => {
-                          if (r.type === 'pdf') setOpenPdf(r);
-                          else setOpenDocId(r.id);
-                        }}
-                        className="group relative flex flex-col gap-3 rounded-2xl border border-[#1e2d42] bg-[#0d1422] p-6 text-left shadow-[0_8px_24px_rgba(0,0,0,0.2)] transition-all hover:border-[#ff5d5d]/40 hover:shadow-[0_12px_32px_rgba(0,0,0,0.3)]"
+                          onClick={() => handleOpenResource(r)}
+                        className="group relative flex flex-col gap-3 rounded-2xl border border-[#1e2d42] bg-[#070d16] p-6 text-left shadow-[0_8px_24px_rgba(0,0,0,0.2)] transition-all hover:border-[#ff5d5d]/40 hover:shadow-[0_12px_32px_rgba(0,0,0,0.3)]"
                       >
                         <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#ff5d5d]/20 bg-[#ff5d5d]/8">
                           <FileText className="h-5 w-5 text-[#ff7070]" />
@@ -673,7 +611,7 @@ const StaffPortalClassic = () => {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-black text-white">{r.title}</p>
                           <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
-                            {r.type === 'pdf' ? 'PDF' : 'Document'}
+                            {resourceTypeLabel(r)}
                           </p>
                         </div>
                         <p className="text-[10px] text-[#3f5470]">
@@ -685,18 +623,13 @@ const StaffPortalClassic = () => {
                     ))}
                   </div>
                 )}
-              </>
-            )}
           </div>
         )}
 
         {/* ─── EVENTS TAB ───────────────────────────────────────────────────── */}
         {activeTab === 'events' && (
           <div className="flex-1 px-8 py-9">
-            {pageLoading ? (
-              <PageLoadingScreen loading accent="#ff7070" />
-            ) : (
-              <>
+            <>
                 <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
                   <div>
                     <h2 className="text-3xl font-black leading-none tracking-[-0.05em] text-white sm:text-4xl">
@@ -727,7 +660,7 @@ const StaffPortalClassic = () => {
                 </div>
 
                 {(showEventForm || editingEvent) && (
-                  <div className="mb-6 rounded-xl border border-[#ff5d5d]/25 bg-[#0d1422] p-6">
+                  <div className="mb-6 rounded-xl border border-[#ff5d5d]/25 bg-[#070d16] p-6">
                     <h3 className="mb-4 text-sm font-black text-white">
                       {editingEvent ? 'Edit Event' : 'Host New Event'}
                     </h3>
@@ -842,7 +775,7 @@ const StaffPortalClassic = () => {
                   </div>
                 )}
 
-                <div className="overflow-hidden rounded-xl border border-[#172235] bg-[#0d1422]">
+                <div className="overflow-hidden rounded-xl border border-[#131f30] bg-[#070d16]">
                   {events.length === 0 ? (
                     <div className="flex flex-col items-center justify-center gap-3 px-8 py-16 text-center">
                       <CalendarDays className="h-8 w-8 text-[#ff5d5d]/30" />
@@ -931,11 +864,168 @@ const StaffPortalClassic = () => {
                     </div>
                   )}
                 </div>
-              </>
-            )}
+            </>
           </div>
         )}
+    </>
+  );
+
+  const inputCls = 'h-10 w-full rounded-lg border border-[#1f3050] bg-[#07111f] px-3 text-sm font-semibold text-white placeholder:text-[#3f5470] outline-none focus:border-[#ff5d5d] transition-colors';
+  const labelCls = 'block text-[10px] font-black uppercase tracking-[0.18em] text-[#6f7f99] mb-1.5';
+
+  return (
+    <>
+      {useModernShell ? (
+        <StaffModernShell
+          tabs={STAFF_NAV_TABS}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          tabTitle={tabTitle}
+          tabSubtitle={tabSubtitle}
+          username={username}
+          rankLabel={rankLabel}
+          isLoading={authLoading}
+          pageLoading={pageLoading}
+          session={session}
+          profileOpen={profileOpen}
+          setProfileOpen={setProfileOpen}
+          profileRef={profileRef}
+          handleSignOut={() => { clearCadSession(); navigate('/', { replace: true }); }}
+          canSeeAdminPortal={canSeeAdminPortal}
+          onAdminPortal={() => navigate('/admin_members')}
+          navigate={navigate}
+        >
+          {staffTabPanels}
+        </StaffModernShell>
+      ) : (
+        <main className="min-h-screen bg-[#02060b] text-white">
+
+      {/* ── Sidebar ───────────────────────────────────────────────────────── */}
+      <aside className="fixed inset-y-0 left-0 flex w-[265px] flex-col border-r border-[#131f30] bg-[#02060b] px-5 py-5">
+        <div className="shrink-0">
+          <h1 className="text-xl font-black tracking-[-0.04em] text-white">Staff Roster</h1>
+          <p className="mt-2 flex items-center gap-2 text-sm font-black leading-none text-[#4384ff]"><DojrpShield className="h-5 w-5" /><DojrpLogo /></p>
+          <p className="mt-1 text-[10px] font-black uppercase tracking-[0.22em] text-[#526179]">
+            {getStaffSidebarTitle(session)}
+          </p>
+        </div>
+
+        <div className="sidebar-scroll mt-8 flex-1 overflow-x-hidden overflow-y-auto">
+          <p className="mb-2 px-3 text-[9px] font-black uppercase tracking-[0.24em] text-[#3f5470]">Staff sections</p>
+          <nav className="flex flex-col gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('roster')}
+              className={`flex items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm font-semibold transition-colors ${
+                activeTab === 'roster'
+                  ? 'border-l-2 border-[#4384ff] bg-[#071120] text-white'
+                  : 'text-[#8392aa] hover:bg-[#070d16] hover:text-white'
+              }`}
+            >
+              <Users className="h-4 w-4 shrink-0" />
+              Staff Roster
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('resources')}
+              className={`flex items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm font-semibold transition-colors ${
+                activeTab === 'resources'
+                  ? 'border-l-2 border-[#4384ff] bg-[#071120] text-white'
+                  : 'text-[#8392aa] hover:bg-[#070d16] hover:text-white'
+              }`}
+            >
+              <BookOpen className="h-4 w-4 shrink-0" />
+              Resources
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('events')}
+              className={`flex items-center gap-2.5 rounded-md px-4 py-3 text-left text-sm font-semibold transition-colors ${
+                activeTab === 'events'
+                  ? 'border-l-2 border-[#4384ff] bg-[#071120] text-white'
+                  : 'text-[#8392aa] hover:bg-[#070d16] hover:text-white'
+              }`}
+            >
+              <CalendarDays className="h-4 w-4 shrink-0" />
+              Events
+            </button>
+          </nav>
+        </div>
+
+        <div className="shrink-0 border-t border-[#131f30] px-4 py-4">
+          <p className="mb-2 px-2 text-[9px] font-black uppercase tracking-[0.24em] text-[#3f5470]">Portal tools</p>
+          <div className="space-y-0.5">
+            <button
+              type="button"
+              onClick={() => window.open('https://portal.dojrblx.com/', '_blank')}
+              className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs font-bold text-[#7a90aa] transition-colors hover:bg-[#070d16] hover:text-[#4384ff]"
+            >
+              <Shield className="h-3.5 w-3.5 shrink-0" />
+              Staff Portal
+            </button>
+            {(isSuperAdminSession(session) || (groups.find(g => g.name.toLowerCase() === ((session?.staff_role ?? session?.role) ?? '').toLowerCase().trim())?.admin_access ?? false)) && (
+              <button
+                type="button"
+                onClick={() => navigate('/admin_members')}
+                className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-xs font-bold text-[#7a90aa] transition-colors hover:bg-[#070d16] hover:text-[#4384ff]"
+              >
+                <Shield className="h-3.5 w-3.5 shrink-0" />
+                Admin Portal
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="shrink-0 border-t border-[#131f30] px-3 py-4 space-y-1">
+          <button
+            type="button"
+            onClick={() => navigate('/portal_dashboard')}
+            className="flex w-full items-center gap-3 rounded-md px-4 py-2.5 text-left text-sm font-bold text-[#8392aa] transition-colors hover:bg-white/5 hover:text-[#4384ff]"
+          >
+            <LayoutDashboard className="h-4 w-4" />
+            Member Portal
+          </button>
+          <button type="button" onClick={() => { clearCadSession(); navigate('/', { replace: true }); }}
+            className="flex w-full items-center gap-3 rounded-md px-4 py-2.5 text-left text-sm font-bold text-[#526179] transition-colors hover:bg-white/5 hover:text-white">
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Main content ──────────────────────────────────────────────────── */}
+      <section className="ml-[265px] flex min-h-screen flex-col">
+        <header className="relative z-40 flex items-center justify-between border-b border-[#131f30] bg-[#02060b]/90 px-9 py-4 backdrop-blur-md">
+          <p className="flex items-center gap-2 text-sm font-black uppercase tracking-[0.08em] text-white"><DojrpShield className="h-5 w-5" /><DojrpLogo /></p>
+          {/* Right — profile avatar */}
+          <div className="relative" ref={profileRef}>
+            <button type="button" onClick={() => setProfileOpen(o => !o)}
+              className="h-9 w-9 overflow-hidden rounded-full border-2 border-[#1b2738] transition-all hover:border-[#4384ff]">
+              {session?.discord_id && session?.avatar_hash
+                ? <img src={`https://cdn.discordapp.com/avatars/${session.discord_id}/${session.avatar_hash}.png?size=64`} alt="Profile" className="h-full w-full object-cover" onError={e => { (e.target as HTMLImageElement).style.display='none'; }} />
+                : <div className="flex h-full w-full items-center justify-center bg-[#0f1b28] text-xs font-black text-[#4384ff]">{(session?.username ?? '?')[0].toUpperCase()}</div>}
+            </button>
+            {profileOpen && (
+              <div className="absolute right-0 top-11 z-[80] w-56 rounded-xl border border-[#1b2738] bg-[#0b1422] py-1 shadow-[0_16px_48px_rgba(0,0,0,0.5)]">
+                <div className="border-b border-[#131f30] px-4 py-3">
+                  <p className="text-xs font-black text-white">{session?.username}</p>
+                  <p className="mt-0.5 text-[10px] font-semibold text-[#526179]">{getStaffSidebarTitle(session)}</p>
+                </div>
+                <button type="button" onClick={() => { setProfileOpen(false); clearCadSession(); navigate('/', { replace: true }); }}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm font-bold text-[#ff7070] transition-colors hover:bg-white/5">
+                  <LogOut className="h-4 w-4" />
+                  Log off
+                </button>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {staffTabPanels}
       </section>
+
+    </main>
+      )}
 
       {openDocId !== null && (
         <DocumentEditor
@@ -943,17 +1033,17 @@ const StaffPortalClassic = () => {
           resourceId={openDocId}
           canEdit={false}
           apiBase="/api/staff/resources"
-          onClose={() => setOpenDocId(null)}
+          onClose={handleCloseResource}
         />
       )}
 
       {openPdf !== null && (
         <div className="fixed inset-0 z-50 flex flex-col bg-black/85">
-          <div className="flex items-center justify-between border-b border-[#1e2d42] bg-[#0d1422] px-5 py-3">
+          <div className="flex items-center justify-between border-b border-[#1e2d42] bg-[#070d16] px-5 py-3">
             <p className="truncate text-sm font-black text-white">{openPdf.title}</p>
             <button
               type="button"
-              onClick={() => setOpenPdf(null)}
+              onClick={handleCloseResource}
               className="rounded-full p-1.5 text-[#4a5568] hover:bg-white/5 hover:text-white"
               aria-label="Close"
             >
@@ -961,13 +1051,14 @@ const StaffPortalClassic = () => {
             </button>
           </div>
           <PdfViewer
-            fileUrl={`/api/staff/resources/${openPdf.id}/file`}
+            fileUrl={resourceFileUrl('staff', openPdf.id, openPdf)}
             downloadName={`${openPdf.title}.pdf`}
+            liveRefreshMs={googleFileIdFromResource(openPdf) || openPdf.type === 'google_doc' ? 45_000 : undefined}
           />
         </div>
       )}
-    </main>
+    </>
   );
 };
 
-export default StaffPortalClassic;
+export default StaffPortal;

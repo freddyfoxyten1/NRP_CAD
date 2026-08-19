@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { invalidateDiscordGuildRolesCache } from "./discord-guild-roles-cache";
+import { setDiscordPresence } from "./discord-presence-cache";
 import { logger } from "./logger";
 
 type SyncJob = { key: string; run: () => Promise<void> };
@@ -25,7 +26,7 @@ const MAX_WAIT_MS = Math.max(
   Number(process.env.DISCORD_SYNC_MAX_WAIT_MS) || 8_000,
 );
 
-const GATEWAY_INTENTS = (1 << 0) | (1 << 1); // GUILDS | GUILD_MEMBERS
+const GATEWAY_INTENTS = (1 << 0) | (1 << 1) | (1 << 8); // GUILDS | GUILD_MEMBERS | GUILD_PRESENCES
 
 let ws: WebSocket | null = null;
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -102,6 +103,13 @@ function handleDispatch(event: string, data: Record<string, unknown>, seq: numbe
   if (event === "GUILD_MEMBER_UPDATE") {
     const guildId = String(data.guild_id ?? "");
     if (guildId) onGuildMemberRolesChanged(guildId);
+    return;
+  }
+
+  if (event === "PRESENCE_UPDATE") {
+    const user = data.user as { id?: string } | undefined;
+    const userId = String(user?.id ?? data.user_id ?? "");
+    if (userId) setDiscordPresence(userId, data.status);
     return;
   }
 

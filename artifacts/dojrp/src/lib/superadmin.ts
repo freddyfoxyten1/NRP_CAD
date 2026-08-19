@@ -18,3 +18,26 @@ export function isSuperAdminDiscordId(discordId: string | null | undefined): boo
 export function isSuperAdminSession(session: { discord_id?: string | null } | null | undefined): boolean {
   return isSuperAdminDiscordId(session?.discord_id);
 }
+
+export type SuperAdminAccessFlags = {
+  can_access_iab?: boolean;
+  can_access_system_logs?: boolean;
+  can_access_terms_privacy?: boolean;
+  can_access_terminal_offline?: boolean;
+  can_access_doc_dps_cad?: boolean;
+};
+
+/** Grant every portal / lock-restricted flag on local session objects for superadmins. */
+export function applySuperAdminSessionOverrides<
+  T extends { discord_id?: string | null } & SuperAdminAccessFlags,
+>(session: T): T {
+  if (!isSuperAdminSession(session)) return session;
+  return {
+    ...session,
+    can_access_iab: true,
+    can_access_system_logs: true,
+    can_access_terms_privacy: true,
+    can_access_terminal_offline: true,
+    can_access_doc_dps_cad: true,
+  };
+}

@@ -2,9 +2,11 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useParams } from "react-router-dom";
 import RequireAuth from "@/components/auth/RequireAuth";
+import { getCadSession } from "@/lib/cad-session";
 import PublicView from "@/pages/PublicView";
 import NotFound from "@/pages/NotFound";
 import RouteFallback from "@/components/routing/RouteFallback";
+import { parseResourceSection } from "@/lib/resource-url";
 
 const MemberPortal = lazy(() => import("@/pages/MemberPortal"));
 const AdminPortal = lazy(() => import("@/pages/AdminPortal"));
@@ -15,6 +17,8 @@ const DpsInternalAffairs = lazy(() => import("@/pages/DpsInternalAffairs"));
 const StaffPortal = lazy(() => import("@/pages/StaffPortal"));
 const CadPage = lazy(() => import("@/pages/CadPage"));
 const DocCadPage = lazy(() => import("@/pages/DocCadPage"));
+const CivilianOperations = lazy(() => import("@/pages/CivilianOperations"));
+const DepartmentOfTransportation = lazy(() => import("@/pages/DepartmentOfTransportation"));
 
 const BASES = new Set([
   "public",
@@ -24,6 +28,8 @@ const BASES = new Set([
   "dph",
   "doc",
   "staff",
+  "civilian",
+  "dot",
 ]);
 
 function withSuspense(node: ReactNode) {
@@ -57,6 +63,39 @@ export default function SectionPathRoute() {
       </RequireAuth>,
     );
   }
+
+  const resourceLink = parseResourceSection(section);
+  // In-app resource paths (/dps_resources-title-id) are normal department sections — never PublicView.
+  const isExternalPublicShare =
+    resourceLink?.mode === "public"
+    && !resourceLink.inApp
+    && (base === "dps" || base === "dph");
+  if (isExternalPublicShare) {
+    // Logged-in members opening a public share link stay in the department portal.
+    if (getCadSession()) {
+      return withSuspense(
+        <RequireAuth>
+          {base === "dps" ? <DepartmentOfPublicSafety /> : <DepartmentOfPublicHealth />}
+        </RequireAuth>,
+      );
+    }
+    return <PublicView />;
+  }
+  if (resourceLink?.mode === "edit" && base === "staff") {
+    return withSuspense(
+      <RequireAuth>
+        <AdminPortal />
+      </RequireAuth>,
+    );
+  }
+  if (resourceLink?.mode === "public" && base === "staff") {
+    return withSuspense(
+      <RequireAuth>
+        <StaffPortal />
+      </RequireAuth>,
+    );
+  }
+
   if (base === "dps" && section === "cad") {
     return withSuspense(
       <RequireAuth>
@@ -112,6 +151,18 @@ export default function SectionPathRoute() {
       return withSuspense(
         <RequireAuth>
           <StaffPortal />
+        </RequireAuth>,
+      );
+    case "civilian":
+      return withSuspense(
+        <RequireAuth>
+          <CivilianOperations />
+        </RequireAuth>,
+      );
+    case "dot":
+      return withSuspense(
+        <RequireAuth>
+          <DepartmentOfTransportation />
         </RequireAuth>,
       );
     default:

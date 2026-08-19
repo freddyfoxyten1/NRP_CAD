@@ -10,6 +10,7 @@ import multer from "multer";
 import { pool, isMongoStore, resourcesRepo } from "@workspace/db";
 import { writeLog } from "../lib/audit-log.js";
 import { ConversionError, convertDocxToPdf, isDocx, isLegacyDoc, isPdf } from "../lib/docx-to-pdf";
+import { sanitizeResourceForClient, tryServeGoogleDocFile } from "../lib/google-doc-resource";
 
 function actorFrom(req: { headers: Record<string, unknown>; body?: unknown }): string {
   const header = req.headers["x-actor"];
@@ -48,15 +49,16 @@ const parseRankList = (value: unknown): string[] => {
   return parsed.map(String).map(s => s.trim()).filter(Boolean);
 };
 
-const normalizeResourceRow = (row: Record<string, unknown>) => ({
-  ...row,
-  header_config: parseJsonField(row.header_config, {}),
-  content: parseJsonField(row.content, {}),
-  division_only: Boolean(row.division_only),
-  allowed_ranks: parseRankList(row.allowed_ranks),
-  personnel_only: Boolean(row.personnel_only),
-  allowed_dph_ranks: parseRankList(row.allowed_dph_ranks),
-});
+const normalizeResourceRow = (row: Record<string, unknown>, opts: { public?: boolean } = {}) =>
+  sanitizeResourceForClient({
+    ...row,
+    header_config: parseJsonField(row.header_config, {}),
+    content: parseJsonField(row.content, {}),
+    division_only: Boolean(row.division_only),
+    allowed_ranks: parseRankList(row.allowed_ranks),
+    personnel_only: Boolean(row.personnel_only),
+    allowed_dph_ranks: parseRankList(row.allowed_dph_ranks),
+  }, opts);
 
 // ── One-time migration ────────────────────────────────────────────────────────
 (async () => {
@@ -84,17 +86,21 @@ const normalizeResourceRow = (row: Record<string, unknown>) => ({
     // Department-wide visibility: DPH personnel only + optional DPH rank list
     await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS personnel_only boolean NOT NULL DEFAULT false`);
     await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS allowed_dph_ranks text NOT NULL DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
+    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
+    await pool.query(`ALTER TABLE dph_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
   } catch (e) {
     console.error("dph_resources migration failed:", e);
   }
 })();
 
 const RESOURCE_LIST_COLS = `
-  id, title, type, logo_url, created_by, created_at, updated_at, division_id,
+  id, title, type, logo_url, header_config, created_by, created_at, updated_at, division_id,
   COALESCE(division_only, false) AS division_only,
   COALESCE(allowed_ranks, '[]') AS allowed_ranks,
   COALESCE(personnel_only, false) AS personnel_only,
-  COALESCE(allowed_dph_ranks, '[]') AS allowed_dph_ranks
+  COALESCE(allowed_dph_ranks, '[]') AS allowed_dph_ranks,
+  google_file_id, google_integration_id, google_modified_time
 `;
 
 const RESOURCE_DETAIL_COLS = `
@@ -102,7 +108,8 @@ const RESOURCE_DETAIL_COLS = `
   division_id, COALESCE(division_only, false) AS division_only,
   COALESCE(allowed_ranks, '[]') AS allowed_ranks,
   COALESCE(personnel_only, false) AS personnel_only,
-  COALESCE(allowed_dph_ranks, '[]') AS allowed_dph_ranks
+  COALESCE(allowed_dph_ranks, '[]') AS allowed_dph_ranks,
+  google_file_id, google_integration_id, google_modified_time
 `;
 
 const isPublicResource = (row: {
@@ -144,7 +151,7 @@ router.get("/dph/resources", async (req, res) => {
         ORDER BY created_at DESC`,
       params
     );
-    const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>));
+    const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>, { public: publicOnly }));
     res.json(publicOnly ? normalized.filter(isPublicResource) : normalized);
   } catch (err) {
     req.log.error({ err }, "dph/resources GET error");
@@ -248,6 +255,7 @@ router.get("/dph/resources/:id/file", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    if (await tryServeGoogleDocFile(req, res, "dph", id)) return;
     if (isMongoStore()) {
       const file = await resourcesRepo.getResourceFile("dph", id);
       if (!file) { res.status(404).json({ error: "File not found." }); return; }

@@ -4,7 +4,8 @@ import { toast } from 'sonner';
 import type { IncomingCall } from '@/components/overlays/IncomingCallOverlay';
 import { clearCadSession, getCadSession, setCadSession, type CadSession } from '@/lib/cad-session';
 import { formatInGameCount } from '@/lib/in-game-count';
-import { isSuperAdminSession } from '@/lib/superadmin';
+import { fetchPublicLiveStats } from '@/lib/live-stats';
+import { applySuperAdminSessionOverrides, isSuperAdminSession } from '@/lib/superadmin';
 import { getMemberDisplayRank, getMemberDisplayRole } from '@/lib/display-rank';
 import { useCadStatus } from '@/hooks/useCadStatus';
 import { usePhoneSSE, type PhoneSSEEvent } from '@/hooks/usePhoneSSE';
@@ -70,6 +71,30 @@ export const MEMBER_PORTAL_NAV_ITEMS = [
   'Department of Transportation',
 ] as const;
 
+const MEMBER_PORTAL_NAV_PATHS: Partial<Record<(typeof MEMBER_PORTAL_NAV_ITEMS)[number] | 'Department of Internal Affairs' | 'Civilian Operations', string>> = {
+  'Department of Public Safety': '/dps_information',
+  'Department of Public Health': '/dph_information',
+  'Department of Communications': '/doc_information',
+  'Department of Transportation': '/dot_information',
+  'Department of Internal Affairs': '/dps_internal-affairs',
+  'Civilian Operations': '/civilian_operations',
+};
+
+export function isMemberPortalNavComingSoon(
+  item: string,
+  options: { superAdmin: boolean; canAccessIab: boolean },
+): boolean {
+  if (item === 'Dashboard' || item === 'Information & Support') return false;
+  if (item === 'Department of Public Safety' || item === 'Department of Public Health') return false;
+  if (options.superAdmin) return false;
+  if (item === 'Department of Internal Affairs') return !options.canAccessIab;
+  return item === 'Department of Communications' || item === 'Department of Transportation' || item === 'Civilian Operations';
+}
+
+export function getMemberPortalNavPath(item: string): string | undefined {
+  return MEMBER_PORTAL_NAV_PATHS[item as keyof typeof MEMBER_PORTAL_NAV_PATHS];
+}
+
 export const ADMIN_CODE_STORAGE_KEY = 'west-coast-admin-code';
 
 const toPortalData = (session: CadSession, stats: PortalData['stats']): PortalData => ({
@@ -92,13 +117,27 @@ const defaultStats: PortalData['stats'] = {
   totalMembers: 0,
   totalPlayTime: 'Coming Soon!',
   totalOnlineMembers: 0,
-  inGameCount: '—',
+  inGameCount: '…',
 };
 
 const fetchStats = async (): Promise<PortalData['stats']> => {
+  const applyInGameFromPublic = async (base: PortalData['stats']): Promise<PortalData['stats']> => {
+    const pub = await fetchPublicLiveStats();
+    if (!pub) return base;
+    return {
+      ...base,
+      inGameCount: formatInGameCount(pub.erlc_players, pub.erlc_max_players),
+    };
+  };
+
   try {
-    const response = await fetch('/api/stats', { headers: { accept: 'application/json' } });
-    if (!response.ok) return defaultStats;
+    const response = await fetch('/api/stats', {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!response.ok) {
+      return applyInGameFromPublic(defaultStats);
+    }
     const data = (await response.json()) as {
       totalMembers: number;
       totalOnlineMembers: number;
@@ -106,14 +145,16 @@ const fetchStats = async (): Promise<PortalData['stats']> => {
       inGameMaxPlayers: number;
     };
     const max = data.inGameMaxPlayers ?? 0;
-    return {
+    const base: PortalData['stats'] = {
       totalMembers: data.totalMembers,
       totalPlayTime: 'Coming Soon!',
       totalOnlineMembers: data.totalOnlineMembers,
       inGameCount: formatInGameCount(data.inGameCount, max),
     };
+    if (max > 0 || data.inGameCount > 0) return base;
+    return applyInGameFromPublic(base);
   } catch {
-    return defaultStats;
+    return applyInGameFromPublic(defaultStats);
   }
 };
 
@@ -196,10 +237,11 @@ export function useMemberPortal() {
           return;
         }
 
-        setCadSession(result.account);
+        const account = applySuperAdminSessionOverrides(result.account);
+        setCadSession(account);
 
         if (isMounted) {
-          setPortalData(toPortalData(result.account, defaultStats));
+          setPortalData(toPortalData(account, defaultStats));
           if (grpRes.ok) {
             try { setStaffGroups((await grpRes.json()) as StaffGroup[]); } catch { /* keep existing */ }
           }
@@ -352,6 +394,7 @@ export function useMemberPortal() {
     canAccessStaff,
     canAccessAdminPortal,
     canAccessDoc,
+    superAdmin,
     handleAnswer,
     handleDecline,
   };

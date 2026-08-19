@@ -1,11 +1,14 @@
-import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, BookOpen, ChevronDown, ChevronRight, ChevronUp, ClipboardList, FileText, FolderOpen,
-  GripVertical, Info, Layers, Pencil, Plus, Radio, Search, Settings, Trash2, UserMinus, UserPlus, Users, X,
+  GripVertical, Info, Layers, Pencil, Plus, Radio, RefreshCw, Search, Settings, Trash2, UserMinus, UserPlus, Users, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { isPdfLikeResource, resourceTypeLabel } from '@/lib/resource-type';
 import ImageInput from '@/components/shared/ImageInput';
 import { ContentBlocksEditor, renderFormattedText, type ContentBlock } from '@/components/shared/ContentBlocks';
+import { useDiscordPresence } from '@/hooks/useDiscordPresence';
+import { DiscordStatusBadge } from '@/components/shared/DiscordStatusBadge';
 
 export type DpsDivision = {
   id: number;
@@ -94,6 +97,8 @@ export type DivisionRosterMember = {
     can_edit_roster?: boolean;
     can_edit_info?: boolean;
   }>;
+  /** Division ids where the member holds the linked membership Discord role. */
+  division_discord_links?: number[];
   status: string;
   appointed_date: string | null;
   certifications?: string[];
@@ -104,6 +109,8 @@ type DivisionResource = {
   title: string;
   type: 'document' | 'pdf' | string;
   logo_url: string | null;
+  google_file_id?: string | null;
+  header_config?: unknown;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -164,6 +171,18 @@ function assignmentForDivision(m: DivisionRosterMember, division: DpsDivision) {
   ) ?? null;
 }
 
+function memberInDivisionRoster(m: DivisionRosterMember, division: DpsDivision): boolean {
+  const hasDiscordLink = Boolean(division.discord_role_id?.trim());
+  if (hasDiscordLink) {
+    if (Array.isArray(m.division_discord_links)) {
+      if (m.division_discord_links.includes(division.id)) return true;
+      if (m.division_discord_links.length > 0) return false;
+    }
+    return assignmentForDivision(m, division) != null;
+  }
+  return assignmentForDivision(m, division) != null;
+}
+
 import { compareCallsigns } from '@/lib/roster-sort';
 
 function byCallsign(a: DivisionRosterMember, b: DivisionRosterMember) {
@@ -177,11 +196,16 @@ function sortMembersByDivisionRank(
   ranks: DpsDivisionRank[],
 ) {
   const order = new Map(ranks.map((r, i) => [r.name.toLowerCase(), r.sort_order ?? i]));
+  const unrankedSort = 999_999;
   return [...list].sort((a, b) => {
     const rankA = (assignmentForDivision(a, division)?.division_rank ?? '').trim();
     const rankB = (assignmentForDivision(b, division)?.division_rank ?? '').trim();
-    const sortA = order.has(rankA.toLowerCase()) ? order.get(rankA.toLowerCase())! : 9999;
-    const sortB = order.has(rankB.toLowerCase()) ? order.get(rankB.toLowerCase())! : 9999;
+    const sortA = rankA.toLowerCase() === 'unranked'
+      ? unrankedSort
+      : (order.has(rankA.toLowerCase()) ? order.get(rankA.toLowerCase())! : 9999);
+    const sortB = rankB.toLowerCase() === 'unranked'
+      ? unrankedSort
+      : (order.has(rankB.toLowerCase()) ? order.get(rankB.toLowerCase())! : 9999);
     if (sortA !== sortB) return sortA - sortB;
     if (rankA.toLowerCase() !== rankB.toLowerCase()) return rankA.localeCompare(rankB);
     return byCallsign(a, b) || a.username.localeCompare(b.username);
@@ -254,6 +278,9 @@ export function DivisionRosterView({
   const [divisionResources, setDivisionResources] = useState<DivisionResource[]>([]);
   const [resourcesLoading, setResourcesLoading] = useState(false);
 
+  const discordIds = useMemo(() => members.map(m => m.discord_id), [members]);
+  const discordPresence = useDiscordPresence(discordIds);
+
   useEffect(() => {
     fetch(`${apiBase}/divisions`, { headers: { accept: 'application/json' } })
       .then(r => r.json()).then(rows => setDivisions(Array.isArray(rows) ? rows : [])).catch(() => setDivisions([]));
@@ -317,7 +344,7 @@ export function DivisionRosterView({
       .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 
   const membersInDivision = (division: DpsDivision) =>
-    members.filter(m => assignmentForDivision(m, division) != null);
+    members.filter(m => memberInDivisionRoster(m, division));
 
   const getDpsRankMeta = (name: string | null | undefined) =>
     getPersonnelRankMeta(personnelRanks, name);
@@ -337,13 +364,13 @@ export function DivisionRosterView({
     // Avoid flashing empty / kicking users out while the roster is still loading
     if (loading) return true;
     if (!viewerMember) return false;
-    return assignmentForDivision(viewerMember, division) != null;
+    return memberInDivisionRoster(viewerMember, division);
   };
 
   // If selection is no longer allowed after membership resolves, return to cards
   useEffect(() => {
     if (loading || selectedDivision == null || bypassDivisionRestrictions) return;
-    if (!viewerMember || assignmentForDivision(viewerMember, selectedDivision) == null) {
+    if (!viewerMember || !memberInDivisionRoster(viewerMember, selectedDivision)) {
       setSelectedDivisionId(null);
       setPanelMode('roster');
     }
@@ -542,7 +569,7 @@ export function DivisionRosterView({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-black text-white">{r.title}</p>
                     <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#526179]">
-                      {r.type === 'pdf' ? 'PDF' : 'Document'}
+                      {resourceTypeLabel(r)}
                     </p>
                   </div>
                   <p className="text-[10px] text-[#3f5470]">
@@ -607,7 +634,7 @@ export function DivisionRosterView({
       for (const [label, list] of byOrphan) {
         groups.push({
           label,
-          sort: 999,
+          sort: label.toLowerCase() === 'unranked' ? 999_999 : 999,
           rank: null,
           members: list.sort(byCallsign),
         });
@@ -620,7 +647,7 @@ export function DivisionRosterView({
   })();
 
   const toggle = (label: string) => setCollapsed(p => ({ ...p, [label]: !p[label] }));
-  const colCount = 8;
+  const colCount = 9;
 
   return (
     <div className="rounded-xl border border-[#172235] bg-[#0d1422] shadow-[0_22px_55px_rgba(0,0,0,0.22)] overflow-hidden">
@@ -663,6 +690,7 @@ export function DivisionRosterView({
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-36">DPS Rank</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-24">Callsign</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-20">Status</th>
+                <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-28">Discord Status</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470] w-28">Appointed</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Discord ID</th>
                 <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Certifications</th>
@@ -748,6 +776,11 @@ export function DivisionRosterView({
                             </span>
                           </td>
                           <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                          <td className="px-4 py-3.5">
+                            <DiscordStatusBadge
+                              status={m.discord_id ? (discordPresence[m.discord_id] ?? 'offline') : 'offline'}
+                            />
+                          </td>
                           <td className="px-4 py-3.5 text-[#8392aa]">{formatDate(m.appointed_date)}</td>
                           <td className="px-4 py-3.5">
                             <span className="font-mono text-[11px] text-[#526179]">{m.discord_id || '—'}</span>
@@ -929,12 +962,12 @@ export function DivisionsInformationView({
     if (bypassDivisionRestrictions) return true;
     if (loading) return true;
     if (!viewerMember) return false;
-    return assignmentForDivision(viewerMember, division) != null;
+    return memberInDivisionRoster(viewerMember, division);
   };
 
   useEffect(() => {
     if (loading || selectedDivision == null || bypassDivisionRestrictions) return;
-    if (!viewerMember || assignmentForDivision(viewerMember, selectedDivision) == null) {
+    if (!viewerMember || !memberInDivisionRoster(viewerMember, selectedDivision)) {
       setSelectedDivisionId(null);
     }
   }, [loading, selectedDivision, bypassDivisionRestrictions, viewerMember]);
@@ -1913,6 +1946,39 @@ export function DivisionPanelSection({
   const [addOfficerOpen, setAddOfficerOpen] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<number | null>(null);
   const [accessSavingKey, setAccessSavingKey] = useState<string | null>(null);
+  const [syncingDiscord, setSyncingDiscord] = useState(false);
+
+  const panelDiscordIds = useMemo(() => members.map(m => m.discord_id), [members]);
+  const panelDiscordPresence = useDiscordPresence(panelDiscordIds);
+
+  const handleSyncDivisionDiscord = async () => {
+    setSyncingDiscord(true);
+    try {
+      const res = await fetch(`${apiBase}/sync-division-discord-roles`, { method: 'POST' });
+      const data = await res.json().catch(() => ({})) as {
+        assigned?: number;
+        removed?: number;
+        pruned?: number;
+        errors?: string[];
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? 'Division Discord sync failed.');
+      const errCount = Array.isArray(data.errors) ? data.errors.length : 0;
+      const assigned = data.assigned ?? 0;
+      const removed = (data.removed ?? 0) + (data.pruned ?? 0);
+      if (errCount > 0) {
+        toast.error(`Division sync finished with ${errCount} error(s). Added/updated ${assigned}, removed ${removed}.`);
+      } else {
+        toast.success(`Division Discord sync complete — updated ${assigned}, removed ${removed}.`);
+      }
+      onMembersChanged();
+      refresh({ silent: true });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Division Discord sync failed.');
+    } finally {
+      setSyncingDiscord(false);
+    }
+  };
 
   const refresh = (opts?: { silent?: boolean }) => {
     const silent = opts?.silent ?? divisions.length > 0;
@@ -2018,7 +2084,7 @@ export function DivisionPanelSection({
   };
 
   const membersInDivision = (division: DpsDivision) =>
-    members.filter(m => assignmentForDivision(m, division) != null);
+    members.filter(m => memberInDivisionRoster(m, division));
 
   const openDivision = (id: number, mode: DivisionPanelMode) => {
     const access = accessForDivision(id);
@@ -2211,31 +2277,6 @@ export function DivisionPanelSection({
         body: JSON.stringify({ ids: inDiv.map(r => r.id) }),
       }),
     ]);
-  };
-
-  const setDivisionAssignment = async (
-    memberId: number,
-    divisionId: number,
-    rankName: string,
-  ) => {
-    const member = members.find(m => m.id === memberId);
-    const current = member ? memberAssignments(member)
-      .filter(a => a.division_id > 0)
-      .map(a => ({ division_id: a.division_id, division_rank: a.division_rank })) : [];
-
-    const next = current.filter(a => a.division_id !== divisionId);
-    if (rankName.trim()) {
-      next.push({ division_id: divisionId, division_rank: rankName.trim() });
-    }
-
-    const res = await fetch(`${apiBase}/${memberId}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ division_assignments: next }),
-    });
-    if (!res.ok) { toast.error('Failed to update assignment.'); return; }
-    toast.success(rankName.trim() ? 'Division assignment updated.' : 'Division removed.');
-    onMembersChanged();
   };
 
   const removeFromDivision = async (memberId: number, divisionId: number, username: string) => {
@@ -2668,7 +2709,7 @@ export function DivisionPanelSection({
                   <div className="flex-1 min-w-0">
                     <p className="truncate text-sm font-black text-white">{r.title}</p>
                     <p className="text-[10px] text-[#3f5470]">
-                      {r.type === 'pdf' ? 'PDF' : 'Document'} · Updated{' '}
+                      {resourceTypeLabel(r)} · Updated{' '}
                       {new Date(r.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                     </p>
                     {(r.division_only || (Array.isArray(r.allowed_ranks) && r.allowed_ranks.length > 0)) && (
@@ -2686,8 +2727,8 @@ export function DivisionPanelSection({
                     onClick={() => onOpenResource(r, true)}
                     className="flex items-center gap-1 rounded-lg border border-[#34d399]/30 bg-[#34d399]/8 px-3 py-1.5 text-[11px] font-black text-[#34d399] hover:bg-[#34d399]/15 transition-colors"
                   >
-                    {r.type === 'pdf' ? <BookOpen className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-                    {r.type === 'pdf' ? 'View' : 'Edit'}
+                    {isPdfLikeResource(r) ? <BookOpen className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                    {isPdfLikeResource(r) ? 'View' : 'Edit'}
                   </button>
                   <button
                     type="button"
@@ -2969,7 +3010,7 @@ export function DivisionPanelSection({
 
         {/* Member / officer table */}
         <div className="flex flex-wrap items-center gap-3 border-b border-[#172235] px-6 py-3">
-          <div className="relative w-full max-w-sm flex-1">
+          <div className="relative w-full max-w-sm flex-1 min-w-[12rem]">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#526179]" />
             <input
               type="text"
@@ -2982,16 +3023,29 @@ export function DivisionPanelSection({
           <span className="shrink-0 text-[10px] font-black text-[#526179]">
             {filtered.length} {filtered.length !== 1 ? personNounPlural : personNoun}
           </span>
-          <button
-            type="button"
-            onClick={() => setAddOfficerOpen(true)}
-            disabled={divRanks.length === 0}
-            title={divRanks.length === 0 ? 'Add a division rank first' : `Add ${personNoun} to this division`}
-            className="ml-auto flex items-center gap-1.5 rounded-lg border border-[#22d3ee]/30 bg-[#22d3ee]/8 px-3 py-2 text-[10px] font-black uppercase tracking-[0.12em] text-[#22d3ee] hover:bg-[#22d3ee]/15 disabled:opacity-40 transition-colors"
-          >
-            <UserPlus className="h-3.5 w-3.5" />
-            Add {personNounTitle}
-          </button>
+          {(fullAccess || accessForDivision(selectedDivision.id).can_edit_roster) && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleSyncDivisionDiscord()}
+              disabled={syncingDiscord}
+              className="flex items-center gap-1.5 rounded-lg border border-[#4384ff]/30 bg-[#4384ff]/8 px-3 py-2 text-[10px] font-black uppercase tracking-[0.12em] text-[#4384ff] hover:bg-[#4384ff]/15 disabled:opacity-50 transition-colors"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${syncingDiscord ? 'animate-spin' : ''}`} />
+              {syncingDiscord ? 'Syncing…' : 'Sync Discord'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setAddOfficerOpen(true)}
+              disabled={divRanks.length === 0}
+              title={divRanks.length === 0 ? 'Add a division rank first' : `Add ${personNoun} to this division`}
+              className="flex items-center gap-1.5 rounded-lg border border-[#22d3ee]/30 bg-[#22d3ee]/8 px-3 py-2 text-[10px] font-black uppercase tracking-[0.12em] text-[#22d3ee] hover:bg-[#22d3ee]/15 disabled:opacity-40 transition-colors"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Add {personNounTitle}
+            </button>
+          </div>
+          )}
         </div>
 
         {membersLoading && members.length === 0 ? (
@@ -3020,6 +3074,7 @@ export function DivisionPanelSection({
                   <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Division Rank</th>
                   <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Callsign</th>
                   <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Status</th>
+                  <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Discord Status</th>
                   <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.22em] text-[#3f5470]">Actions</th>
                 </tr>
               </thead>
@@ -3051,26 +3106,18 @@ export function DivisionPanelSection({
                         />
                       </td>
                       <td className="px-4 py-3.5">
-                        {canManageRoster ? (
-                        <select
-                          value={currentRank}
-                          onChange={e => void setDivisionAssignment(m.id, selectedDivision.id, e.target.value)}
-                          className="h-7 min-w-[140px] rounded border border-[#1f3050] bg-[#07111f] px-2 text-[10px] font-semibold text-white outline-none focus:border-[#2f70ff] cursor-pointer"
-                        >
-                          <option value="">—</option>
-                          {divRanks.map(r => (
-                            <option key={r.id} value={r.name}>{r.name}</option>
-                          ))}
-                        </select>
-                        ) : (
-                          <RankWithInsignia
-                            rankName={currentRank || '—'}
-                            meta={getDivRankMeta(selectedDivision.id, currentRank)}
-                          />
-                        )}
+                        <RankWithInsignia
+                          rankName={currentRank || '—'}
+                          meta={getDivRankMeta(selectedDivision.id, currentRank)}
+                        />
                       </td>
                       <td className="px-4 py-3.5 font-black text-[#4384ff]">{m.callsign || '—'}</td>
                       <td className="px-4 py-3.5"><StatusBadge status={m.status} /></td>
+                      <td className="px-4 py-3.5">
+                        <DiscordStatusBadge
+                          status={m.discord_id ? (panelDiscordPresence[m.discord_id] ?? 'offline') : 'offline'}
+                        />
+                      </td>
                       <td className="px-4 py-3.5">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {fullAccess && (

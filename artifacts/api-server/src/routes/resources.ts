@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { isMongoStore, pool, getCollection } from "@workspace/db";
+import { sanitizeResourceForClient } from "../lib/google-doc-resource";
 
 const router = Router();
 
@@ -24,15 +25,16 @@ const parseRankList = (value: unknown): string[] => {
   return parsed.map(String).map(s => s.trim()).filter(Boolean);
 };
 
-const normalizeResourceRow = (row: Record<string, unknown>) => ({
-  ...row,
-  header_config: parseJsonField(row.header_config, {}),
-  content: parseJsonField(row.content, {}),
-  division_only: Boolean(row.division_only),
-  allowed_ranks: parseRankList(row.allowed_ranks),
-  personnel_only: Boolean(row.personnel_only),
-  allowed_dps_ranks: parseRankList(row.allowed_dps_ranks),
-});
+const normalizeResourceRow = (row: Record<string, unknown>, opts: { public?: boolean } = {}) =>
+  sanitizeResourceForClient({
+    ...row,
+    header_config: parseJsonField(row.header_config, {}),
+    content: parseJsonField(row.content, {}),
+    division_only: Boolean(row.division_only),
+    allowed_ranks: parseRankList(row.allowed_ranks),
+    personnel_only: Boolean(row.personnel_only),
+    allowed_dps_ranks: parseRankList(row.allowed_dps_ranks),
+  }, opts);
 
 // ── One-time migration ────────────────────────────────────────────────────────
 (async () => {
@@ -61,17 +63,21 @@ const normalizeResourceRow = (row: Record<string, unknown>) => ({
     // Department-wide visibility: DPS personnel only + optional DPS rank list
     await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS personnel_only boolean NOT NULL DEFAULT false`);
     await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS allowed_dps_ranks text NOT NULL DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
+    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
+    await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
   } catch (e) {
     console.error("dps_resources migration failed:", e);
   }
 })();
 
 const RESOURCE_LIST_COLS = `
-  id, title, type, logo_url, created_by, created_at, updated_at, division_id,
+  id, title, type, logo_url, header_config, created_by, created_at, updated_at, division_id,
   COALESCE(division_only, false) AS division_only,
   COALESCE(allowed_ranks, '[]') AS allowed_ranks,
   COALESCE(personnel_only, false) AS personnel_only,
-  COALESCE(allowed_dps_ranks, '[]') AS allowed_dps_ranks
+  COALESCE(allowed_dps_ranks, '[]') AS allowed_dps_ranks,
+  google_file_id, google_integration_id, google_modified_time
 `;
 
 const RESOURCE_DETAIL_COLS = `
@@ -79,7 +85,8 @@ const RESOURCE_DETAIL_COLS = `
   division_id, COALESCE(division_only, false) AS division_only,
   COALESCE(allowed_ranks, '[]') AS allowed_ranks,
   COALESCE(personnel_only, false) AS personnel_only,
-  COALESCE(allowed_dps_ranks, '[]') AS allowed_dps_ranks
+  COALESCE(allowed_dps_ranks, '[]') AS allowed_dps_ranks,
+  google_file_id, google_integration_id, google_modified_time
 `;
 
 const isPublicResource = (row: ReturnType<typeof normalizeResourceRow>) =>
@@ -113,7 +120,7 @@ router.get("/resources", async (req, res) => {
         };
       }
       const rows = await col.find(filter).sort({ created_at: -1 }).toArray();
-      const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>));
+      const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>, { public: publicOnly }));
       res.json(publicOnly ? normalized.filter(isPublicResource) : normalized);
       return;
     }
@@ -137,7 +144,7 @@ router.get("/resources", async (req, res) => {
         ORDER BY created_at DESC`,
       params
     );
-    const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>));
+    const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>, { public: publicOnly }));
     res.json(publicOnly ? normalized.filter(isPublicResource) : normalized);
   } catch (e) {
     console.error(e);

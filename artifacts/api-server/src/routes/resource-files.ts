@@ -13,6 +13,7 @@ import { Router } from "express";
 import multer from "multer";
 import { pool, isMongoStore, resourcesRepo } from "@workspace/db";
 import { ConversionError, convertDocxToPdf, isDocx, isLegacyDoc, isPdf } from "../lib/docx-to-pdf";
+import { tryServeGoogleDocFile } from "../lib/google-doc-resource";
 
 const router = Router();
 
@@ -167,6 +168,7 @@ router.get("/resources/:id/file", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) { res.status(400).json({ error: "Invalid id." }); return; }
   try {
+    if (await tryServeGoogleDocFile(req, res, "dps", id)) return;
     if (isMongoStore()) {
       const file = await resourcesRepo.getResourceFile("dps", id);
       if (!file) { res.status(404).json({ error: "File not found." }); return; }

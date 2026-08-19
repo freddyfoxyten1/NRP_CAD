@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Car, ChevronDown, ChevronRight, Package, Search, Users, X } from "lucide-react";
 import { imageStyle } from "@/components/shared/ImageInput";
 import {
-  buildPersonnelTitleGroups,
+  buildPublicPersonnelTitleGroups,
   dedupeRosterMembersById,
   type TitleGroup,
 } from "@/lib/roster-sort";
 import { normalizeRankGroupId, fetchRosterArray } from "@/lib/roster-fetch";
+import { fetchDiscordPresence, type DiscordPresenceStatus } from "@/lib/discord-presence";
+import { DiscordStatusBadge } from "@/components/shared/DiscordStatusBadge";
 
 type RosterTab = "personnel" | "vehicles" | "equipment";
 
@@ -211,6 +213,7 @@ export default function DpsPublicRosterModal({
   const [ranks, setRanks] = useState<RankMeta[]>([]);
   const [vehicles, setVehicles] = useState<FleetVehicle[]>([]);
   const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
+  const [discordPresence, setDiscordPresence] = useState<Record<string, DiscordPresenceStatus>>({});
 
   useEffect(() => {
     if (!open) return;
@@ -298,6 +301,19 @@ export default function DpsPublicRosterModal({
     return () => { cancelled = true; };
   }, [open, apiBase]);
 
+  useEffect(() => {
+    if (!open || members.length === 0) {
+      setDiscordPresence({});
+      return;
+    }
+    let cancelled = false;
+    const ids = members.map(m => m.discord_id).filter(Boolean) as string[];
+    void fetchDiscordPresence(ids).then(map => {
+      if (!cancelled) setDiscordPresence(map);
+    });
+    return () => { cancelled = true; };
+  }, [open, members]);
+
   const rankMetaByName = useMemo(() => {
     const map = new Map<string, RankMeta>();
     ranks.forEach(r => map.set(r.name.trim().toLowerCase(), r));
@@ -308,20 +324,22 @@ export default function DpsPublicRosterModal({
     const q = search.trim().toLowerCase();
     if (!q) return members;
     return members.filter(m =>
-      [m.username, m.discord_username, memberRank(m), m.callsign, m.group_name, m.staff_role]
+      [m.username, m.discord_username, m.discord_id, memberRank(m), m.callsign, m.group_name, m.staff_role, m.status]
         .filter(Boolean)
         .some(v => String(v).toLowerCase().includes(q))
     );
   }, [members, search]);
 
   const groupedMembers = useMemo(() => {
-    return buildPersonnelTitleGroups(
+    return buildPublicPersonnelTitleGroups(
       filteredMembers,
       groups,
       ranks,
       memberRankName,
     );
   }, [filteredMembers, groups, ranks]);
+
+  const searching = search.trim().length > 0;
 
   const visibleMemberCount = useMemo(
     () => groupedMembers.reduce((sum, g) => sum + g.members.length, 0),
@@ -381,25 +399,27 @@ export default function DpsPublicRosterModal({
           </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-b border-[#131f30] px-5 py-3 sm:px-6">
-          {tabs.map(({ id, label, icon: Icon, count }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => { setTab(id); setSearch(""); }}
-              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] transition-colors ${
-                tab === id ? theme.tabActive : theme.tabIdle
-              }`}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-              <span className="rounded-full bg-black/25 px-1.5 py-0.5 text-[9px] text-[#6f7f99]">{count}</span>
-            </button>
-          ))}
-          <div className="relative ml-auto w-full min-w-[180px] sm:w-56">
+        <div className="flex flex-col gap-2 border-b border-[#131f30] px-5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:px-6">
+          <div className="flex flex-wrap gap-2">
+            {tabs.map(({ id, label, icon: Icon, count }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => { setTab(id); setSearch(""); }}
+                className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] transition-colors ${
+                  tab === id ? theme.tabActive : theme.tabIdle
+                }`}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+                <span className="rounded-full bg-black/25 px-1.5 py-0.5 text-[9px] text-[#6f7f99]">{count}</span>
+              </button>
+            ))}
+          </div>
+          <div className="relative w-full sm:ml-auto sm:w-56 sm:shrink-0">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#526179]" />
             <input
-              type="text"
+              type="search"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder={
@@ -427,13 +447,15 @@ export default function DpsPublicRosterModal({
               </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-[#172235]">
-                <table className="w-full min-w-[640px] border-collapse text-left text-xs">
+                <table className="w-full min-w-[900px] border-collapse text-left text-xs">
                   <thead>
                     <tr className="border-b border-[#131f30] bg-[#070d16]">
                       <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Name</th>
                       <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Rank</th>
                       <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Callsign</th>
                       <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Status</th>
+                      <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Discord Status</th>
+                      <th className="px-4 py-3 text-[9px] font-black uppercase tracking-[0.18em] text-[#3f5470]">Discord ID</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -442,7 +464,7 @@ export default function DpsPublicRosterModal({
                         key={group.label}
                         label={group.label}
                         count={group.members.length}
-                        collapsed={Boolean(collapsed[group.label])}
+                        collapsed={searching ? false : Boolean(collapsed[group.label])}
                         chevronClass={theme.chevron}
                         onToggle={() => setCollapsed(prev => ({ ...prev, [group.label]: !prev[group.label] }))}
                       >
@@ -482,6 +504,18 @@ export default function DpsPublicRosterModal({
                                 </span>
                               </td>
                               <td className="px-4 py-3"><StatusBadge status={m.status} /></td>
+                              <td className="px-4 py-3">
+                                <DiscordStatusBadge
+                                  status={
+                                    m.discord_id
+                                      ? (discordPresence[m.discord_id] ?? "offline")
+                                      : "offline"
+                                  }
+                                />
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="font-mono text-[11px] text-[#526179]">{m.discord_id || "—"}</span>
+                              </td>
                             </tr>
                           );
                         })}
@@ -644,7 +678,7 @@ function FragmentGroup({
         className={`cursor-pointer border-b border-t border-[#172235] transition-colors hover:bg-[#0c1830] ${indent ? "bg-[#08111d]" : "bg-[#0a1525]"}`}
         onClick={onToggle}
       >
-        <td colSpan={4} className={`px-4 py-2.5 ${indent ? "pl-8" : ""}`}>
+        <td colSpan={6} className={`px-4 py-2.5 ${indent ? "pl-8" : ""}`}>
           <div className="flex items-center gap-2">
             {collapsed
               ? <ChevronRight className={`h-3.5 w-3.5 shrink-0 ${chevronClass}`} />

@@ -29,6 +29,11 @@ export async function ensureMongoIndexes(db: Db): Promise<void> {
     { key: { created_at: -1 }, name: "media_created_at" },
   ], db);
 
+  await ensure("google_integrations", [
+    { key: { id: 1 }, unique: true, name: "google_integrations_id_uq" },
+    { key: { google_user_id: 1 }, unique: true, name: "google_integrations_user_uq" },
+  ], db);
+
   await ensure("resources", [
     // IDs are unique per department (staff/dps/dph tables historically overlapped).
     { key: { department: 1, id: 1 }, unique: true, name: "resources_dept_id_uq" },

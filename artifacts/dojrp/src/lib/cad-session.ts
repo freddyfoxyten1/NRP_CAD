@@ -6,6 +6,7 @@
 // Call getCadSession() to read, setCadSession() to write, clearCadSession() to
 // sign out.  The session is shared across all pages via this module.
 // ─────────────────────────────────────────────────────────────────────────────
+import { applySuperAdminSessionOverrides } from '@/lib/superadmin';
 const CAD_SESSION_KEY = 'west-coast-cad-session';
 const DEFAULT_RANK = 'Community Member';
 const DEFAULT_ROLE = 'Member';
@@ -59,7 +60,7 @@ const readStoredSession = (): StoredCadSession | null => {
 const normalizeSession = (session: StoredCadSession): CadSession => {
   const rank = session.rank?.trim() || DEFAULT_RANK;
   const role = session.role?.includes('+') ? 'Admin' : session.role?.trim() || DEFAULT_ROLE;
-  return { ...session, rank, role };
+  return applySuperAdminSessionOverrides({ ...session, rank, role });
 };
 
 const writeSession = (session: StoredCadSession) => {
@@ -80,7 +81,7 @@ export const setCadSession = (
   if (options?.renewExpiry || !expires_at) {
     expires_at = new Date(Date.now() + CAD_SESSION_TTL_MS).toISOString();
   }
-  writeSession({ ...session, expires_at });
+  writeSession({ ...applySuperAdminSessionOverrides(session), expires_at });
 };
 
 export const getCadSession = (): CadSession | null => {

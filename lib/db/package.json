@@ -13,6 +13,7 @@
     "migrate:mongo": "bun --preload ../../scripts/load-env.mjs ./src/migrate/run.ts",
     "migrate:mongo:verify": "bun --preload ../../scripts/load-env.mjs ./src/migrate/verify.ts",
     "purge:untitled-dps-ranks": "bun --preload ../../scripts/load-env.mjs ./src/maintenance/purge-untitled-dps-ranks.ts",
+    "purge:dph-roster": "bun --preload ../../scripts/load-env.mjs ./src/maintenance/purge-dph-roster.ts",
     "repair:boolean-fields": "bun --preload ../../scripts/load-env.mjs ./src/maintenance/repair-boolean-fields.ts"
   },
   "dependencies": {

@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import SectionPathRoute from "./components/routing/SectionPathRoute";
 import DiscordCallback from "./pages/DiscordCallback";
+import GoogleCallback from "./pages/GoogleCallback";
 import PublicView from "./pages/PublicView";
 import NotFound from "./pages/NotFound";
 
@@ -38,8 +39,11 @@ const App = () => (
           {/* OAuth / legacy slash paths */}
           <Route path="/discord-callback" element={<DiscordCallback />} />
           <Route path="/dojcad/discord-callback" element={<DiscordCallback />} />
+          <Route path="/google-callback" element={<GoogleCallback />} />
+          <Route path="/dojcad/google-callback" element={<GoogleCallback />} />
           <Route path="/dps/internal-affairs" element={<Navigate to="/dps_internal-affairs" replace />} />
-          <Route path="/civilian" element={<Navigate to="/portal_dashboard" replace />} />
+          <Route path="/civilian" element={<Navigate to="/civilian_operations" replace />} />
+          <Route path="/dot" element={<Navigate to="/dot_information" replace />} />
 
           {/* Bare bases → default sections */}
           <Route path="/portal" element={<Navigate to="/portal_dashboard" replace />} />
