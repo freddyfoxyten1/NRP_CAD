@@ -46,7 +46,7 @@ import { normalizeGroupRow, normalizeRankGroupId, normalizeRankRow } from "../li
 const router = Router();
 
 // ─── DPS Discord Guild ────────────────────────────────────────────────────────
-const DPS_GUILD_ID = process.env.DPS_DISCORD_GUILD_ID ?? "1469131277612486791";
+const DPS_GUILD_ID = process.env.DPS_DISCORD_GUILD_ID ?? "1539660726338326571";
 /** Guild used for Division Roster Discord role links — defaults to the DPS guild. */
 const DIVISION_GUILD_ID = process.env.DIVISION_DISCORD_GUILD_ID ?? DPS_GUILD_ID;
 
@@ -706,7 +706,7 @@ async function restorePersonnelCallsignFromRank(profileId: number): Promise<void
 const DPS_MEMBERS_TTL_MS = 5 * 60 * 1000; // 5 min — used by Add Officer typeahead
 let _dpsMembersFetchRunning: Promise<DpsMemberCacheEntry[]> | null = null;
 
-/** Paginate DPS guild (1469131277612486791) and refresh the in-memory member cache. */
+/** Paginate DPS guild (1539660726338326571) and refresh the in-memory member cache. */
 async function fetchDpsGuildMembers(): Promise<DpsGuildMember[]> {
   const tok = process.env.DISCORD_BOT_TOKEN;
   if (!tok) throw new Error("No DISCORD_BOT_TOKEN configured");

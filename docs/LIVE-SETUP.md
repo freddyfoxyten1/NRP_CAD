@@ -47,6 +47,7 @@ GitHub Pages is built with `VITE_STATS_URL` pointing at that URL, so the homepag
    | `DISCORD_CLIENT_ID` | `1539474351752224789` |
    | `DISCORD_CLIENT_SECRET` | From Discord portal |
    | `DISCORD_BOT_TOKEN` | From Discord portal |
+   | `DPS_DISCORD_GUILD_ID` | `1539660726338326571` (DPS Discord server) |
 
 4. Check: `https://nrp-cad-api.onrender.com/api/healthz` → `{"status":"ok"}`.
 
