@@ -9,10 +9,11 @@ import {
   X,
 } from 'lucide-react';
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
+import { NRP_LOGO_URL } from '@/components/shared/DojrpShield';
 import type { CadSession } from '@/lib/cad-session';
 import { cadModeLabel } from '@/hooks/useCadStatus';
 
-const SHIELD_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}nrp-logo.png`;
+const SHIELD_URL = NRP_LOGO_URL;
 
 export type AdminNavTab = {
   id: string;
