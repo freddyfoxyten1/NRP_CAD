@@ -4055,7 +4055,7 @@ export default function CadPage() {
       <footer className={`flex shrink-0 items-center gap-3 border-t-[3px] bg-[#03080f] px-4 py-1.5 ${myUnit ? STATUS_BORDER_T[myUnit.status] : 'border-t-[#0f1c2e]'}`}>
         <div className="flex items-center gap-1.5">
           <Zap className="h-3 w-3 text-[#2a3a50]" />
-          <span className="text-[9px] font-black uppercase tracking-widest text-[#1e2e42]">DOJRP CAD</span>
+          <span className="text-[9px] font-black uppercase tracking-widest text-[#1e2e42]">Northpoint CAD</span>
         </div>
         {myUnit && (
           <div className="flex items-center gap-1.5 text-[9px] text-[#2a3a50]">

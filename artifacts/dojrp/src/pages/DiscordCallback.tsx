@@ -3,7 +3,7 @@
 //
 // Discord sends the user back here after they authorise the application.
 // Exchanges the code, completes login, then routes to the portal.
-// New members must be in the DOJRP Discord server; accounts are created on first sign-in.
+// New members must be in the Northpoint Roleplay Discord server; accounts are created on first sign-in.
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -109,7 +109,7 @@ const DiscordCallback = () => {
             setState({
               kind: 'join',
               prompt: {
-                guildName: payload.guild_name?.trim() || 'DOJRP',
+                guildName: payload.guild_name?.trim() || 'Northpoint Roleplay',
                 inviteCode: payload.invite_code ?? null,
                 inviteUrl: payload.invite_url
                   ?? (payload.invite_code ? `https://discord.gg/${payload.invite_code}` : null),

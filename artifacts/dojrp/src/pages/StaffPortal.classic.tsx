@@ -24,9 +24,9 @@ type StaffTab = 'roster' | 'resources' | 'events';
 
 function getStaffTabSubtitle(tab: StaffTab): string {
   switch (tab) {
-    case 'roster': return 'Active staff roster for DOJ:RP.';
+    case 'roster': return 'Active staff roster for Northpoint Roleplay.';
     case 'resources': return 'Guides and reference materials for staff. Managed from the Admin Portal.';
-    case 'events': return 'Host server events as DOJ Staff. Public events appear on the website index.';
+    case 'events': return 'Host server events as Northpoint Staff. Public events appear on the website index.';
     default: return 'Staff roster portal.';
   }
 }
@@ -636,7 +636,7 @@ const StaffPortal = ({ shellTheme = 'classic' }: { shellTheme?: StaffShellTheme 
                       Staff Events
                     </h2>
                     <p className="mt-2 text-sm text-[#8392aa]">
-                      Host server events as DOJ Staff. Public events appear on the website index as “Server event hosted by DOJ Staff”.
+                      Host server events as Northpoint Staff. Public events appear on the website index as “Server event hosted by Northpoint Staff”.
                     </p>
                   </div>
                   {!showEventForm && !editingEvent && (
@@ -691,7 +691,7 @@ const StaffPortal = ({ shellTheme = 'classic' }: { shellTheme?: StaffShellTheme 
                       </div>
                       <div>
                         <label className={labelCls}>Hosting department</label>
-                        <input type="text" value="DOJ Staff" readOnly
+                        <input type="text" value="Northpoint Staff" readOnly
                           className={`${inputCls} cursor-not-allowed opacity-80`} />
                       </div>
                       <div className="sm:col-span-2">
@@ -726,7 +726,7 @@ const StaffPortal = ({ shellTheme = 'classic' }: { shellTheme?: StaffShellTheme 
                             </p>
                             <p className="text-[10px] text-[#3f5470]">
                               {eventForm.is_public
-                                ? 'Shown on the public website as a server event hosted by DOJ Staff'
+                                ? 'Shown on the public website as a server event hosted by Northpoint Staff'
                                 : 'Only visible to staff in this portal'}
                             </p>
                           </div>
@@ -746,7 +746,7 @@ const StaffPortal = ({ shellTheme = 'classic' }: { shellTheme?: StaffShellTheme 
                               headers: { 'content-type': 'application/json' },
                               body: JSON.stringify({
                                 ...eventForm,
-                                hosting_department: 'DOJ Staff',
+                                hosting_department: 'Northpoint Staff',
                               }),
                             });
                             if (!r.ok) throw new Error();
@@ -807,7 +807,7 @@ const StaffPortal = ({ shellTheme = 'classic' }: { shellTheme?: StaffShellTheme 
                               </div>
                               <p className="mt-0.5 text-[10px] text-[#526179]">{dateStr}{timeStr ? ` · ${timeStr}` : ''}</p>
                               <p className="mt-0.5 text-[10px] text-[#8392aa]">
-                                {ev.hosted_by ? `Hosted by ${ev.hosted_by}` : 'Hosted by DOJ Staff'} · DOJ Staff
+                                {ev.hosted_by ? `Hosted by ${ev.hosted_by}` : 'Hosted by Northpoint Staff'} · Northpoint Staff
                               </p>
                               {ev.location && (
                                 <p className="mt-0.5 flex items-center gap-1 text-[10px] text-[#3f5470]">

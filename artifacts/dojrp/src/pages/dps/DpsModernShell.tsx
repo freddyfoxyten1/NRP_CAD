@@ -136,7 +136,7 @@ function DpsSidebarContent({
           <div className="flex items-center gap-3">
             <img src={DPS_SEAL_URL} alt="" className="h-10 w-10 shrink-0 object-contain" />
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#4a6080]">DOJ:RP CAD</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#4a6080]">Northpoint Roleplay CAD</p>
               <h1 className="text-base font-black tracking-tight text-white">Dept. of Public Safety</h1>
             </div>
           </div>

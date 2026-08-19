@@ -69,7 +69,7 @@ const LegalDocModal = ({ doc, onClose, onSwitch }: LegalDocModalProps) => {
         <div className="mb-6 text-center">
           <DojrpShield className="mx-auto mb-3 h-14 w-14" />
           <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#5b8fd9]">
-            DOJRP Community
+            Northpoint Roleplay Community
           </p>
           <h2 className="mt-3 text-3xl font-black tracking-[-0.04em] text-white sm:text-4xl">
             {isTerms ? 'Terms of Service' : 'Privacy Policy'}

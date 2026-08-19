@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // components/overlays/PhonePanel.tsx  —  In-app phone / comms panel
 //
-// Slide-in panel for the DOJRP in-app phone system.  Shows call history,
+// Slide-in panel for the Northpoint Roleplay in-app phone system.  Shows call history,
 // lets officers make and receive calls, and displays active call state.
 // Communicates with /api/phone/* endpoints on the API server.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1220,7 +1220,7 @@ export default function PhonePanel({ open, onClose, username, callEvent, answere
           onPointerMove={onDragMove}
           onPointerUp={onDragEnd}
         >
-          <span className="text-[8px] font-bold text-white/30">DOJRP</span>
+          <span className="text-[8px] font-bold text-white/30">NRP</span>
           <div className="flex items-center gap-1.5">
             {/* Pin toggle */}
             <button

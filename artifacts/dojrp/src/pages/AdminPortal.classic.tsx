@@ -40,9 +40,9 @@ import { DiscordStatusBadge } from '@/components/shared/DiscordStatusBadge';
 
 function getAdminTabSubtitle(tab: AdminTab): string {
   switch (tab) {
-    case 'members': return 'View members of the DOJRP Discord server — username, Discord ID, website rank, and server roles.';
+    case 'members': return 'View members of the Northpoint Roleplay Discord server — username, Discord ID, website rank, and server roles.';
     case 'staff-roster': return 'Manage staff rank groups and members. Only superadmins can manage the Executive Team or reorder its ranks.';
-    case 'announcement': return 'Compose and publish announcements visible to all DOJRP CAD members.';
+    case 'announcement': return 'Compose and publish announcements visible to all Northpoint Roleplay CAD members.';
     case 'information-support': return 'Edit the Information & Support page shown in the Member Portal.';
     case 'staff-resources': return 'Add, edit, and remove resources shown on the Staff Roster Resources tab.';
     case 'terms-privacy': return 'Edit the Terms of Service and Privacy Policy shown on the sign-in screen.';
@@ -5321,11 +5321,11 @@ const AdminPortal = ({ shellTheme = 'classic' }: { shellTheme?: AdminShellTheme 
               <h2 className="text-3xl font-black leading-none tracking-[-0.05em] text-white sm:text-4xl">{tabTitle}</h2>
               <p className="mt-2 text-sm text-[#8392aa] sm:text-base">
                 {activeTab === 'members'
-                  ? 'View members of the DOJRP Discord server (823606319529066548) — username, Discord ID, website rank, and server roles.'
+                  ? 'View members of the Northpoint Roleplay Discord server — username, Discord ID, website rank, and server roles.'
                   : activeTab === 'staff-roster'
                   ? 'Manage staff rank groups and members. Only superadmins can manage the Executive Team or reorder its ranks.'
                   : activeTab === 'announcement'
-                  ? 'Compose and publish announcements visible to all DOJRP CAD members.'
+                  ? 'Compose and publish announcements visible to all Northpoint Roleplay CAD members.'
                   : activeTab === 'information-support'
                   ? 'Edit the Information & Support page shown in the Member Portal.'
                   : activeTab === 'staff-resources'

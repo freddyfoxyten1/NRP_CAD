@@ -2,7 +2,7 @@
 // pages/PublicView.tsx   -   Public-facing community page  (/public)
 //
 // No authentication required. Displays live stats, announcements, gallery,
-// and press/news items for the DOJRP community.
+// and press/news items for the Northpoint Roleplay community.
 // ----
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment, lazy, Suspense } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -756,7 +756,7 @@ const PublicView = () => {
         <div className="mx-auto flex h-full max-w-6xl items-center gap-3 px-4 sm:gap-4 sm:px-8">
           <div className="flex min-w-0 items-center gap-2.5">
             <DojrpShield className="h-7 w-7 shrink-0" />
-            <span className="truncate text-sm font-black tracking-tight text-white">DOJ:RP CAD</span>
+            <span className="truncate text-sm font-black tracking-tight text-white">Northpoint Roleplay CAD</span>
           </div>
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -882,13 +882,13 @@ const PublicView = () => {
         {tab === "home" && (
           <>
             <section>
-              <SectionHeading icon={Shield} title="About DOJRP" />
+              <SectionHeading icon={Shield} title="About Northpoint Roleplay" />
               <div className={`mb-6 px-4 py-6 sm:px-8 sm:py-8 ${skin.card}`}>
                 <p className={`text-sm leading-relaxed ${skin.bodyText}`}>
-                  DOJ:RP is one of the largest ER:LC servers out there. With multiple departments including DPS and DPH and divisions like Hazmat, SRU, HSU and many more. We aim to ensure that the server is fun for everyone who joins us here in DOJ. We always aim for everyone to have a great time with the amazing staff team, great roleplays and fun events.
+                  Northpoint Roleplay is an ER:LC community with departments including DPS and DPH and divisions like Hazmat, SRU, HSU and many more. We aim to ensure that the server is fun for everyone who joins us here. We always aim for everyone to have a great time with the amazing staff team, great roleplays and fun events.
                 </p>
                 <p className={`mt-4 text-sm leading-relaxed ${skin.bodyText}`}>
-                  Whether you want to patrol as a cop, or save peoples lives in fires or accidents, or have fun roleplaying as a civilian getting up to all sorts of crime, there's always a place here for you at DOJ.
+                  Whether you want to patrol as a cop, or save peoples lives in fires or accidents, or have fun roleplaying as a civilian getting up to all sorts of crime, there's always a place here for you at Northpoint Roleplay.
                 </p>
               </div>
               <div className="grid gap-4 sm:grid-cols-3">
@@ -1346,7 +1346,7 @@ const PublicView = () => {
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-[#4384ff]/25 bg-[#4384ff]/10">
                   <ShoppingBag className="h-7 w-7 text-[#4384ff]" />
                 </div>
-                <h3 className="mt-5 text-lg font-black text-white">DOJ:RP Server Store</h3>
+                <h3 className="mt-5 text-lg font-black text-white">Northpoint Roleplay Server Store</h3>
                 <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-[#526179]">
                   Support the community and unlock store packages, cosmetics, and server perks.
                 </p>
@@ -1458,7 +1458,7 @@ const PublicView = () => {
                     ? new Date(`1970-01-01T${ev.event_time}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
                     : null;
                   const hostLine = ev.is_staff_event || ev.source === 'staff'
-                    ? 'Server event hosted by DOJ Staff'
+                    ? 'Server event hosted by Northpoint Staff'
                     : [
                         ev.hosted_by ? `Hosted by ${ev.hosted_by}` : null,
                         ev.hosting_department || null,

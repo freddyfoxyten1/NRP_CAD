@@ -39,10 +39,12 @@ async function start() {
     const mongo = isMongoStore() ? await pingMongo() : null;
     const redis = (process.env.REDIS_URL ?? "").trim() ? await pingRedis() : null;
     const production = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
+    const postgresUrl = Boolean((process.env.DATABASE_URL ?? "").trim());
     const ok = isMongoStore() ? Boolean(mongo) : !production;
     res.status(ok ? 200 : 503).json({
-      dataStore: isMongoStore() ? "mongo" : "sql",
+      dataStore: isMongoStore() ? "mongo" : postgresUrl ? "postgres" : "sql",
       mongo,
+      postgres: postgresUrl,
       redis,
       ok,
     });
@@ -77,7 +79,7 @@ async function start() {
   try {
     const stores = await initDataStores();
     logger.info(
-      { dataStore: isMongoStore() ? "mongo" : "sql", mongo: stores.mongo, redis: stores.redis },
+      { dataStore: isMongoStore() ? "mongo" : "sql", mongo: stores.mongo, postgres: stores.postgres, redis: stores.redis },
       "Data stores initialized",
     );
   } catch (err) {

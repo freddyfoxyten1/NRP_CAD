@@ -1695,7 +1695,7 @@ const ensureStaffEvents = pool.query(`
     location            TEXT,
     purpose             TEXT,
     hosted_by           TEXT,
-    hosting_department  TEXT NOT NULL DEFAULT 'DOJ Staff',
+    hosting_department  TEXT NOT NULL DEFAULT 'Northpoint Staff',
     is_public           BOOLEAN NOT NULL DEFAULT false,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )
@@ -1707,7 +1707,7 @@ function mapStaffEvent(row: Record<string, unknown>) {
   return {
     ...row,
     event_date: String(row.event_date ?? "").slice(0, 10),
-    hosting_department: (row.hosting_department as string) || "DOJ Staff",
+    hosting_department: (row.hosting_department as string) || "Northpoint Staff",
     is_public: Boolean(row.is_public),
   };
 }
@@ -1745,7 +1745,7 @@ router.post("/staff/events", async (req, res) => {
        RETURNING id, title, event_date, event_time, location, purpose, hosted_by, hosting_department, is_public, created_at`,
       [
         title.trim(), event_date, event_time || null, location?.trim() || null, purpose?.trim() || null,
-        is_public === true, hosted_by?.trim() || null, "DOJ Staff",
+        is_public === true, hosted_by?.trim() || null, "Northpoint Staff",
       ]
     );
     res.status(201).json(mapStaffEvent(r.rows[0] as Record<string, unknown>));
@@ -1774,7 +1774,7 @@ router.patch("/staff/events/:id", async (req, res) => {
        RETURNING id, title, event_date, event_time, location, purpose, hosted_by, hosting_department, is_public, created_at`,
       [
         title.trim(), event_date, event_time || null, location?.trim() || null, purpose?.trim() || null,
-        is_public === true, hosted_by?.trim() || null, "DOJ Staff", id,
+        is_public === true, hosted_by?.trim() || null, "Northpoint Staff", id,
       ]
     );
     if (!r.rows.length) { res.status(404).json({ error: "Event not found." }); return; }

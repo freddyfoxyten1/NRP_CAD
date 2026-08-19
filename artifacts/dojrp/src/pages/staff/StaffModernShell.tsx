@@ -11,7 +11,7 @@ import {
 import { PageLoadingScreen } from '@/components/shared/LoadingProgress';
 import type { CadSession } from '@/lib/cad-session';
 
-const SHIELD_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}dojrp-shield.png`;
+const SHIELD_URL = `${(import.meta.env.BASE_URL as string) ?? '/'}nrp-logo.png`;
 
 export type StaffNavTab = {
   id: string;
@@ -100,7 +100,7 @@ function StaffSidebarContent({
           <div className="flex items-center gap-3">
             <img src={SHIELD_URL} alt="" className="h-10 w-10 shrink-0 object-contain" />
             <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.28em] text-[#4a6080]">DOJ:RP CAD</p>
+              <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#4a6080]">Northpoint Roleplay CAD</p>
               <h1 className="text-base font-black tracking-tight text-white">Staff Roster</h1>
             </div>
           </div>

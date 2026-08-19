@@ -7,6 +7,7 @@ import {
   invalidateMemberCaches,
 } from "@workspace/db";
 import { writeLog, ensureAuditLog, listLogs } from "../lib/audit-log";
+import { COMMUNITY_GUILD_ID } from "../lib/discord-auth";
 
 const router = Router();
 
@@ -42,8 +43,6 @@ router.get("/admin/logs", requireAdmin, async (req, res) => {
 
 // Caches for Discord data — rate limits make per-request fetches unsustainable.
 // Admin Members tab is always scoped to the main community Discord guild.
-const COMMUNITY_GUILD_ID =
-  (process.env.DISCORD_GUILD_ID ?? "").trim() || "823606319529066548";
 
 type CachedMember = { id: string; username: string; global_name?: string | null; avatar?: string | null; nick?: string | null; roles: string[] };
 type CachedRole   = { id: string; name: string; position: number };

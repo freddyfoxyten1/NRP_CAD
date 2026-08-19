@@ -99,7 +99,7 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
             <DojrpLogo />
           </p>
           <h2 className="mt-5 text-[32px] font-black leading-none tracking-[-0.045em] text-white">
-            DOJ CAD
+            Northpoint CAD
           </h2>
           <p className="mt-3 text-[11px] font-black uppercase tracking-[0.22em] text-[#5b8fd9]">
             Roleplay CAD &amp; Roster
@@ -152,7 +152,7 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
         <p className="mt-6 text-center text-[11px] leading-relaxed text-[#6a7f9a]">
           Sign in with Discord to access the CAD terminal.
           <br />
-          You must be a member of the DOJRP Discord server.
+          You must be a member of the Northpoint Roleplay Discord server.
         </p>
 
         <p className="mt-5 text-center text-[11px] text-[#4a5f78]">

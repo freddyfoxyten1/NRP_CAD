@@ -16,12 +16,12 @@ import { pool, isMongoStore, contentRepo } from "@workspace/db";
 import { fetchInGameStats } from "../lib/erlc-stats";
 import { getDiscordPresenceBatch } from "../lib/discord-presence-cache";
 import { writeLog } from "../lib/audit-log";
+import { COMMUNITY_GUILD_ID } from "../lib/discord-auth";
 
 const router = Router();
 
 const ADMIN_CODE      = process.env.ADMIN_PORTAL_CODE ?? "ADMIN2026";
 const DISCORD_BOT     = process.env.DISCORD_BOT_TOKEN ?? "";
-const PUBLIC_GUILD_ID = "823606319529066548";
 
 // ── Admin guard ───────────────────────────────────────────────────────────────
 const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
@@ -118,7 +118,7 @@ async function refreshPublicStats(): Promise<PublicStats> {
   const [erlc, discordResult] = await Promise.allSettled([
     fetchInGameStats(),
     DISCORD_BOT
-      ? fetch(`https://discord.com/api/v10/guilds/${PUBLIC_GUILD_ID}?with_counts=true`, {
+      ? fetch(`https://discord.com/api/v10/guilds/${COMMUNITY_GUILD_ID}?with_counts=true`, {
           headers: { Authorization: `Bot ${DISCORD_BOT}` },
           signal: AbortSignal.timeout(8_000),
         }).then(r => r.ok ? r.json() as Promise<{ approximate_member_count?: number; approximate_presence_count?: number }> : Promise.resolve({}))
@@ -746,7 +746,7 @@ router.get("/public/events", async (req, res) => {
     const events = [
       ...dps.rows.map((row) => normalize(row as Row, "dps", "Department of Public Safety")),
       ...dph.rows.map((row) => normalize(row as Row, "dph", "Department of Public Health")),
-      ...staff.rows.map((row) => normalize(row as Row, "staff", "DOJ Staff")),
+      ...staff.rows.map((row) => normalize(row as Row, "staff", "Northpoint Staff")),
     ].sort((a, b) => {
       const dateCmp = String(a.event_date).localeCompare(String(b.event_date));
       if (dateCmp !== 0) return dateCmp;

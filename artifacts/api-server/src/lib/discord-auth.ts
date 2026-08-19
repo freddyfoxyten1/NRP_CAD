@@ -3,8 +3,9 @@ import { pool, isMongoStore, usersRepo } from "@workspace/db";
 import { denyMessageForMode, getCadMode, modeToOnline, type CadMode } from "./cad-mode";
 import { applySuperAdminSessionOverrides, isSuperAdminDiscordId } from "./superadmin";
 
+/** Main community Discord — login gate, public member/online counts. */
 export const COMMUNITY_GUILD_ID =
-  process.env.DISCORD_GUILD_ID ?? "823606319529066548";
+  (process.env.DISCORD_GUILD_ID ?? "").trim() || "1539452857592324116";
 
 export type CommunityGuildJoinInfo = {
   guild_name: string;
@@ -28,7 +29,7 @@ export async function getCommunityGuildJoinInfo(): Promise<CommunityGuildJoinInf
     process.env.DISCORD_INVITE_CODE ?? process.env.DISCORD_INVITE_URL ?? "",
   );
 
-  let guildName = envName || "DOJRP";
+  let guildName = envName || "Northpoint Roleplay";
   let inviteCode = envInvite;
 
   if (process.env.DISCORD_BOT_TOKEN) {

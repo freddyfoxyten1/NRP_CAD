@@ -1,16 +1,11 @@
 /**
- * Renders "DOJRP" with per-letter brand colours:
- *   D   = Blue  (#2f70ff)
- *   OJR = White (#ffffff)
- *   P   = Red   (#ff5d5d)
+ * Renders "Northpoint Roleplay" in white so it stays readable on dark CAD chrome.
  *
  * Inherits font-size, weight, tracking, and uppercase transforms from the parent.
  */
 const DojrpLogo = () => (
-  <span className="dojrp-logo">
-    <span style={{ color: '#2f70ff' }}>D</span>
-    <span style={{ color: '#ffffff' }}>OJR</span>
-    <span style={{ color: '#ff5d5d' }}>P</span>
+  <span className="dojrp-logo" style={{ color: '#ffffff' }}>
+    Northpoint Roleplay
   </span>
 );
 

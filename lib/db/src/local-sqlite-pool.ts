@@ -582,7 +582,7 @@ function bootstrapSchema(db: Database): void {
       location TEXT,
       purpose TEXT,
       hosted_by TEXT,
-      hosting_department TEXT NOT NULL DEFAULT 'DOJ Staff',
+      hosting_department TEXT NOT NULL DEFAULT 'Northpoint Staff',
       is_public INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );

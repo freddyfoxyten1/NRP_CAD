@@ -10,9 +10,9 @@ type StaffTab = 'roster' | 'resources' | 'events';
 
 function getStaffTabSubtitle(tab: StaffTab): string {
   switch (tab) {
-    case 'roster': return 'Active staff roster for DOJ:RP.';
+    case 'roster': return 'Active staff roster for Northpoint Roleplay.';
     case 'resources': return 'Guides and reference materials for staff. Managed from the Admin Portal.';
-    case 'events': return 'Host server events as DOJ Staff. Public events appear on the website index.';
+    case 'events': return 'Host server events as Northpoint Staff. Public events appear on the website index.';
     default: return 'Staff roster portal.';
   }
 }

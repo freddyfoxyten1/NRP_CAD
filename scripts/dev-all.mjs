@@ -4,7 +4,7 @@
  * With PREVIEW_API_URL (dev:live): proxied VPS API + Mongo on cad.dojrblx.com.
  * Code changes stay on your machine until you push to GitHub.
  */
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -93,7 +93,68 @@ function shutdown(code = 0) {
   process.exit(code);
 }
 
-function spawnInRoot(command, args) {
+function isPortListening(port) {
+  try {
+    if (process.platform === "win32") {
+      const out = execSync(`netstat -ano | findstr "LISTENING" | findstr ":${port} "`, {
+        encoding: "utf8",
+      });
+      return out.trim().length > 0;
+    }
+    execSync(`lsof -i :${port} -sTCP:LISTEN`, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function killPort(port) {
+  try {
+    if (process.platform === "win32") {
+      const out = execSync(`netstat -ano | findstr "LISTENING" | findstr ":${port} "`, {
+        encoding: "utf8",
+      });
+      const pids = new Set();
+      for (const line of out.split("\n")) {
+        if (!line.includes("LISTENING")) continue;
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && /^\d+$/.test(pid) && pid !== "0") pids.add(pid);
+      }
+      for (const pid of pids) {
+        try {
+          execSync(`taskkill /PID ${pid} /F`, { stdio: "ignore" });
+        } catch {
+          /* ignore */
+        }
+      }
+      return pids.size > 0;
+    }
+    execSync(`lsof -ti :${port} | xargs kill -9 2>/dev/null`, { shell: true, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPortFree(port, label, maxMs = 15_000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    if (!isPortListening(port)) return true;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  console.warn(`Warning: ${label} port ${port} may still be in use.`);
+  return false;
+}
+
+async function freePort(port, label) {
+  if (!isPortListening(port)) return;
+  console.log(`Stopping previous ${label} on port ${port}…`);
+  killPort(port);
+  await waitForPortFree(port, label);
+}
+
+function spawnInRoot(command, args, { fatal = true } = {}) {
   const child = spawn(command, args, {
     cwd: root,
     stdio: "inherit",
@@ -103,6 +164,10 @@ function spawnInRoot(command, args) {
   children.push(child);
   child.on("exit", (code, signal) => {
     if (exiting) return;
+    if (!fatal) {
+      console.warn(`${command} ${args.join(" ")} exited (${code ?? signal}).`);
+      return;
+    }
     if (signal) shutdown(1);
     else shutdown(code ?? 0);
   });
@@ -115,8 +180,8 @@ function printBanner() {
       "",
       "═══════════════════════════════════════════════════════════════",
       usingRemoteApi
-        ? "  DOJCAD live preview — local files + VPS Mongo (cad.dojrblx.com)"
-        : "  DOJCAD local preview (private — not on GitHub)",
+        ? "  NRP CAD live preview — local files + VPS Mongo"
+        : "  NRP CAD local preview (private — not on GitHub)",
       "═══════════════════════════════════════════════════════════════",
       "",
       `  Site (live reload):  http://localhost:${WEB_PORT}/`,
@@ -150,18 +215,23 @@ function openBrowser(url) {
 process.on("SIGINT", () => shutdown(0));
 process.on("SIGTERM", () => shutdown(0));
 
+await freePort(WEB_PORT, "preview");
+
 if (usingRemoteApi) {
   console.log(`Using live VPS API (Mongo on cad.dojrblx.com): ${PREVIEW_API_URL}`);
   const dbOk = await probeDbHealth(PREVIEW_API_URL);
   if (!dbOk) {
-    console.warn("VPS Mongo is not ready — falling back to local API + .env MongoDB.");
+    console.warn("VPS Mongo is not ready — falling back to local API + .env.");
     usingRemoteApi = false;
   }
-} else {
-  spawnInRoot("bun", ["run", "dev:api"]);
+}
+
+if (!usingRemoteApi) {
+  await freePort(API_PORT, "API");
+  spawnInRoot("bun", ["run", "dev:api"], { fatal: false });
   const apiReady = await waitFor(
-    `http://127.0.0.1:${API_PORT}/api/health/db`,
-    "API (Mongo)",
+    `http://127.0.0.1:${API_PORT}/api/healthz`,
+    "API",
   );
   if (!apiReady) {
     console.warn("Warning: API did not respond in time. Starting web anyway — retry in a minute.");

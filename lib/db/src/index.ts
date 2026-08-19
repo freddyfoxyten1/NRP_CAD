@@ -7,16 +7,27 @@ import { connectMongo, closeMongo, pingMongo } from "./mongo";
 import { connectRedis, closeRedis, pingRedis } from "./redis";
 import { ensureMongoIndexes } from "./ensure-indexes";
 import { createMongoPoolFacade } from "./mongo-sql-bridge";
+import { postgresPoolConfig } from "./postgres-url";
+import { ensurePostgresSchema } from "./bootstrap-postgres";
 
 const { Pool } = pg;
 
+function isPlaceholderDatabaseUrl(url: string): boolean {
+  return /\[YOUR-PASSWORD\]|:YOUR_PASSWORD@|:PASSWORD@/i.test(url);
+}
+
 function createSqlPool(): pg.Pool {
-  if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
-    throw new Error("Production cannot open a local SQL database. Use MongoDB Atlas.");
+  if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "production" && !process.env.DATABASE_URL) {
+    throw new Error("Production cannot open a local SQL database. Use MongoDB Atlas or DATABASE_URL.");
   }
-  if (process.env.DATABASE_URL) {
-    console.info("[db] Using Postgres via DATABASE_URL");
-    return new Pool({ connectionString: process.env.DATABASE_URL });
+  const databaseUrl = (process.env.DATABASE_URL ?? "").trim();
+  if (databaseUrl) {
+    if (isPlaceholderDatabaseUrl(databaseUrl)) {
+      console.warn("[db] DATABASE_URL still has a password placeholder — using local SQLite until you paste the real Supabase password.");
+    } else {
+      console.info("[db] Using Postgres via DATABASE_URL");
+      return new Pool(postgresPoolConfig(databaseUrl));
+    }
   }
 
   return createLocalSqlitePool();
@@ -97,10 +108,23 @@ export {
 } from "./cache/members-cache";
 
 /** Connect Mongo (+ Redis) when DATA_STORE=mongo, or when MONGODB_URI is set for hybrid/ETL. */
-export async function initDataStores(): Promise<{ mongo: boolean; redis: boolean }> {
+export async function initDataStores(): Promise<{ mongo: boolean; redis: boolean; postgres: boolean }> {
   const wantMongo = isMongoStore() || Boolean((process.env.MONGODB_URI ?? "").trim());
   let mongoOk = false;
   let redisOk = false;
+  let postgresOk = false;
+
+  if (!isMongoStore() && (process.env.DATABASE_URL ?? "").trim() && !/\[YOUR-PASSWORD\]|:YOUR_PASSWORD@|:PASSWORD@/i.test(process.env.DATABASE_URL ?? "")) {
+    try {
+      await pool.query("SELECT 1");
+      await ensurePostgresSchema(pool);
+      postgresOk = true;
+      console.info("[db] Postgres schema ready (Supabase/Neon)");
+    } catch (err) {
+      console.error("[db] Postgres init failed:", err instanceof Error ? err.message : err);
+      throw err;
+    }
+  }
 
   if (wantMongo) {
     try {
@@ -125,9 +149,9 @@ export async function initDataStores(): Promise<{ mongo: boolean; redis: boolean
   }
 
   console.info(
-    `[db] DATA_STORE=${getDataStore()} mongo=${mongoOk ? "ok" : "off"} redis=${redisOk ? "ok" : "off"}`,
+    `[db] DATA_STORE=${getDataStore()} mongo=${mongoOk ? "ok" : "off"} postgres=${postgresOk ? "ok" : "off"} redis=${redisOk ? "ok" : "off"}`,
   );
-  return { mongo: mongoOk, redis: redisOk };
+  return { mongo: mongoOk, redis: redisOk, postgres: postgresOk };
 }
 
 export async function shutdownDataStores(): Promise<void> {
