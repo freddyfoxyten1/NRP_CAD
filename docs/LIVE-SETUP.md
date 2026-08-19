@@ -20,7 +20,24 @@ GitHub Pages is built with `VITE_STATS_URL` pointing at that URL, so the homepag
 
 ## Full CAD: API on Render (sign-in + database)
 
-1. Open [Render → New Blueprint](https://dashboard.render.com/select-repo?type=blueprint) and connect **freddyfoxyten1/NRP_CAD**.
+### Option A — one command (recommended after first Blueprint)
+
+1. Create a Render [API key](https://dashboard.render.com/u/settings#api-keys) and add to local `.env`:
+   ```
+   RENDER_API_KEY=rnd_...
+   ```
+2. Ensure `.env` has `DATABASE_URL`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, and `DISCORD_BOT_TOKEN`.
+3. Run:
+   ```bash
+   bun run render:setup
+   ```
+   This creates or updates **nrp-cad-api**, syncs env vars, runs `db:setup` on deploy, and checks `/api/healthz`.
+
+   Check only: `bun run render:check`
+
+### Option B — Blueprint (first time, no API key)
+
+1. Open [Render → New Blueprint](https://dashboard.render.com/select-repo?type=blueprint) and connect **freddyfoxyten1/NRP_CAD** (branch `cursor/vps-deploy-ia-roster-fixes`).
 2. Render creates **nrp-cad-api** from `render.yaml`.
 3. Set these **secret** environment variables (copy from your local `.env`):
 
@@ -33,7 +50,12 @@ GitHub Pages is built with `VITE_STATS_URL` pointing at that URL, so the homepag
 
 4. Check: `https://nrp-cad-api.onrender.com/api/healthz` → `{"status":"ok"}`.
 
-Optional: add Render **Deploy Hook** URL as GitHub secret `RENDER_DEPLOY_HOOK`.
+### GitHub Actions (optional)
+
+Add repo secrets: `RENDER_API_KEY`, `DATABASE_URL`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN`.  
+Run workflow **Sync Render env** to push secrets and redeploy without a local machine.
+
+Optional: add Render **Deploy Hook** URL as GitHub secret `RENDER_DEPLOY_HOOK` (used by **Deploy API (Render)** on push).
 
 ## Discord OAuth redirect
 
@@ -53,5 +75,5 @@ http://localhost:5173/dojcad/discord-callback
 
 - **Homepage counts:** https://northpointrp.xyz (Members / Online cards)
 - **Stats JSON (Supabase):** `https://vmkfcsbbzuzznwauzsxe.supabase.co/functions/v1/public-stats`
-- **Stats JSON (Render):** `https://nrp-cad-api.onrender.com/api/public/stats`
+- **Stats JSON (Render):** `https://nrp-cad-api.onrender.com/api/public/live-stats`
 - **Sign in:** Staff Login with Discord on https://northpointrp.xyz

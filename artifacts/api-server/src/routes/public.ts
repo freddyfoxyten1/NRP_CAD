@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // routes/public.ts — Unauthenticated public-view endpoints
 //
-// GET  /public/stats   — live ERLC player count + Discord guild member count
+// GET  /public/live-stats — live ERLC player count + Discord guild member count
+// GET  /public/stats      — alias (Render blocks /public/stats at the edge)
 // GET  /public/gallery — gallery images
 // POST /public/gallery (admin) — add image
 // PATCH /public/gallery/:id (admin) — update title/caption (credit)
@@ -155,8 +156,7 @@ function schedulePublicStatsRefresh(log: { error: (obj: unknown, msg: string) =>
     .finally(() => { _statsRefreshRunning = false; });
 }
 
-// ── GET /public/stats ─────────────────────────────────────────────────────────
-router.get("/public/stats", async (req, res) => {
+async function handlePublicLiveStats(req: Request, res: Response) {
   try {
     const cached = fromCacheAllowStale<PublicStats>("stats");
     if (cached?.fresh) { res.json(cached.data); return; }
@@ -171,10 +171,14 @@ router.get("/public/stats", async (req, res) => {
     res.json(EMPTY_PUBLIC_STATS);
     schedulePublicStatsRefresh(req.log);
   } catch (err) {
-    req.log.error({ err }, "public/stats error");
+    req.log.error({ err }, "public/live-stats error");
     res.status(500).json({ error: "Unable to load stats." });
   }
-});
+}
+
+// Render's edge returns 404 (x-render-routing: no-server) for /public/stats — use live-stats.
+router.get("/public/live-stats", handlePublicLiveStats);
+router.get("/public/stats", handlePublicLiveStats);
 
 // ── GET /public/discord-presence — batch Discord status for roster display ───
 router.get("/public/discord-presence", (req, res) => {

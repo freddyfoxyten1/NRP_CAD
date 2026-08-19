@@ -1,4 +1,4 @@
-/** Live ERLC + Discord counts from GET /api/public/stats (or Supabase fallback on GitHub Pages). */
+/** Live ERLC + Discord counts from GET /api/public/live-stats (or Supabase fallback on GitHub Pages). */
 export type PublicLiveStats = {
   erlc_players: number;
   erlc_max_players: number;
@@ -48,7 +48,7 @@ async function fetchStatsUrl(
 export async function fetchPublicLiveStats(
   signal?: AbortSignal,
 ): Promise<PublicLiveStats | null> {
-  const primary = await fetchStatsUrl("/api/public/stats", signal);
+  const primary = await fetchStatsUrl("/api/public/live-stats", signal);
   if (primary && hasDiscordCounts(primary)) return primary;
 
   if (STATS_FALLBACK_URL) {

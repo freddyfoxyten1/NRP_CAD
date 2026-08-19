@@ -4,8 +4,11 @@ services:
     runtime: docker
     plan: free
     region: frankfurt
+    repo: https://github.com/freddyfoxyten1/NRP_CAD
+    branch: cursor/vps-deploy-ia-roster-fixes
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/healthz
+    preDeployCommand: bun run db:setup
     autoDeploy: true
     envVars:
       - key: NODE_ENV

@@ -10,6 +10,7 @@ on:
       - "Dockerfile"
       - "render.yaml"
       - "scripts/start-production-api.mjs"
+      - "scripts/render-setup.mjs"
       - "artifacts/api-server/**"
       - "lib/db/**"
 

@@ -1,0 +1,28 @@
+name: Sync Render env
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Push secrets to nrp-cad-api and deploy
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_OWNER_ID: ${{ secrets.RENDER_OWNER_ID }}
+          RENDER_BRANCH: ${{ vars.RENDER_BRANCH || 'cursor/vps-deploy-ia-roster-fixes' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          DISCORD_CLIENT_SECRET: ${{ secrets.DISCORD_CLIENT_SECRET }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: |
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "Add GitHub secrets: RENDER_API_KEY, DATABASE_URL, DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN"
+            exit 1
+          fi
+          bun ./scripts/render-setup.mjs
