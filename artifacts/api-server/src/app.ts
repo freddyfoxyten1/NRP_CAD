@@ -10,25 +10,25 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { isAllowedCorsOrigin } from "./lib/site-origins";
 
 const app: Express = express();
 app.set("trust proxy", 1);
 
 function corsOrigin(): cors.CorsOptions["origin"] {
-  const raw = (process.env.CORS_ORIGIN ?? process.env.PUBLIC_ORIGIN ?? "").trim();
-  if (raw) {
-    const origins = raw.split(",").map(s => s.trim()).filter(Boolean);
-    return origins.length === 1 ? origins[0] : origins;
+  const isProd = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
+  if (isProd) {
+    return (origin, callback) => {
+      if (isAllowedCorsOrigin(origin)) {
+        callback(null, origin ?? true);
+        return;
+      }
+      callback(null, false);
+    };
   }
-  if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
-    return [
-      "https://northpointrp.xyz",
-      "https://www.northpointrp.xyz",
-      "https://freddyfoxyten1.github.io",
-      "https://cad.dojrblx.com",
-    ];
-  }
-  return true;
+  return (origin, callback) => {
+    callback(null, isAllowedCorsOrigin(origin));
+  };
 }
 
 app.use(

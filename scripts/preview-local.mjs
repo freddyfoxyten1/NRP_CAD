@@ -25,6 +25,9 @@ const repoEnv = {
   get PREVIEW_API_URL() {
     return remoteApiUrl;
   },
+  get VITE_STATS_URL() {
+    return (process.env.VITE_STATS_URL ?? "").trim();
+  },
   CAD_DATABASE_PATH: process.env.CAD_DATABASE_PATH ?? path.join(root, "cad-database"),
   DISCORD_REDIRECT_URI: previewRedirectUri,
 };

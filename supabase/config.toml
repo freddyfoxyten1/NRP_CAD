@@ -1,0 +1,6 @@
+# Supabase project for Northpoint Roleplay CAD (Discord stats edge function).
+# Deploy: bun run supabase:deploy-stats  (needs SUPABASE_ACCESS_TOKEN in .env)
+project_id = "vmkfcsbbzuzznwauzsxe"
+
+[functions.public-stats]
+verify_jwt = false

@@ -1,6 +1,6 @@
 # Live site: northpointrp.xyz
 
-GitHub Pages serves the frontend only — it **does not read `.env`**. Discord member/online counts and sign-in need hosted backends with your secrets.
+**GitHub Pages** serves the frontend at https://northpointrp.xyz (free). It does **not** read `.env` — Discord login and live counts need Render + Supabase.
 
 ## Quick fix: Discord counts on the homepage (Supabase)
 

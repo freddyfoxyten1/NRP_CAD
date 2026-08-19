@@ -26,6 +26,8 @@
     "db:setup": "bun --cwd ./lib/db --preload ../../scripts/load-env.mjs ./src/setup-cli.ts",
     "render:setup": "bun ./scripts/render-setup.mjs",
     "render:check": "bun ./scripts/render-setup.mjs --check",
+    "supabase:deploy-stats": "bun ./scripts/supabase-deploy-stats.mjs",
+    "vercel:build": "bun ./scripts/vercel-build.mjs",
     "typecheck:libs": "bunx tsc --build",
     "typecheck": "bun run typecheck:libs && bun run --cwd ./artifacts/api-server typecheck && bun run --cwd ./artifacts/dojrp typecheck && bun run --cwd ./artifacts/mockup-sandbox typecheck && bun run --cwd ./scripts typecheck",
     "test": "bun test artifacts/api-server/src/lib/google-oauth.test.ts artifacts/api-server/src/lib/google-doc-resource.test.ts artifacts/dojrp/src/lib/resource-type.test.ts artifacts/dojrp/src/lib/fetch-api-json.test.ts artifacts/dojrp/src/lib/google-doc-url.test.ts artifacts/dojrp/src/lib/persist-google-doc.test.ts artifacts/dojrp/src/lib/resource-url.test.ts"

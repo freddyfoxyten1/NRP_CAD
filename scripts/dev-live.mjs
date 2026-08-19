@@ -1,7 +1,11 @@
 /**
- * Live-reload preview against the team VPS / MongoDB on cad.dojrblx.com.
- * Local file edits show immediately; data comes from the deployed API.
+ * Live-reload preview wired to the NRP hosted stack:
+ * - Render API (nrp-cad-api) → Supabase Postgres + Discord sign-in
+ * - Supabase Edge Function fallback for homepage Discord counts
  */
-process.env.PREVIEW_API_URL ??= "https://cad.dojrblx.com";
+import { NRP_RENDER_API, NRP_SUPABASE_STATS } from "./nrp-live-defaults.mjs";
+
+process.env.PREVIEW_API_URL ??= NRP_RENDER_API;
+process.env.VITE_STATS_URL ??= NRP_SUPABASE_STATS;
 process.env.OPEN_BROWSER ??= "0";
 await import("./dev-all.mjs");
