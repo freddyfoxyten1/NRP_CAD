@@ -1,0 +1,15 @@
+{
+  "name": "NRP CAD",
+  "install": "export BUN_INSTALL=\"$HOME/.bun\"\nexport PATH=\"$BUN_INSTALL/bin:$PATH\"\nif ! command -v bun >/dev/null 2>&1; then\n  curl -fsSL https://bun.sh/install | bash\n  export PATH=\"$HOME/.bun/bin:$PATH\"\nfi\nbun install",
+  "terminals": [
+    {
+      "name": "NRP CAD Preview",
+      "command": "export BUN_INSTALL=\"$HOME/.bun\"; export PATH=\"$BUN_INSTALL/bin:$PATH\"; OPEN_BROWSER=0 bun run dev",
+      "description": "Live-reload Northpoint Roleplay CAD preview on port 5173 from this NRP_CAD checkout."
+    }
+  ],
+  "ports": [
+    { "name": "NRP CAD preview", "port": 5173 },
+    { "name": "Production-style preview", "port": 4173 }
+  ]
+}

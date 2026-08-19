@@ -1,7 +1,6 @@
 /**
- * Test preview — unpublished local UI + live VPS Mongo (cad.dojrblx.com).
- * HTTP keeps Discord on http://localhost:4173 (HTTPS proxy becomes https://localhost, which Discord rejects).
+ * Test preview — unpublished local UI from this NRP_CAD checkout.
+ * Uses the local API unless PREVIEW_API_URL is set explicitly.
  */
-process.env.PREVIEW_API_URL ??= "https://cad.dojrblx.com";
 process.env.OPEN_BROWSER ??= "0";
 await import("./preview-local.mjs");
