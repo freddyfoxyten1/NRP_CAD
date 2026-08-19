@@ -67,33 +67,37 @@ async function ensureDpsResourcesSchema(): Promise<void> {
         await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_file_id text`);
         await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_integration_id integer`);
         await pool.query(`ALTER TABLE dps_resources ADD COLUMN IF NOT EXISTS google_modified_time text`);
-        await pool.query(`
-          DO $$
-          BEGIN
-            IF EXISTS (
-              SELECT 1 FROM information_schema.columns
-              WHERE table_schema = 'public' AND table_name = 'dps_resources'
-                AND column_name = 'division_only' AND udt_name = 'bool'
-            ) THEN
-              ALTER TABLE dps_resources ALTER COLUMN division_only DROP DEFAULT;
-              ALTER TABLE dps_resources
-                ALTER COLUMN division_only TYPE INTEGER
-                USING (CASE WHEN division_only THEN 1 ELSE 0 END);
-              ALTER TABLE dps_resources ALTER COLUMN division_only SET DEFAULT 0;
-            END IF;
-            IF EXISTS (
-              SELECT 1 FROM information_schema.columns
-              WHERE table_schema = 'public' AND table_name = 'dps_resources'
-                AND column_name = 'personnel_only' AND udt_name = 'bool'
-            ) THEN
-              ALTER TABLE dps_resources ALTER COLUMN personnel_only DROP DEFAULT;
-              ALTER TABLE dps_resources
-                ALTER COLUMN personnel_only TYPE INTEGER
-                USING (CASE WHEN personnel_only THEN 1 ELSE 0 END);
-              ALTER TABLE dps_resources ALTER COLUMN personnel_only SET DEFAULT 0;
-            END IF;
-          END $$;
-        `);
+        try {
+          await pool.query(`
+            DO $$
+            BEGIN
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'dps_resources'
+                  AND column_name = 'division_only' AND udt_name = 'bool'
+              ) THEN
+                ALTER TABLE dps_resources ALTER COLUMN division_only DROP DEFAULT;
+                ALTER TABLE dps_resources
+                  ALTER COLUMN division_only TYPE INTEGER
+                  USING (CASE WHEN division_only THEN 1 ELSE 0 END);
+                ALTER TABLE dps_resources ALTER COLUMN division_only SET DEFAULT 0;
+              END IF;
+              IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = 'dps_resources'
+                  AND column_name = 'personnel_only' AND udt_name = 'bool'
+              ) THEN
+                ALTER TABLE dps_resources ALTER COLUMN personnel_only DROP DEFAULT;
+                ALTER TABLE dps_resources
+                  ALTER COLUMN personnel_only TYPE INTEGER
+                  USING (CASE WHEN personnel_only THEN 1 ELSE 0 END);
+                ALTER TABLE dps_resources ALTER COLUMN personnel_only SET DEFAULT 0;
+              END IF;
+            END $$;
+          `);
+        } catch (e) {
+          console.warn("[resources] optional dps_resources flag column normalize skipped:", e);
+        }
       } catch (e) {
         dpsResourcesSchemaReady = null;
         console.error("dps_resources migration failed:", e);
@@ -135,10 +139,47 @@ const isPublicResource = (row: ReturnType<typeof normalizeResourceRow>) =>
   && row.allowed_ranks.length === 0
   && row.allowed_dps_ranks.length === 0;
 
+const RESOURCE_LIST_COLS_BASE = `
+  id, title, type, logo_url, header_config, created_by, created_at, updated_at, division_id
+`;
+
+async function queryDpsResourceList(
+  where: string,
+  params: unknown[],
+): Promise<Record<string, unknown>[]> {
+  try {
+    const { rows } = await pool.query(
+      `SELECT ${RESOURCE_LIST_COLS}
+         FROM dps_resources
+         ${where}
+        ORDER BY created_at DESC`,
+      params,
+    );
+    return rows as Record<string, unknown>[];
+  } catch (err) {
+    console.warn("[resources] full list query failed, falling back to base columns:", err);
+    const fallbackWhere = where.includes("division_id = $1")
+      ? "WHERE division_id = $1"
+      : where.includes("division_id IS NULL")
+        ? "WHERE division_id IS NULL"
+        : "";
+    const { rows } = await pool.query(
+      `SELECT ${RESOURCE_LIST_COLS_BASE}
+         FROM dps_resources
+         ${fallbackWhere}
+        ORDER BY created_at DESC`,
+      params,
+    );
+    return rows as Record<string, unknown>[];
+  }
+}
+
 // ── GET /resources — list all (lightweight, no content blob) ──────────────────
 router.get("/resources", async (req, res) => {
   try {
-    await ensureDpsResourcesSchema();
+    await ensureDpsResourcesSchema().catch((err) => {
+      console.warn("[resources] schema ensure failed:", err);
+    });
     const divisionIdRaw = typeof req.query.division_id === "string" ? req.query.division_id : "";
     const divisionId = divisionIdRaw ? parseInt(divisionIdRaw, 10) : NaN;
     const publicOnly =
@@ -177,14 +218,8 @@ router.get("/resources", async (req, res) => {
                  AND ${flagCol("personnel_only")} = 0`;
     }
     // Clients filter by viewer membership / ranks / personnel flags when not publicOnly.
-    const { rows } = await pool.query(
-      `SELECT ${RESOURCE_LIST_COLS}
-         FROM dps_resources
-         ${where}
-        ORDER BY created_at DESC`,
-      params
-    );
-    const normalized = rows.map(r => normalizeResourceRow(r as Record<string, unknown>, { public: publicOnly }));
+    const rows = await queryDpsResourceList(where, params);
+    const normalized = rows.map(r => normalizeResourceRow(r, { public: publicOnly }));
     res.json(publicOnly ? normalized.filter(isPublicResource) : normalized);
   } catch (e) {
     console.error(e);
