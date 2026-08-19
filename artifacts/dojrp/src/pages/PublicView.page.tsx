@@ -796,7 +796,7 @@ const PublicView = () => {
               <DojrpLogo />
             </h1>
             <p className={`mt-3 max-w-lg px-2 text-xs font-semibold sm:mt-4 sm:px-0 sm:text-sm ${skin.mutedText}`}>
-              We are one of the largest ER:LC Roleplay Community's, giving you: "A roleplay experience beyond your imagination."
+              Northpoint Roleplay is starting fresh. Join our new ER:LC community and help build something great from day one.
             </p>
 
             {/* Live stats strip */}
