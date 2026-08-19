@@ -143,7 +143,7 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
           ) : (
             <>
               <DiscordIcon className="h-5 w-5" />
-              Staff Login with Discord
+              Login with Discord
             </>
           )}
         </button>
