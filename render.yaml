@@ -10,13 +10,13 @@ services:
       - key: DATA_STORE
         value: sql
       - key: PUBLIC_BASE_PATH
-        value: /NRP_CAD
+        value: ""
       - key: CORS_ORIGIN
-        value: https://freddyfoxyten1.github.io
+        value: https://northpointrp.xyz
       - key: PUBLIC_ORIGIN
-        value: https://freddyfoxyten1.github.io
+        value: https://northpointrp.xyz
       - key: DISCORD_REDIRECT_URI
-        value: https://freddyfoxyten1.github.io/NRP_CAD/dojcad/discord-callback
+        value: https://northpointrp.xyz/dojcad/discord-callback
       - key: DISCORD_GUILD_ID
         value: "1539452857592324116"
       - key: STAFF_DISCORD_GUILD_ID

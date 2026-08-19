@@ -22,6 +22,8 @@ function corsOrigin(): cors.CorsOptions["origin"] {
   }
   if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
     return [
+      "https://northpointrp.xyz",
+      "https://www.northpointrp.xyz",
       "https://freddyfoxyten1.github.io",
       "https://cad.dojrblx.com",
     ];

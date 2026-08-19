@@ -122,7 +122,13 @@ function isAllowedOAuthHost(host: string, isProd: boolean): boolean {
     const port = lower.includes(":") ? lower.split(":").pop() ?? "" : "";
     return PREVIEW_OAUTH_PORTS.has(port);
   }
-  if (lower === "cad.dojrblx.com" || lower === "freddyfoxyten1.github.io" || lower.endsWith(".github.io")) {
+  if (
+    lower === "cad.dojrblx.com" ||
+    lower === "northpointrp.xyz" ||
+    lower === "www.northpointrp.xyz" ||
+    lower === "freddyfoxyten1.github.io" ||
+    lower.endsWith(".github.io")
+  ) {
     return true;
   }
   const envUri = (process.env.DISCORD_REDIRECT_URI ?? "").trim();
@@ -187,6 +193,8 @@ export function getRedirectUri(req: Request): string {
 const PREVIEW_REDIRECT_URIS = new Set([
   "http://localhost:4173/dojcad/discord-callback",
   "http://localhost:5173/dojcad/discord-callback",
+  "https://northpointrp.xyz/dojcad/discord-callback",
+  "https://www.northpointrp.xyz/dojcad/discord-callback",
   "https://freddyfoxyten1.github.io/NRP_CAD/dojcad/discord-callback",
 ]);
 

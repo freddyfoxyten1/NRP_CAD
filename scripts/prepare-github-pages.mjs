@@ -6,4 +6,5 @@ const indexFile = path.join(outDir, "index.html");
 
 copyFileSync(indexFile, path.join(outDir, "404.html"));
 writeFileSync(path.join(outDir, ".nojekyll"), "");
+writeFileSync(path.join(outDir, "CNAME"), "northpointrp.xyz\n");
 console.log("Prepared GitHub Pages fallback files in", outDir);

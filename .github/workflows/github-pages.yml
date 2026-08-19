@@ -34,7 +34,7 @@ jobs:
       - name: Build frontend
         run: bun run --cwd ./artifacts/dojrp build
         env:
-          BASE_PATH: /NRP_CAD/
+          BASE_PATH: /
           NODE_ENV: production
           VITE_API_URL: ${{ vars.VITE_API_URL || 'https://nrp-cad-api.onrender.com' }}
 
