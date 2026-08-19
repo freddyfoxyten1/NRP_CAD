@@ -122,7 +122,9 @@ function isAllowedOAuthHost(host: string, isProd: boolean): boolean {
     const port = lower.includes(":") ? lower.split(":").pop() ?? "" : "";
     return PREVIEW_OAUTH_PORTS.has(port);
   }
-  if (lower === "cad.dojrblx.com") return true;
+  if (lower === "cad.dojrblx.com" || lower === "freddyfoxyten1.github.io" || lower.endsWith(".github.io")) {
+    return true;
+  }
   const envUri = (process.env.DISCORD_REDIRECT_URI ?? "").trim();
   if (envUri) {
     try {
@@ -134,7 +136,30 @@ function isAllowedOAuthHost(host: string, isProd: boolean): boolean {
   return false;
 }
 
-/** Discord OAuth redirect — prefer the browser-facing host (Vite/nginx), not the API port. */
+function publicSiteBasePath(host: string): string {
+  const fromEnv = (process.env.PUBLIC_BASE_PATH ?? "").trim().replace(/\/$/, "");
+  if (fromEnv) return fromEnv.startsWith("/") ? fromEnv : `/${fromEnv}`;
+  if (host.toLowerCase().endsWith(".github.io")) return "/NRP_CAD";
+  return "";
+}
+
+function discordCallbackPath(host: string): string {
+  const envUri = (process.env.DISCORD_REDIRECT_URI ?? "").trim();
+  if (envUri) {
+    try {
+      const parsed = new URL(envUri);
+      if (parsed.host.toLowerCase() === host.toLowerCase()) {
+        const path = parsed.pathname.replace(/\/$/, "");
+        if (path) return path;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return `${publicSiteBasePath(host)}/dojcad/discord-callback`.replace(/\/{2,}/g, "/");
+}
+
+/** Discord OAuth redirect — prefer the browser-facing host (Vite/nginx/GitHub Pages), not the API port. */
 export function getRedirectUri(req: Request): string {
   const forwardedHost = (req.headers["x-forwarded-host"] as string | undefined)
     ?.split(",")[0]
@@ -149,7 +174,7 @@ export function getRedirectUri(req: Request): string {
     const isLocal = isLocalBrowserHost(host);
     // Discord only accepts http for localhost. Ignore https from the VPS proxy.
     const proto = isLocal ? "http" : (forwardedProto || "https");
-    return `${proto}://${host}/dojcad/discord-callback`;
+    return `${proto}://${host}${discordCallbackPath(host)}`;
   }
 
   if (process.env.DISCORD_REDIRECT_URI) {
@@ -162,12 +187,29 @@ export function getRedirectUri(req: Request): string {
 const PREVIEW_REDIRECT_URIS = new Set([
   "http://localhost:4173/dojcad/discord-callback",
   "http://localhost:5173/dojcad/discord-callback",
+  "https://freddyfoxyten1.github.io/NRP_CAD/dojcad/discord-callback",
 ]);
 
-/** Prefer an explicit preview callback when Discord has that URI registered. */
+function isAllowedExplicitRedirect(uri: string): boolean {
+  if (PREVIEW_REDIRECT_URIS.has(uri)) return true;
+  const envUri = (process.env.DISCORD_REDIRECT_URI ?? "").trim();
+  if (envUri && uri === envUri) return true;
+  try {
+    const parsed = new URL(uri);
+    const path = parsed.pathname.replace(/\/$/, "");
+    if (!path.endsWith("/dojcad/discord-callback") && !path.endsWith("/discord-callback")) {
+      return false;
+    }
+    return isAllowedOAuthHost(parsed.host, true);
+  } catch {
+    return false;
+  }
+}
+
+/** Prefer an explicit browser callback when Discord has that URI registered. */
 export function resolveRedirectUri(req: Request, explicit?: string): string {
   const trimmed = (explicit ?? "").trim();
-  if (trimmed && PREVIEW_REDIRECT_URIS.has(trimmed)) {
+  if (trimmed && isAllowedExplicitRedirect(trimmed)) {
     return trimmed;
   }
   return getRedirectUri(req);

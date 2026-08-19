@@ -1,4 +1,4 @@
-/** Active persistent data store. GitHub / VPS production is Mongo only. */
+/** Active persistent data store. Production may be Mongo Atlas or hosted Postgres. */
 export type DataStore = "sql" | "mongo";
 
 function isProductionRuntime(): boolean {
@@ -9,30 +9,48 @@ function mongoUri(): string {
   return (process.env.MONGODB_URI ?? "").trim();
 }
 
-/** Fail at boot when production or explicit mongo mode lacks Atlas credentials. */
-export function assertMongoConfigured(): void {
+function hostedPostgresUrl(): string {
+  const url = (process.env.DATABASE_URL ?? "").trim();
+  if (!url) return "";
+  if (/\[YOUR-PASSWORD\]|:YOUR_PASSWORD@|:PASSWORD@/i.test(url)) return "";
+  return url;
+}
+
+function wantsSqlStore(): boolean {
   const raw = (process.env.DATA_STORE ?? "").trim().toLowerCase();
+  return raw === "sql" || raw === "postgres";
+}
+
+/** Fail at boot when production or explicit mongo mode lacks credentials. */
+export function assertMongoConfigured(): void {
   const hasUri = Boolean(mongoUri());
 
   if (isProductionRuntime()) {
-    if (raw === "sql") {
-      throw new Error("GitHub/VPS production cannot use a local SQL database. Set DATA_STORE=mongo.");
+    if (wantsSqlStore()) {
+      if (!hostedPostgresUrl()) {
+        throw new Error(
+          "Production SQL requires DATABASE_URL (Supabase/Neon). Local SQLite is not used on GitHub or a VPS.",
+        );
+      }
+      return;
     }
     if (!hasUri) {
       throw new Error(
-        "Production requires MONGODB_URI. Local SQLite is not used on GitHub or the VPS.",
+        "Production requires MONGODB_URI, or DATABASE_URL with DATA_STORE=sql.",
       );
     }
     return;
   }
 
-  if (raw === "mongo" && !hasUri) {
+  if (!wantsSqlStore() && (process.env.DATA_STORE ?? "").trim().toLowerCase() === "mongo" && !hasUri) {
     throw new Error("DATA_STORE=mongo requires MONGODB_URI. Configure MongoDB Atlas in .env.");
   }
 }
 
 export function getDataStore(): DataStore {
   assertMongoConfigured();
+
+  if (wantsSqlStore()) return "sql";
 
   if (isProductionRuntime()) return "mongo";
 

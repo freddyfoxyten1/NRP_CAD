@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import "./bootstrap-env";
-import { initDataStores, shutdownDataStores, isMongoStore, pingMongo, pingRedis } from "@workspace/db";
+import { initDataStores, shutdownDataStores, isMongoStore, pingMongo, pingRedis, pool } from "@workspace/db";
 import app from "./app";
 import { startDiscordGateway, stopDiscordGateway } from "./lib/discord-realtime-sync";
 import { logger } from "./lib/logger";
@@ -40,11 +40,20 @@ async function start() {
     const redis = (process.env.REDIS_URL ?? "").trim() ? await pingRedis() : null;
     const production = (process.env.NODE_ENV ?? "").trim().toLowerCase() === "production";
     const postgresUrl = Boolean((process.env.DATABASE_URL ?? "").trim());
-    const ok = isMongoStore() ? Boolean(mongo) : !production;
+    let postgres = false;
+    if (!isMongoStore() && postgresUrl) {
+      try {
+        await pool.query("SELECT 1");
+        postgres = true;
+      } catch {
+        postgres = false;
+      }
+    }
+    const ok = isMongoStore() ? Boolean(mongo) : postgresUrl ? postgres : !production;
     res.status(ok ? 200 : 503).json({
       dataStore: isMongoStore() ? "mongo" : postgresUrl ? "postgres" : "sql",
       mongo,
-      postgres: postgresUrl,
+      postgres,
       redis,
       ok,
     });

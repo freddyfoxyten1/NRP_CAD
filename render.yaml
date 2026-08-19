@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: nrp-cad-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_STORE
+        value: sql
+      - key: PUBLIC_BASE_PATH
+        value: /NRP_CAD
+      - key: CORS_ORIGIN
+        value: https://freddyfoxyten1.github.io
+      - key: PUBLIC_ORIGIN
+        value: https://freddyfoxyten1.github.io
+      - key: DISCORD_REDIRECT_URI
+        value: https://freddyfoxyten1.github.io/NRP_CAD/dojcad/discord-callback
+      - key: DISCORD_GUILD_ID
+        value: "1539452857592324116"
+      - key: STAFF_DISCORD_GUILD_ID
+        value: "1539452857592324116"
+      - key: DPS_DISCORD_GUILD_ID
+        value: "1539452857592324116"
+      - key: DIVISION_DISCORD_GUILD_ID
+        value: "1539452857592324116"
+      - key: DPH_DISCORD_GUILD_ID
+        value: "1539452857592324116"
+      - key: DISCORD_SERVER_NAME
+        value: Northpoint Roleplay
+      - key: DISCORD_GATEWAY_ENABLED
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: DISCORD_BOT_TOKEN
+        sync: false

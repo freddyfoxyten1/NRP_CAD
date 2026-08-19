@@ -6,8 +6,11 @@
 import { createRoot } from 'react-dom/client';
 
 import App from './App';
+import { installApiOrigin } from './lib/api-origin';
 
 import './index.css';
+
+installApiOrigin();
 
 try {
   localStorage.removeItem('dojcad-appearance');

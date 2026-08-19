@@ -12,6 +12,7 @@ import router from "./routes";
 import { logger } from "./lib/logger";
 
 const app: Express = express();
+app.set("trust proxy", 1);
 
 function corsOrigin(): cors.CorsOptions["origin"] {
   const raw = (process.env.CORS_ORIGIN ?? process.env.PUBLIC_ORIGIN ?? "").trim();
@@ -20,7 +21,10 @@ function corsOrigin(): cors.CorsOptions["origin"] {
     return origins.length === 1 ? origins[0] : origins;
   }
   if ((process.env.NODE_ENV ?? "").trim().toLowerCase() === "production") {
-    return "https://cad.dojrblx.com";
+    return [
+      "https://freddyfoxyten1.github.io",
+      "https://cad.dojrblx.com",
+    ];
   }
   return true;
 }

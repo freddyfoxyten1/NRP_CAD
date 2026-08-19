@@ -10,6 +10,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { X } from 'lucide-react';
 import { setCadSession } from '@/lib/cad-session';
 import type { CadSession } from '@/lib/cad-session';
+import { discordOAuthRedirectUri } from '@/lib/api-origin';
 import DojrpLogo from '@/components/shared/DojrpLogo';
 import DojrpShield from '@/components/shared/DojrpShield';
 
@@ -51,15 +52,10 @@ const DiscordCallback = () => {
 
     (async () => {
       try {
-        const host = window.location.hostname;
-        const previewRedirect =
-          host === 'localhost' || host === '127.0.0.1'
-            ? `http://localhost:${window.location.port || '80'}/dojcad/discord-callback`
-            : undefined;
         const exchRes = await fetch('/api/discord/oauth/exchange', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ code, redirect_uri: previewRedirect }),
+          body: JSON.stringify({ code, redirect_uri: discordOAuthRedirectUri() }),
         });
         const discordUser = await exchRes.json() as {
           id?: string;

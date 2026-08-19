@@ -10,6 +10,7 @@ import DojrpLogo from '@/components/shared/DojrpLogo';
 import DojrpShield from '@/components/shared/DojrpShield';
 import { useCadStatus, cadModeLabel } from '@/hooks/useCadStatus';
 import LegalDocModal, { type LegalDoc } from '@/components/overlays/LegalDocModal';
+import { discordOAuthRedirectUri } from '@/lib/api-origin';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -34,14 +35,8 @@ const LoginModal = ({ isOpen, onClose }: LoginModalProps) => {
     setError(null);
     setPending(true);
     try {
-      const host = window.location.hostname;
-      const previewRedirect =
-        host === 'localhost' || host === '127.0.0.1'
-          ? `http://${host === '127.0.0.1' ? 'localhost' : host}:${window.location.port || '80'}/dojcad/discord-callback`
-          : null;
-      const oauthUrl = previewRedirect
-        ? `/api/discord/oauth/url?redirect_uri=${encodeURIComponent(previewRedirect)}`
-        : '/api/discord/oauth/url';
+      const redirectUri = discordOAuthRedirectUri();
+      const oauthUrl = `/api/discord/oauth/url?redirect_uri=${encodeURIComponent(redirectUri)}`;
       const res = await fetch(oauthUrl, {
         headers: { accept: 'application/json' },
       });

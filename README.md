@@ -4,7 +4,17 @@ Public community CAD for Northpoint Roleplay. The live frontend is published fro
 
 **https://freddyfoxyten1.github.io/NRP_CAD/**
 
-GitHub Pages serves the React app only. Discord login, rosters, and CAD data still need the API server (Bun + MongoDB) on a VPS. See `deploy/README.md`.
+GitHub Pages is the static website. Discord login, member counts, and CAD data come from the API, which uses your Discord bot and Supabase Postgres.
+
+The Pages build calls `https://nrp-cad-api.onrender.com`. Create that API once on [Render](https://render.com) from this repo (`render.yaml`), and paste these **environment values** in the Render dashboard (do not put them in git):
+
+- `DATABASE_URL` — Supabase session pooler URI
+- `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` / `DISCORD_BOT_TOKEN`
+
+In the [Discord Developer Portal](https://discord.com/developers/applications) OAuth2 redirects, add:
+
+- `http://localhost:5173/dojcad/discord-callback`
+- `https://freddyfoxyten1.github.io/NRP_CAD/dojcad/discord-callback`
 
 ```bash
 bun install

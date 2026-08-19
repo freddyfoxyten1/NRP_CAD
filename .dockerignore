@@ -1,0 +1,14 @@
+node_modules
+.git
+.github
+cad-database
+.env
+.env.*
+!.env.example
+artifacts/dojrp/dist
+artifacts/api-server/dist
+artifacts/dojrp/node_modules
+**/.vite
+*.sqlite
+*.sqlite-*
+agent-transcripts
