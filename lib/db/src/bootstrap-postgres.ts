@@ -419,6 +419,21 @@ export async function ensurePostgresSchema(pool: Queryable): Promise<void> {
       content TEXT NOT NULL DEFAULT '{}'
     );
 
+    CREATE TABLE IF NOT EXISTS cad_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
+
+    INSERT INTO cad_settings (key, value) VALUES ('cad_online', 'true')
+    ON CONFLICT (key) DO NOTHING;
+
+    INSERT INTO cad_settings (key, value) VALUES ('cad_mode', 'online')
+    ON CONFLICT (key) DO NOTHING;
+
+    INSERT INTO cad_settings (key, value) VALUES ('self_dispatch', 'false')
+    ON CONFLICT (key) DO NOTHING;
+
     INSERT INTO staff_rank_groups (name, sort_order, locked, staff_access, admin_access, doc_access)
     SELECT 'Executive Team', 0, 1, 1, 1, 1
     WHERE NOT EXISTS (

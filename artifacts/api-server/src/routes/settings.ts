@@ -9,6 +9,7 @@ import {
   setCadMode,
   type CadMode,
 } from "../lib/cad-mode";
+import { ensureCadSettingsTable } from "../lib/ensure-cad-settings";
 
 const router = Router();
 const ADMIN_CODE = process.env.ADMIN_PORTAL_CODE ?? "ADMIN2026";
@@ -21,27 +22,7 @@ const requireAdmin = (req: Request, res: Response, next: NextFunction) => {
   next();
 };
 
-const ensureSettings = (async () => {
-  if (isMongoStore()) {
-    await settingsRepo.ensureDefaultSettings();
-    await getCadMode();
-    return;
-  }
-  await pool.query(
-    `CREATE TABLE IF NOT EXISTS cad_settings (
-       key TEXT PRIMARY KEY,
-       value TEXT NOT NULL,
-       updated_at TIMESTAMPTZ DEFAULT NOW()
-     )`,
-  );
-  await pool.query(
-    `INSERT INTO cad_settings (key, value) VALUES ('cad_online', 'true') ON CONFLICT DO NOTHING`,
-  );
-  await pool.query(
-    `INSERT INTO cad_settings (key, value) VALUES ('self_dispatch', 'false') ON CONFLICT DO NOTHING`,
-  );
-  await getCadMode();
-})().catch(() => {});
+const ensureSettings = ensureCadSettingsTable().catch(() => {});
 
 router.get("/settings/cad-status", async (_req, res) => {
   await ensureSettings;

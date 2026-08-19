@@ -9,6 +9,7 @@ import {
   isCommunityGuildMemberViaOAuth,
   loadCadSession,
 } from "../lib/discord-auth";
+import { ensureCadSettingsTable } from "../lib/ensure-cad-settings";
 import { ensureSuperAdminAccess, isSuperAdminDiscordId } from "../lib/superadmin";
 
 const router = Router();
@@ -139,6 +140,8 @@ router.post("/discord/oauth/login", async (req, res) => {
   }
 
   try {
+    await ensureCadSettingsTable();
+
     // Must be in the community Discord server (OAuth guilds preferred, bot fallback).
     let guildMember: boolean | null = null;
     if (accessToken) {
