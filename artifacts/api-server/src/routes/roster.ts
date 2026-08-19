@@ -45,10 +45,7 @@ import { normalizeGroupRow, normalizeRankGroupId, normalizeRankRow } from "../li
 
 const router = Router();
 
-// ─── DPS Discord Guild ────────────────────────────────────────────────────────
-const DPS_GUILD_ID = process.env.DPS_DISCORD_GUILD_ID ?? "1539660726338326571";
-/** Guild used for Division Roster Discord role links — defaults to the DPS guild. */
-const DIVISION_GUILD_ID = process.env.DIVISION_DISCORD_GUILD_ID ?? DPS_GUILD_ID;
+import { DPS_GUILD_ID, DIVISION_GUILD_ID } from "../lib/discord-guild-ids.js";
 
 const UNIT_KEYS = ["pob", "iab", "hsu", "sru", "fou"] as const;
 type UnitKey = (typeof UNIT_KEYS)[number];
